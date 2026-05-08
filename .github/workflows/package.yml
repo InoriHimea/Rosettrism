@@ -1,0 +1,129 @@
+name: Package
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/git
+            ~/.cargo/registry
+            target
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-cargo-
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build dashboard
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Check Rust formatting
+        run: cargo fmt --check
+
+      - name: Run Rust tests
+        run: cargo test --locked --all-targets
+
+      - name: Build release binary
+        run: cargo build --release --locked
+
+      - name: Prepare package metadata
+        shell: pwsh
+        run: |
+          $sha = "${{ github.sha }}"
+          $version = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { $sha.Substring(0, 7) }
+          $platform = "${{ runner.os }}-${{ runner.arch }}".ToLowerInvariant()
+          $packageName = "rosettrism-$version-$platform"
+          "PACKAGE_NAME=$packageName" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Create archive
+        shell: pwsh
+        run: |
+          $packageDir = Join-Path "dist" $env:PACKAGE_NAME
+          New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
+
+          $binaryName = if ("${{ runner.os }}" -eq "Windows") { "rosettrism.exe" } else { "rosettrism" }
+          Copy-Item (Join-Path "target/release" $binaryName) $packageDir
+          Copy-Item "README.md" $packageDir
+          Copy-Item "LICENSE" $packageDir
+
+          if ("${{ runner.os }}" -eq "Windows") {
+            $archive = Join-Path "dist" "$env:PACKAGE_NAME.zip"
+            Compress-Archive -Path (Join-Path $packageDir "*") -DestinationPath $archive -Force
+          } else {
+            $archive = Join-Path "dist" "$env:PACKAGE_NAME.tar.gz"
+            tar -czf $archive -C "dist" $env:PACKAGE_NAME
+          }
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PACKAGE_NAME }}
+          path: |
+            dist/*.zip
+            dist/*.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-artifacts/*
+          generate_release_notes: true

@@ -1,0 +1,7 @@
+/target/
+/frontend/node_modules/
+/.idea/
+/.vscode/
+*.log
+*.txt
+*.ini

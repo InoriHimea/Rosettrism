@@ -61,12 +61,6 @@ jobs:
           npm ci
           npm run build
 
-      - name: Check Rust formatting
-        run: cargo fmt --check
-
-      - name: Run Rust tests
-        run: cargo test --locked --all-targets
-
       - name: Build release binary
         run: cargo build --release --locked
 

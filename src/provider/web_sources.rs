@@ -175,6 +175,7 @@ impl PublicWebProvider {
             input_format: InputFormat::Text,
             raw,
             document: Some(document),
+            annotations: Vec::new(),
         })
     }
 }
@@ -279,6 +280,7 @@ impl LineMusicProvider {
             input_format: InputFormat::Text,
             raw,
             document: Some(document),
+            annotations: Vec::new(),
         })
     }
 }

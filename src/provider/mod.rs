@@ -3,7 +3,7 @@ use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
 use crate::decoder::InputFormat;
-use crate::model::LyricDocument;
+use crate::model::{Annotation, LyricDocument};
 use crate::Result;
 
 pub mod apple_music;
@@ -163,6 +163,7 @@ pub struct FetchedLyric {
     pub input_format: InputFormat,
     pub raw: Vec<u8>,
     pub document: Option<LyricDocument>,
+    pub annotations: Vec<Annotation>,
 }
 
 #[async_trait]

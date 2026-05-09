@@ -170,6 +170,7 @@ fn cached_fetch_hit(body: Vec<u8>, metadata: serde_json::Value) -> Result<Fetche
         input_format: metadata.input_format,
         raw: body,
         document: metadata.document,
+        annotations: Vec::new(),
     })
 }
 
@@ -216,6 +217,7 @@ mod tests {
                 input_format: InputFormat::Lrc,
                 raw: b"[00:01.00]Hi\n".to_vec(),
                 document: None,
+                annotations: Vec::new(),
             })
         }
     }

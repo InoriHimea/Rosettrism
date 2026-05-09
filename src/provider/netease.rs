@@ -175,6 +175,7 @@ impl NeteaseProvider {
                 input_format: InputFormat::Yrc,
                 raw: raw.into_bytes(),
                 document: None,
+                annotations: Vec::new(),
             }));
         }
 
@@ -183,6 +184,7 @@ impl NeteaseProvider {
                 input_format: InputFormat::Yrc,
                 raw: raw.into_bytes(),
                 document: None,
+                annotations: Vec::new(),
             }));
         }
 
@@ -191,6 +193,7 @@ impl NeteaseProvider {
                 input_format: InputFormat::Lrc,
                 raw: raw.into_bytes(),
                 document: None,
+                annotations: Vec::new(),
             }));
         }
 

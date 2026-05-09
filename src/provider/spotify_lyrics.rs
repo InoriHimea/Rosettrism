@@ -99,6 +99,7 @@ impl SpotifyLyricsProvider {
             input_format: InputFormat::Json,
             raw: body.into_bytes(),
             document: Some(document),
+            annotations: Vec::new(),
         })
     }
 }

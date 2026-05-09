@@ -8,7 +8,7 @@ use crate::cache::{default_ttl, UpstreamCache};
 use crate::cached_provider::CachedProvider;
 use crate::decoder::{decode_bytes, decode_raw_bytes, InputFormat};
 use crate::model::{
-    InlineLyricLine, LyricDocument, LyricLine, LyricMeta, LyricTrack, LyricTrackKind,
+    Annotation, InlineLyricLine, LyricDocument, LyricLine, LyricMeta, LyricTrack, LyricTrackKind,
     LyricTrackQuality, UnifiedLyric, UnifiedLyricMode, UnifiedLyricScore,
 };
 use crate::provider::{
@@ -540,6 +540,7 @@ impl ServiceContext {
         })?;
         let fetched = provider.fetch(&result).await?;
         let input_format = fetched.input_format;
+        let annotations = fetched.annotations.clone();
         let document = decode_fetched(fetched)?;
         if document.lines.is_empty() {
             return Err(Error::Provider(format!(
@@ -556,6 +557,7 @@ impl ServiceContext {
             input_format,
             document,
             quality,
+            annotations,
         })
     }
 
@@ -571,6 +573,7 @@ impl ServiceContext {
             .await?;
         let fetched = provider.fetch(&result).await?;
         let input_format = fetched.input_format;
+        let annotations = fetched.annotations.clone();
         let document = decode_fetched(fetched)?;
         if document.lines.is_empty() {
             return Err(Error::Provider(format!(
@@ -587,6 +590,7 @@ impl ServiceContext {
             input_format,
             document,
             quality,
+            annotations,
         })
     }
 }
@@ -648,6 +652,7 @@ struct SourceCandidate {
     input_format: crate::decoder::InputFormat,
     document: LyricDocument,
     quality: LyricTrackQuality,
+    annotations: Vec<Annotation>,
 }
 
 fn build_unified(
@@ -732,6 +737,7 @@ fn build_unified(
         score,
         cache_refs,
         warnings: Vec::new(),
+        annotations: base.annotations.clone(),
     }
 }
 
@@ -1261,6 +1267,7 @@ mod tests {
                 }],
             },
             quality: LyricTrackQuality::default(),
+            annotations: Vec::new(),
         };
         let ruby = SourceCandidate {
             source: Source::Utaten,

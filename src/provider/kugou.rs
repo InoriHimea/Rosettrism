@@ -510,6 +510,7 @@ impl LyricProvider for KugouProvider {
                         input_format,
                         raw,
                         document: None,
+                        annotations: Vec::new(),
                     });
                 }
                 Ok(_) => errors.push(format!("{fmt}: empty response")),

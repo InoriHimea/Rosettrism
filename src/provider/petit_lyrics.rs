@@ -222,6 +222,7 @@ impl LyricProvider for PetitLyricsProvider {
             input_format: InputFormat::Text,
             raw: self.download_text(id).await?,
             document: None,
+            annotations: Vec::new(),
         })
     }
 }

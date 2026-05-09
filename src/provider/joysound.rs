@@ -148,6 +148,7 @@ impl JoysoundProvider {
             input_format: InputFormat::Text,
             raw,
             document: Some(document),
+            annotations: Vec::new(),
         })
     }
 
@@ -196,6 +197,7 @@ impl LyricProvider for JoysoundProvider {
                 input_format: InputFormat::Text,
                 raw,
                 document: None,
+                annotations: Vec::new(),
             }),
             Err(err) => {
                 errors.push(format!("html: {err}"));

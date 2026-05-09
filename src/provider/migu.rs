@@ -119,6 +119,7 @@ impl MiguProvider {
             },
             raw: ensure_trailing_newline(lyric).into_bytes(),
             document: None,
+            annotations: Vec::new(),
         })
     }
 }

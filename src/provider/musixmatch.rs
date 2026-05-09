@@ -243,6 +243,7 @@ impl LyricProvider for MusixmatchProvider {
                             input_format: InputFormat::Lrc,
                             raw,
                             document: None,
+                            annotations: Vec::new(),
                         });
                     }
                     Err(err) => errors.push(format!("subtitle {}: {err}", identifier.name)),
@@ -257,6 +258,7 @@ impl LyricProvider for MusixmatchProvider {
                         input_format: InputFormat::Text,
                         raw,
                         document: None,
+                        annotations: Vec::new(),
                     });
                 }
                 Err(err) => errors.push(format!("lyrics {}: {err}", identifier.name)),

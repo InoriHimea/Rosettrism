@@ -3,6 +3,7 @@ mod detect;
 pub mod krc;
 pub mod lrc;
 pub mod qrc;
+pub mod singing_annotations;
 pub mod text;
 pub mod yrc;
 

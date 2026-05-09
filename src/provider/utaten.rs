@@ -108,6 +108,7 @@ impl UtatenProvider {
             input_format: InputFormat::Text,
             raw: ensure_trailing_newline(text).into_bytes(),
             document: Some(document),
+            annotations: Vec::new(),
         })
     }
 

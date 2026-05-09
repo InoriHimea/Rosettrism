@@ -1,13 +1,16 @@
 # Rosettrism
 
+[中文文档](README-zh.md)
+
 Rosettrism is a Rust single-binary lyric tool. It can decode local KRC/QRC/YRC/LRC/TTML files, fetch lyrics from online sources, cache upstream requests with SQLite, and aggregate multiple sources into a unified JSON result.
 
-Version 4.0 adds a local HTTP server, an embedded dashboard, TTL upstream caching, and multi-source lyric merging.
+Version 4.0 adds a local HTTP server, an embedded dashboard, TTL upstream caching, and multi-source lyric merging. Version 4.2 adds QQ Music singing annotations (助唱标注) support.
 
 ## Highlights
 
 - Local decode: KRC, QQ QRC/XML, Netease YRC, Apple Music TTML, LRC, plain text, and Rosettrism JSON.
 - Online sources: Kugou, QQ Music, Netease, Apple Music, Musixmatch, PetitLyrics, LRCLIB, UtaTen, JOYSOUND, Migu H5, LINE MUSIC, KKBOX, Genius, AZLyrics, Songtexte, Uta-Net, J-Lyric, J-Total, Kashinavi, UtaMap, Lyrical Nonsense, Animesongz, AWA, TuneCore, RockLyric, Spotify Lyrics, and Offline DB.
+- Singing annotations: QQ Music singing annotations (助唱标注) are automatically fetched and included in the output. Annotations mark vocal techniques such as stress (重音), breath (换气), long tone (长音), portamento up (上滑音), and portamento down (下滑音) with per-syllable timing.
 - TTL cache: provider `search` and `fetch` calls are cached in SQLite. The default TTL is 7 days. Before TTL expiry, Rosettrism reuses the previous upstream result and does not call the source again.
 - Aggregation: when `fetch` is called without `--source`, Rosettrism queries a curated source pool, prefers high-quality timed or word-timed lyrics, and fills missing ruby/reading/romanized tracks when available.
 - Unified JSON: default output is multi-track JSON. `--merge-mode inline` can emit a line-oriented merged view.
@@ -130,6 +133,52 @@ The cache database path is chosen in this order:
 Cache tables include upstream raw operation cache, derived unified cache, fetch runs, AI score placeholders, and schema migrations.
 
 The upstream cache key is based on source, operation, normalized request data, and request version. Cookies and tokens are not included in cache keys.
+
+## Singing Annotations (助唱标注)
+
+When fetching lyrics from QQ Music, Rosettrism automatically retrieves singing annotations if available. These annotations mark vocal techniques on individual syllables with precise timing.
+
+### Annotation Types
+
+| Type | Symbol | Description |
+|------|--------|-------------|
+| Stress | `` ` `` | 重音 — emphasis on the syllable |
+| Breath | `^` | 换气 — breath mark before the syllable |
+| LongTone | `_` | 长音 — sustained note |
+| PortamentoUp | `↑` | 上滑音 — pitch slides up |
+| PortamentoDown | `↓` | 下滑音 — pitch slides down |
+
+### Output Format
+
+Annotations appear in the `annotations` field of the unified JSON output:
+
+```json
+{
+  "annotations": [
+    {
+      "annotation_type": "breath",
+      "start_ms": 16346,
+      "duration_ms": 349,
+      "text": "久"
+    },
+    {
+      "annotation_type": "stress",
+      "start_ms": 17589,
+      "duration_ms": 548,
+      "text": "晴"
+    }
+  ]
+}
+```
+
+When no annotations are available (song not supported, or non-QQ source), the `annotations` field is omitted from the output.
+
+### How It Works
+
+1. During QQ Music `fetch`, Rosettrism sends `needSingingAnnotations: true` in the `GetPlayLyricInfo` request.
+2. The API returns a hex-encoded encrypted payload in `singingAnnotationsLyric`.
+3. Rosettrism decrypts it using the same QRC decryption pipeline, extracts the QRC-format lyric content, and parses annotation symbols embedded before annotated characters.
+4. If annotation fetching fails for any reason, the main lyric fetch continues normally with an empty annotations list.
 
 ## Sources
 

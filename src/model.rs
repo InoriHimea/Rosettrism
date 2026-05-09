@@ -1,5 +1,25 @@
 use serde::{Deserialize, Serialize};
 
+/// 标注类型枚举
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnnotationType {
+    Stress,         // 重音，符号: `
+    Breath,         // 换气，符号: ^
+    LongTone,       // 长音，符号: _
+    PortamentoUp,   // 上滑音，符号: ↑
+    PortamentoDown, // 下滑音，符号: ↓
+}
+
+/// 单个助唱标注
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Annotation {
+    pub annotation_type: AnnotationType,
+    pub start_ms: u32,
+    pub duration_ms: u32,
+    pub text: String,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LyricMeta {
     pub title: Option<String>,
@@ -138,4 +158,6 @@ pub struct UnifiedLyric {
     pub cache_refs: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub annotations: Vec<Annotation>,
 }

@@ -176,6 +176,7 @@ impl OfflineLyric {
             input_format: format,
             raw,
             document: Some(document),
+            annotations: Vec::new(),
         })
     }
 }

@@ -243,6 +243,7 @@ fn lyrics_payload_to_fetched(
             input_format: InputFormat::Text,
             raw: Vec::new(),
             document: None,
+            annotations: Vec::new(),
         };
     }
 
@@ -251,6 +252,7 @@ fn lyrics_payload_to_fetched(
             input_format: InputFormat::Lrc,
             raw: ensure_trailing_newline(synced).into_bytes(),
             document: None,
+            annotations: Vec::new(),
         };
     }
 
@@ -259,6 +261,7 @@ fn lyrics_payload_to_fetched(
             input_format: InputFormat::Text,
             raw: ensure_trailing_newline(plain).into_bytes(),
             document: None,
+            annotations: Vec::new(),
         };
     }
 
@@ -271,6 +274,7 @@ fn lyrics_payload_to_fetched(
         },
         raw: ensure_trailing_newline(lyricsfile).into_bytes(),
         document: None,
+        annotations: Vec::new(),
     }
 }
 

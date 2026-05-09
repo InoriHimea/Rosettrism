@@ -6,7 +6,9 @@ use reqwest::header::{HeaderMap, HeaderValue, COOKIE, REFERER, USER_AGENT};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use crate::decoder::singing_annotations;
 use crate::decoder::InputFormat;
+use crate::model::Annotation;
 use crate::provider::{FetchedLyric, LyricProvider, SearchResult, Source};
 use crate::{Error, Result};
 
@@ -20,15 +22,18 @@ pub struct QqProvider {
     search_url: String,
     qrc_url: String,
     lrc_url: String,
+    annotations_url: String,
 }
 
 impl QqProvider {
     pub fn new(cookie: Option<String>) -> Result<Self> {
+        let url = "https://u.y.qq.com/cgi-bin/musicu.fcg";
         Self::with_endpoints(
             cookie,
-            "https://u.y.qq.com/cgi-bin/musicu.fcg",
+            url,
             "https://c.y.qq.com/qqmusic/fcgi-bin/lyric_download.fcg",
             "https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg",
+            url,
         )
     }
 
@@ -37,6 +42,7 @@ impl QqProvider {
         search_url: impl Into<String>,
         qrc_url: impl Into<String>,
         lrc_url: impl Into<String>,
+        annotations_url: impl Into<String>,
     ) -> Result<Self> {
         let mut headers = HeaderMap::new();
         headers.insert(USER_AGENT, HeaderValue::from_static(USER_AGENT_VALUE));
@@ -64,6 +70,7 @@ impl QqProvider {
             search_url: search_url.into(),
             qrc_url: qrc_url.into(),
             lrc_url: lrc_url.into(),
+            annotations_url: annotations_url.into(),
         })
     }
 
@@ -182,6 +189,84 @@ impl QqProvider {
             "QQ lyric response did not include lyric".into(),
         ))
     }
+
+    async fn fetch_singing_annotations(&self, song_id: u64) -> Result<Vec<Annotation>> {
+        let request = json!({
+            "comm": {
+                "ct": "19",
+                "cv": "1859",
+                "uin": "0"
+            },
+            "req": {
+                "module": "music.musichallSong.PlayLyricInfo",
+                "method": "GetPlayLyricInfo",
+                "param": {
+                    "songID": song_id,
+                    "type": 0,
+                    "cmd": 1,
+                    "qrc": 1,
+                    "trans": 1,
+                    "roma": 1,
+                    "crypt": 0,
+                    "needSingingAnnotations": true,
+                    "singingAnnotationsTs": 0,
+                    "needLTLyric": false,
+                    "lrc_t": 0,
+                    "qrc_t": 0,
+                    "trans_t": 0,
+                    "roma_t": 0,
+                    "lt_lyric_t": 0
+                }
+            }
+        });
+
+        let response = self
+            .client
+            .post(&self.annotations_url)
+            .json(&request)
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<Value>()
+            .await?;
+
+        let lyric = response
+            .get("req")
+            .and_then(|req| req.get("data"))
+            .and_then(|data| data.get("singingAnnotationsLyric"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+
+        if lyric.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // The singingAnnotationsLyric field is hex-encoded encrypted data (same as QRC)
+        // Try to decrypt it using the QRC decryption logic
+        let decrypted = match crate::decoder::qrc::decrypt_payload(lyric.as_bytes()) {
+            Ok(text) => text,
+            Err(_) => {
+                // If decryption fails, try using the raw string directly
+                lyric.to_string()
+            }
+        };
+
+        // The decrypted content may be QRC XML wrapping the actual lyric content
+        // Extract the lyric content from XML if needed
+        let content = if decrypted.contains("<?xml") || decrypted.contains("LyricContent") {
+            match crate::decoder::qrc::decode_raw_lyric_content(decrypted.as_bytes()) {
+                Ok(extracted) => extracted,
+                Err(_) => decrypted,
+            }
+        } else {
+            decrypted
+        };
+
+        // Parse annotations from QRC-format lines
+        // QRC lines look like: [16346,3408]^久(16346,349)未(16695,431)放(17126,463)`晴(17589,548)
+        // Annotation symbols (^ ` _ ↑ ↓) appear BEFORE the character they annotate
+        Ok(singing_annotations::parse_qrc(&content))
+    }
 }
 
 #[async_trait]
@@ -236,6 +321,19 @@ impl LyricProvider for QqProvider {
             .unwrap_or(result.id.as_str());
         let song_id = result.extra.get("songid").and_then(Value::as_u64);
 
+        // Fetch singing annotations when song_id is available (independent of lyric format)
+        let annotations = if let Some(song_id) = song_id {
+            match self.fetch_singing_annotations(song_id).await {
+                Ok(annotations) => annotations,
+                Err(err) => {
+                    eprintln!("[warn] singing annotations fetch failed: {err}");
+                    Vec::new()
+                }
+            }
+        } else {
+            Vec::new()
+        };
+
         let mut errors = Vec::new();
 
         if let Some(song_id) = song_id {
@@ -245,6 +343,7 @@ impl LyricProvider for QqProvider {
                         input_format: InputFormat::Qrc,
                         raw,
                         document: None,
+                        annotations,
                     });
                 }
                 Ok(_) => errors.push("qrc: empty or malformed response".to_string()),
@@ -261,6 +360,7 @@ impl LyricProvider for QqProvider {
                         input_format: InputFormat::Lrc,
                         raw,
                         document: None,
+                        annotations,
                     });
                 }
                 Ok(_) => errors.push("lrc: empty response".to_string()),
@@ -391,6 +491,7 @@ mod tests {
             format!("{}/search", server.uri()),
             format!("{}/qrc", server.uri()),
             format!("{}/lrc", server.uri()),
+            format!("{}/annotations", server.uri()),
         )
         .unwrap();
 

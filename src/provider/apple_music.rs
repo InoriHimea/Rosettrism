@@ -359,6 +359,7 @@ impl LyricProvider for AppleMusicProvider {
             input_format: InputFormat::AppleMusic,
             raw: self.download_ttml(song_id, storefront).await?,
             document: None,
+            annotations: Vec::new(),
         })
     }
 }

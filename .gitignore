@@ -2,6 +2,7 @@
 /frontend/node_modules/
 /.idea/
 /.vscode/
+/.kiro/
 *.log
 *.txt
 *.ini

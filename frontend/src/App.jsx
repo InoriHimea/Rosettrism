@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { LyricPlaybackView } from './LyricPlaybackView.jsx';
+import { defaultLyricSettings, normalizeLyricPayload, readLyricSettings, resolveLyricGradient } from './lyricPlayback.js';
 import {
   BarChart3,
   Database,
@@ -103,6 +105,31 @@ const dictionaries = {
     errorTitle: '操作失败',
     deleteConfirm: '确定删除这条缓存吗？此操作不可撤销。',
     close: '关闭',
+    playback: '歌词播放',
+    play: '播放',
+    pause: '暂停',
+    restart: '重播',
+    timeline: '时间轴',
+    annotations: '助唱标注',
+    annotationsAvailable: '已包含 QQ 助唱标注',
+    annotationsUnavailable: '未发现助唱标注',
+    annotationStress: '重音',
+    annotationBreath: '换气',
+    annotationLongTone: '长音',
+    annotationPortamentoUp: '上滑音',
+    annotationPortamentoDown: '下滑音',
+    rawJson: '原始 JSON',
+    lyricPreviewUnavailable: '获取 JSON 后可预览同步歌词。',
+    lyricColor: '歌词颜色',
+    lyricColorMode: '颜色模式',
+    lyricColorPreset: '颜色预设',
+    solidColor: '纯色',
+    gradient: '渐变',
+    solid: '纯色',
+    qqPrism: 'QQ 棱镜',
+    aurora: '极光',
+    sunset: '日落',
+    classic: '经典',
     collapseSidebar: '收起菜单',
     expandSidebar: '展开菜单',
     qualityPending: 'AI 评分入口已预留；配置模型后可接入重新评分。',
@@ -197,6 +224,31 @@ const dictionaries = {
     errorTitle: 'Operation failed',
     deleteConfirm: 'Delete this cache entry? This cannot be undone.',
     close: 'Close',
+    playback: 'Lyric playback',
+    play: 'Play',
+    pause: 'Pause',
+    restart: 'Restart',
+    timeline: 'Timeline',
+    annotations: 'Singing annotations',
+    annotationsAvailable: 'QQ singing annotations available',
+    annotationsUnavailable: 'No singing annotations found',
+    annotationStress: 'Stress',
+    annotationBreath: 'Breath',
+    annotationLongTone: 'Long tone',
+    annotationPortamentoUp: 'Portamento up',
+    annotationPortamentoDown: 'Portamento down',
+    rawJson: 'Raw JSON',
+    lyricPreviewUnavailable: 'Fetch JSON to preview synced lyrics.',
+    lyricColor: 'Lyric color',
+    lyricColorMode: 'Color mode',
+    lyricColorPreset: 'Color preset',
+    solidColor: 'Solid color',
+    gradient: 'Gradient',
+    solid: 'Solid',
+    qqPrism: 'QQ prism',
+    aurora: 'Aurora',
+    sunset: 'Sunset',
+    classic: 'Classic',
     collapseSidebar: 'Collapse menu',
     expandSidebar: 'Expand menu',
     qualityPending: 'AI scoring is ready to be wired once a model is configured.',
@@ -243,7 +295,9 @@ function App() {
   const [searchWarnings, setSearchWarnings] = useState([]);
   const [selectedResult, setSelectedResult] = useState(null);
   const [resultDetail, setResultDetail] = useState('');
+  const [resultDetailData, setResultDetailData] = useState(null);
   const [resultDetailBusy, setResultDetailBusy] = useState(false);
+  const [lyricSettings, setLyricSettings] = useState(readLyricSettings);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [selectedCacheEntry, setSelectedCacheEntry] = useState(null);
@@ -262,6 +316,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem('rosettrism-sidebar', sidebarCollapsed ? 'collapsed' : 'expanded');
   }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    localStorage.setItem('rosettrism-lyric-settings', JSON.stringify(lyricSettings));
+  }, [lyricSettings]);
 
   const aggregatePayload = useMemo(() => {
     const aggregateQuery = [body.title, body.artist]
@@ -370,11 +428,13 @@ function App() {
   function openResultDetail(entry) {
     setSelectedResult(entry);
     setResultDetail('');
+    setResultDetailData(null);
   }
 
   function closeResultDetail() {
     setSelectedResult(null);
     setResultDetail('');
+    setResultDetailData(null);
     setResultDetailBusy(false);
   }
 
@@ -399,9 +459,12 @@ function App() {
       if (!response.ok) {
         throw new Error(text);
       }
-      setResultDetail(JSON.stringify(JSON.parse(text), null, 2));
+      const data = JSON.parse(text);
+      setResultDetailData(data);
+      setResultDetail(JSON.stringify(data, null, 2));
       await refreshMeta();
     } catch (err) {
+      setResultDetailData(null);
       setResultDetail(err.message);
     } finally {
       setResultDetailBusy(false);
@@ -504,7 +567,9 @@ function App() {
             searchWarnings={searchWarnings}
             selectedResult={selectedResult}
             resultDetail={resultDetail}
+            resultDetailData={resultDetailData}
             resultDetailBusy={resultDetailBusy}
+            lyricSettings={lyricSettings}
             searchLyric={searchLyric}
             fetchAggregate={fetchAggregate}
             openResultDetail={openResultDetail}
@@ -527,7 +592,14 @@ function App() {
         )}
         {activeView === 'inspector' && <InspectorView t={t} result={result} />}
         {activeView === 'settings' && (
-          <SettingsView t={t} language={language} setLanguage={setLanguage} payload={searchPayload} />
+          <SettingsView
+            t={t}
+            language={language}
+            setLanguage={setLanguage}
+            lyricSettings={lyricSettings}
+            setLyricSettings={setLyricSettings}
+            payload={searchPayload}
+          />
         )}
       </section>
     </main>
@@ -713,7 +785,9 @@ function FetchView({
   searchWarnings,
   selectedResult,
   resultDetail,
+  resultDetailData,
   resultDetailBusy,
+  lyricSettings,
   searchLyric,
   fetchAggregate,
   openResultDetail,
@@ -860,7 +934,9 @@ function FetchView({
         t={t}
         entry={selectedResult}
         detail={resultDetail}
+        detailData={resultDetailData}
         busy={resultDetailBusy}
+        lyricSettings={lyricSettings}
         close={closeResultDetail}
         fetchSelectedResult={fetchSelectedResult}
       />
@@ -942,7 +1018,7 @@ function ErrorMessage({ t, error }) {
   );
 }
 
-function ResultDialog({ t, entry, detail, busy, close, fetchSelectedResult }) {
+function ResultDialog({ t, entry, detail, detailData, busy, lyricSettings, close, fetchSelectedResult }) {
   useEffect(() => {
     if (!entry) {
       return undefined;
@@ -963,6 +1039,7 @@ function ResultDialog({ t, entry, detail, busy, close, fetchSelectedResult }) {
   const aggregateSources = aggregateMembers(entry)
     .map((member) => displaySource(member))
     .filter((source, index, sources) => source && sources.indexOf(source) === index);
+  const lyricPlayback = useMemo(() => normalizeLyricPayload(detailData), [detailData]);
 
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={close}>
@@ -1023,10 +1100,15 @@ function ResultDialog({ t, entry, detail, busy, close, fetchSelectedResult }) {
           <strong>{t.extra}</strong>
           <pre className="cache-preview">{JSON.stringify(entry.extra || {}, null, 2)}</pre>
         </div>
-        <div className="detail-section">
-          <strong>{busy ? t.fetching : t.detail}</strong>
+        {lyricPlayback.playable ? (
+          <LyricPlaybackView lyric={lyricPlayback} settings={lyricSettings} t={t} />
+        ) : detailData ? (
+          <p className="hint">{t.lyricPreviewUnavailable}</p>
+        ) : null}
+        <details className="detail-section raw-json-section" open={!lyricPlayback.playable}>
+          <summary>{busy ? t.fetching : t.rawJson}</summary>
           <pre className="cache-preview result-preview">{detail || t.resultEmpty}</pre>
-        </div>
+        </details>
       </section>
     </div>
   );
@@ -1247,7 +1329,12 @@ function InspectorView({ t, result }) {
   );
 }
 
-function SettingsView({ t, language, setLanguage, payload }) {
+function SettingsView({ t, language, setLanguage, lyricSettings, setLyricSettings, payload }) {
+  const previewStyle = {
+    '--lyric-solid-color': lyricSettings.solidColor,
+    '--lyric-gradient': resolveLyricGradient(lyricSettings.colorPreset),
+  };
+
   return (
     <section className="panel split-panel">
       <div className="settings-stack">
@@ -1259,6 +1346,44 @@ function SettingsView({ t, language, setLanguage, payload }) {
             <option value="en">{t.english}</option>
           </select>
         </label>
+        <div className="settings-group">
+          <strong>{t.lyricColor}</strong>
+          <label className="field-label">
+            {t.lyricColorMode}
+            <select
+              value={lyricSettings.colorMode}
+              onChange={(event) => setLyricSettings({ ...lyricSettings, colorMode: event.target.value })}
+            >
+              <option value="gradient">{t.gradient}</option>
+              <option value="solid">{t.solid}</option>
+            </select>
+          </label>
+          <label className="field-label">
+            {t.lyricColorPreset}
+            <select
+              value={lyricSettings.colorPreset}
+              disabled={lyricSettings.colorMode !== 'gradient'}
+              onChange={(event) => setLyricSettings({ ...lyricSettings, colorPreset: event.target.value })}
+            >
+              <option value="qq-prism">{t.qqPrism}</option>
+              <option value="aurora">{t.aurora}</option>
+              <option value="sunset">{t.sunset}</option>
+              <option value="classic">{t.classic}</option>
+            </select>
+          </label>
+          <label className="field-label settings-color-row">
+            {t.solidColor}
+            <input
+              type="color"
+              value={lyricSettings.solidColor || defaultLyricSettings.solidColor}
+              disabled={lyricSettings.colorMode !== 'solid'}
+              onChange={(event) => setLyricSettings({ ...lyricSettings, solidColor: event.target.value })}
+            />
+          </label>
+          <div className={`lyric-color-preview lyric-color-${lyricSettings.colorMode}`} style={previewStyle}>
+            Rosettrism Lyrics
+          </div>
+        </div>
         <p className="hint">{t.cachePath}</p>
       </div>
       <pre className="result compact">{JSON.stringify(payload, null, 2)}</pre>

@@ -4,6 +4,8 @@ import {
   BarChart3,
   Database,
   Languages,
+  PanelLeftClose,
+  PanelLeftOpen,
   RefreshCw,
   Search,
   Server,
@@ -71,6 +73,7 @@ const dictionaries = {
     tracks: '多轨',
     inline: '行内',
     top: 'Top',
+    mergeMode: '合并模式',
     ttl: 'TTL 秒',
     force: '强刷',
     runFetch: '获取',
@@ -93,6 +96,15 @@ const dictionaries = {
     fetchOps: '获取',
     otherOps: '其他',
     sourcePolicy: '指定来源必须选择 raw 或 json。',
+    advancedOptions: '高级选项',
+    searchHint: '输入关键词、歌曲 URL 或平台 ID 开始搜索。也可以填写歌名和艺术家提升匹配率。',
+    searchingResults: '正在搜索候选结果…',
+    foundResults: '已找到候选结果',
+    errorTitle: '操作失败',
+    deleteConfirm: '确定删除这条缓存吗？此操作不可撤销。',
+    close: '关闭',
+    collapseSidebar: '收起菜单',
+    expandSidebar: '展开菜单',
     qualityPending: 'AI 评分入口已预留；配置模型后可接入重新评分。',
     cachePath: '缓存由 --db 或 ROSETTRISM_DB 控制。',
     language: '语言',
@@ -155,6 +167,7 @@ const dictionaries = {
     tracks: 'Tracks',
     inline: 'Inline',
     top: 'Top',
+    mergeMode: 'Merge mode',
     ttl: 'TTL seconds',
     force: 'Force',
     runFetch: 'Fetch',
@@ -177,6 +190,15 @@ const dictionaries = {
     fetchOps: 'Fetch',
     otherOps: 'Other',
     sourcePolicy: 'Source-specific requests require raw or json.',
+    advancedOptions: 'Advanced options',
+    searchHint: 'Enter keywords, a song URL, or a platform ID to search. Add title and artist for better matches.',
+    searchingResults: 'Searching candidates…',
+    foundResults: 'Candidate results found',
+    errorTitle: 'Operation failed',
+    deleteConfirm: 'Delete this cache entry? This cannot be undone.',
+    close: 'Close',
+    collapseSidebar: 'Collapse menu',
+    expandSidebar: 'Expand menu',
     qualityPending: 'AI scoring is ready to be wired once a model is configured.',
     cachePath: 'Cache path is controlled by --db or ROSETTRISM_DB.',
     language: 'Language',
@@ -208,6 +230,7 @@ const defaultBody = {
 
 function App() {
   const [language, setLanguage] = useState(localStorage.getItem('rosettrism-language') || 'zh');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(localStorage.getItem('rosettrism-sidebar') === 'collapsed');
   const [activeView, setActiveView] = useState('overview');
   const [health, setHealth] = useState(null);
   const [stats, setStats] = useState(null);
@@ -235,6 +258,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem('rosettrism-language', language);
   }, [language]);
+
+  useEffect(() => {
+    localStorage.setItem('rosettrism-sidebar', sidebarCollapsed ? 'collapsed' : 'expanded');
+  }, [sidebarCollapsed]);
 
   const aggregatePayload = useMemo(() => {
     const aggregateQuery = [body.title, body.artist]
@@ -382,6 +409,9 @@ function App() {
   }
 
   async function deleteCache(id) {
+    if (!window.confirm(t.deleteConfirm)) {
+      return;
+    }
     await fetch(`/api/cache/${id}`, { method: 'DELETE' });
     if (selectedCacheEntry?.id === id) {
       setSelectedCacheEntry(null);
@@ -409,14 +439,25 @@ function App() {
   }
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
       <aside className="sidebar">
-        <div className="brand">
-          <Sparkles size={24} />
-          <div>
-            <h1>Rosettrism</h1>
-            <p>{t.dashboard}</p>
+        <div className="brand-row">
+          <div className="brand">
+            <LogoMark />
+            <div className="brand-copy">
+              <h1>Rosettrism</h1>
+              <p>{t.dashboard}</p>
+            </div>
           </div>
+          <button
+            className="sidebar-toggle button-icon"
+            type="button"
+            onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
+            aria-label={sidebarCollapsed ? t.expandSidebar : t.collapseSidebar}
+            title={sidebarCollapsed ? t.expandSidebar : t.collapseSidebar}
+          >
+            {sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+          </button>
         </div>
         <nav aria-label="Dashboard">
           {navItems.map(([id, Icon]) => (
@@ -425,15 +466,16 @@ function App() {
               className={activeView === id ? 'nav-active' : ''}
               onClick={() => setActiveView(id)}
               key={id}
+              title={t[id]}
             >
               <Icon size={18} />
-              {t[id]}
+              <span>{t[id]}</span>
             </button>
           ))}
         </nav>
-        <button className="language-button" type="button" onClick={() => setLanguage(language === 'zh' ? 'en' : 'zh')}>
+        <button className="language-button" type="button" onClick={() => setLanguage(language === 'zh' ? 'en' : 'zh')} title={language === 'zh' ? t.english : t.chinese}>
           <Languages size={18} />
-          {language === 'zh' ? t.english : t.chinese}
+          <span>{language === 'zh' ? t.english : t.chinese}</span>
         </button>
       </aside>
 
@@ -492,6 +534,27 @@ function App() {
   );
 }
 
+function LogoMark() {
+  return (
+    <div className="logo-mark" aria-hidden="true">
+      <svg viewBox="0 0 48 48" role="img">
+        <defs>
+          <linearGradient id="logoGradient" x1="8" x2="40" y1="6" y2="42" gradientUnits="userSpaceOnUse">
+            <stop stopColor="#7c3aed" />
+            <stop offset="0.48" stopColor="#06b6d4" />
+            <stop offset="1" stopColor="#22c55e" />
+          </linearGradient>
+        </defs>
+        <path d="M24 4 42 14.4v19.2L24 44 6 33.6V14.4L24 4Z" fill="url(#logoGradient)" />
+        <path d="M15 29c5.4-8.8 12.6-8.8 18 0" fill="none" stroke="white" strokeLinecap="round" strokeWidth="4" />
+        <path d="M15 19h18" stroke="white" strokeLinecap="round" strokeWidth="4" />
+        <circle cx="16" cy="19" r="3" fill="#fef08a" />
+        <circle cx="32" cy="29" r="3" fill="#fef08a" />
+      </svg>
+    </div>
+  );
+}
+
 function Overview({ t, stats, cache, setActiveView }) {
   const total = stats?.cache?.upstream_entries ?? cache.length;
   const fresh = stats?.cache?.fresh_upstream_entries ?? cache.filter((entry) => entry.fresh).length;
@@ -523,7 +586,7 @@ function Overview({ t, stats, cache, setActiveView }) {
           <div className="legend">
             <LegendDot label={t.fresh} value={fresh} color="green" />
             <LegendDot label={t.expired} value={expired} color="amber" />
-            <button className="text-action" type="button" onClick={() => setActiveView('cache')}>
+            <button className="button-secondary text-action" type="button" onClick={() => setActiveView('cache')}>
               {t.cache}
             </button>
           </div>
@@ -665,98 +728,131 @@ function FetchView({
     <section className="panel">
       <div className="panel-title">
         <h2>{t.fetch}</h2>
-        <button type="button" onClick={refreshMeta} title={t.refresh}>
+        <button className="button-icon" type="button" onClick={refreshMeta} title={t.refresh} aria-label={t.refresh}>
           <RefreshCw size={18} />
         </button>
       </div>
       <form className="fetch-form" onSubmit={searchLyric}>
-        <div className="search-fields">
+        <label className="field-label primary-search">
+          {t.keywordSearch}
           <input
             value={body.query}
             onChange={(event) => setBody({ ...body, query: event.target.value })}
-            placeholder={t.keywordSearch}
+            placeholder={t.query}
           />
-          <input
-            value={body.title}
-            onChange={(event) => setBody({ ...body, title: event.target.value })}
-            placeholder={t.titleSearch}
-          />
-          <input
-            value={body.artist}
-            onChange={(event) => setBody({ ...body, artist: event.target.value })}
-            placeholder={t.artistSearch}
-          />
-          <input
-            value={body.id}
-            onChange={(event) => setBody({ ...body, id: event.target.value })}
-            placeholder={t.idSearch}
-          />
-        </div>
-        <div className="controls">
-          <select value={source} onChange={(event) => setSource(event.target.value)}>
-            {sourceOptions.map((option) => (
-              <option value={option} key={option || 'aggregate'}>
-                {option || t.aggregate}
-              </option>
-            ))}
-          </select>
-          <select value={format} onChange={(event) => setFormat(event.target.value)} disabled={!source}>
-            <option value="">{t.format}</option>
-            <option value="json">{t.json}</option>
-            <option value="raw">{t.raw}</option>
-          </select>
-          <select
-            value={body.merge_mode}
-            onChange={(event) => setBody({ ...body, merge_mode: event.target.value })}
-            disabled={Boolean(source)}
-          >
-            <option value="tracks">{t.tracks}</option>
-            <option value="inline">{t.inline}</option>
-          </select>
-          <input
-            aria-label={t.top}
-            type="number"
-            min="1"
-            max={source ? '100' : '10'}
-            placeholder={t.top}
-            value={body.top}
-            onChange={(event) =>
-              setBody({
-                ...body,
-                top: event.target.value === '' ? '' : Number(event.target.value),
-              })
-            }
-          />
-          <input
-            aria-label={t.ttl}
-            type="number"
-            min="60"
-            value={body.ttl_seconds}
-            onChange={(event) => setBody({ ...body, ttl_seconds: Number(event.target.value) })}
-          />
-          <label className="check">
+          <span>{t.searchHint}</span>
+        </label>
+        <div className="search-fields">
+          <label className="field-label">
+            {t.titleSearch}
             <input
-              type="checkbox"
-              checked={Boolean(body.force)}
-              onChange={(event) => setBody({ ...body, force: event.target.checked })}
+              value={body.title}
+              onChange={(event) => setBody({ ...body, title: event.target.value })}
+              placeholder={t.titleSearch}
             />
-            {t.force}
           </label>
-          <button type="submit" disabled={busy || !hasSearchInput}>
+          <label className="field-label">
+            {t.artistSearch}
+            <input
+              value={body.artist}
+              onChange={(event) => setBody({ ...body, artist: event.target.value })}
+              placeholder={t.artistSearch}
+            />
+          </label>
+          <label className="field-label">
+            {t.idSearch}
+            <input
+              value={body.id}
+              onChange={(event) => setBody({ ...body, id: event.target.value })}
+              placeholder={t.idSearch}
+            />
+          </label>
+        </div>
+        <details className="advanced-options">
+          <summary>{t.advancedOptions}</summary>
+          <div className="controls">
+            <label className="field-label">
+              {t.source}
+              <select value={source} onChange={(event) => setSource(event.target.value)}>
+                {sourceOptions.map((option) => (
+                  <option value={option} key={option || 'aggregate'}>
+                    {option || t.aggregate}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field-label">
+              {t.format}
+              <select value={format} onChange={(event) => setFormat(event.target.value)} disabled={!source}>
+                <option value="">{t.format}</option>
+                <option value="json">{t.json}</option>
+                <option value="raw">{t.raw}</option>
+              </select>
+            </label>
+            <label className="field-label">
+              {t.mergeMode || t.aggregate}
+              <select
+                value={body.merge_mode}
+                onChange={(event) => setBody({ ...body, merge_mode: event.target.value })}
+                disabled={Boolean(source)}
+              >
+                <option value="tracks">{t.tracks}</option>
+                <option value="inline">{t.inline}</option>
+              </select>
+            </label>
+            <label className="field-label">
+              {t.top}
+              <input
+                type="number"
+                min="1"
+                max={source ? '100' : '10'}
+                placeholder={t.top}
+                value={body.top}
+                onChange={(event) =>
+                  setBody({
+                    ...body,
+                    top: event.target.value === '' ? '' : Number(event.target.value),
+                  })
+                }
+              />
+            </label>
+            <label className="field-label">
+              {t.ttl}
+              <input
+                type="number"
+                min="60"
+                value={body.ttl_seconds}
+                onChange={(event) => setBody({ ...body, ttl_seconds: Number(event.target.value) })}
+              />
+            </label>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={Boolean(body.force)}
+                onChange={(event) => setBody({ ...body, force: event.target.checked })}
+              />
+              {t.force}
+            </label>
+          </div>
+        </details>
+        <div className="form-actions">
+          <button className="button-primary" type="submit" disabled={busy || !hasSearchInput}>
             <Search size={18} />
             {busy ? t.fetching : t.searchLyrics}
           </button>
-          <button type="button" disabled={busy || !canAggregate} onClick={fetchAggregate}>
+          <button className="button-secondary" type="button" disabled={busy || !canAggregate} onClick={fetchAggregate}>
             <Sparkles size={18} />
             {t.aggregateFetch}
           </button>
         </div>
       </form>
-      {error ? <pre className="error">{error}</pre> : null}
+      {error ? <ErrorMessage t={t} error={error} /> : null}
       <SearchResultsList
         t={t}
         results={searchResults}
         warnings={searchWarnings}
+        busy={busy}
+        touched={Boolean(error || result || searchResults.length || searchWarnings.length)}
         openResultDetail={openResultDetail}
       />
       {result ? <pre className="result">{result}</pre> : null}
@@ -772,14 +868,23 @@ function FetchView({
   );
 }
 
-function SearchResultsList({ t, results, warnings, openResultDetail }) {
+function SearchResultsList({ t, results, warnings, busy, touched, openResultDetail }) {
+  const statusText = busy
+    ? t.searchingResults
+    : results.length > 0
+      ? `${results.length} ${t.foundResults}`
+      : touched
+        ? t.noResults
+        : t.searchHint;
+
   return (
-    <div className="search-results-panel">
+    <div className="search-results-panel" aria-live="polite">
       <div className="search-results-title">
         <div>
           <h3>{t.searchResults}</h3>
-          <span>{results.length} {t.candidates}</span>
+          <span>{statusText}</span>
         </div>
+        {results.length > 0 ? <span className="status-badge">{results.length} {t.candidates}</span> : null}
       </div>
       {warnings.length > 0 ? (
         <details className="warning-list">
@@ -791,8 +896,13 @@ function SearchResultsList({ t, results, warnings, openResultDetail }) {
           </ul>
         </details>
       ) : null}
-      {results.length === 0 ? (
-        <span className="empty-state">{t.noResults}</span>
+      {busy ? (
+        <div className="loading-state">
+          <RefreshCw size={18} />
+          <span>{t.searchingResults}</span>
+        </div>
+      ) : results.length === 0 ? (
+        <span className="empty-state">{touched ? t.noResults : t.searchHint}</span>
       ) : (
         <div className="result-table">
           <div className="result-row result-row-head">
@@ -823,7 +933,29 @@ function SearchResultsList({ t, results, warnings, openResultDetail }) {
   );
 }
 
+function ErrorMessage({ t, error }) {
+  return (
+    <div className="error" role="alert">
+      <strong>{t.errorTitle}</strong>
+      <pre>{error}</pre>
+    </div>
+  );
+}
+
 function ResultDialog({ t, entry, detail, busy, close, fetchSelectedResult }) {
+  useEffect(() => {
+    if (!entry) {
+      return undefined;
+    }
+    function handleKeyDown(event) {
+      if (event.key === 'Escape') {
+        close();
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [entry, close]);
+
   if (!entry) {
     return null;
   }
@@ -838,24 +970,24 @@ function ResultDialog({ t, entry, detail, busy, close, fetchSelectedResult }) {
         className="result-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label={t.selectedCandidate}
+        aria-labelledby="result-dialog-title"
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="dialog-title">
           <div>
             <span>{t.selectedCandidate}</span>
-            <h3>{entry.title || '-'}</h3>
+            <h3 id="result-dialog-title">{entry.title || '-'}</h3>
             <p>{[entry.artist, displaySource(entry), entry.id].filter(Boolean).join(' / ')}</p>
           </div>
-          <button type="button" onClick={close} title="Close">
+          <button className="button-icon" type="button" onClick={close} title={t.close} aria-label={t.close}>
             <X size={18} />
           </button>
         </div>
         <div className="dialog-actions">
-          <button type="button" onClick={() => fetchSelectedResult('raw')} disabled={busy || aggregate}>
+          <button className="button-secondary" type="button" onClick={() => fetchSelectedResult('raw')} disabled={busy || aggregate}>
             {t.fetchRaw}
           </button>
-          <button type="button" onClick={() => fetchSelectedResult('json')} disabled={busy}>
+          <button className="button-primary" type="button" onClick={() => fetchSelectedResult('json')} disabled={busy}>
             {t.fetchJson}
           </button>
         </div>
@@ -916,7 +1048,7 @@ function CacheView({
     <section className="panel">
       <div className="panel-title">
         <h2>{t.cache}</h2>
-        <button type="button" onClick={refreshMeta} title={t.refresh}>
+        <button className="button-icon" type="button" onClick={refreshMeta} title={t.refresh} aria-label={t.refresh}>
           <RefreshCw size={18} />
         </button>
       </div>
@@ -952,10 +1084,13 @@ function CacheView({
                   <strong>{primary}</strong>
                   <span>{secondary}</span>
                 </div>
-                <span>{entry.operation}</span>
-                <span>{entry.fresh ? t.fresh : t.expired}</span>
-                <span>{formatBytes(entry.body_len)}</span>
+                <span data-label={t.operation}>{entry.operation}</span>
+                <span data-label={t.status} className={`status-badge ${entry.fresh ? 'status-fresh' : 'status-expired'}`}>
+                  {entry.fresh ? t.fresh : t.expired}
+                </span>
+                <span data-label={t.size}>{formatBytes(entry.body_len)}</span>
                 <button
+                  className="button-danger button-icon"
                   type="button"
                   onClick={(event) => {
                     event.stopPropagation();

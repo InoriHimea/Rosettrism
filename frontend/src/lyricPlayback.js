@@ -120,12 +120,14 @@ function pickPrimaryTrack(tracks) {
 function normalizeLine(line, index, trackId) {
   const startMs = Number(line.start_ms ?? line.startMs ?? 0);
   const durationMs = optionalNumber(line.duration_ms ?? line.durationMs);
+  const text = line.text || '';
   return {
     id: `${trackId}-${index}-${startMs}`,
     startMs,
     durationMs,
     endMs: durationMs ? startMs + durationMs : startMs,
-    text: line.text || '',
+    text,
+    isMeta: isMetaLyricLine(text),
     translation: line.translation || '',
     reading: line.reading || '',
     romanized: line.romanized || '',
@@ -133,6 +135,15 @@ function normalizeLine(line, index, trackId) {
     words: normalizeWords(line.words || [], startMs, index),
     annotations: [],
   };
+}
+
+function isMetaLyricLine(text) {
+  const value = String(text || '').trim();
+  if (!value) {
+    return false;
+  }
+  return /^(作词|作曲|编曲|词|曲|制作人|制作|监制|原唱|翻唱|演唱|歌手|Lyricist|Lyrics|Composer|Music|Arranger|Producer|Vocal)\s*[:：]/i.test(value)
+    || /^\[[a-z]{2,}\s*[:：].+\]$/i.test(value);
 }
 
 function normalizeWords(words, lineStartMs, lineIndex) {

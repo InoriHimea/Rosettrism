@@ -14,8 +14,9 @@ use serde_json::{json, Value};
 use crate::cache::UpstreamCache;
 use crate::provider::{SearchResult, Source};
 use crate::service::{
-    source_from_cli_name, AggregateFetchRequest, LyricNeed, MergeMode, ServiceContext,
-    SourceSearchRequest, SourceSearchResult, SpecificFetchFormat, SpecificFetchResult,
+    source_from_cli_name, AggregateFetchRequest, AiScoringConfig, LyricNeed, MergeMode,
+    ServiceContext, SourceSearchRequest, SourceSearchResult, SpecificFetchFormat,
+    SpecificFetchResult,
 };
 use crate::{Error, Result};
 
@@ -224,6 +225,7 @@ async fn fetch(
                 .transpose()?,
             force,
             ttl_seconds: request.ttl_seconds,
+            ai_scoring: request.ai_scoring,
         })
         .await?;
     let body = serde_json::to_vec_pretty(&aggregate)?;
@@ -317,7 +319,7 @@ async fn fetch_result(
         let merge_mode = aggregate_merge_mode(&request.result).unwrap_or_default();
         let unified = state
             .context
-            .fetch_aggregate_members(members, merge_mode, ttl, force)
+            .fetch_aggregate_members(members, merge_mode, ttl, force, request.ai_scoring.as_ref())
             .await?;
         let body = serde_json::to_vec_pretty(&json!({
             "source": "aggregate",
@@ -544,6 +546,8 @@ struct ApiFetchRequest {
     force: Option<bool>,
     #[serde(default)]
     ttl_seconds: Option<u64>,
+    #[serde(default)]
+    ai_scoring: Option<AiScoringConfig>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1040,6 +1044,8 @@ struct ApiFetchResultRequest {
     force: Option<bool>,
     #[serde(default)]
     ttl_seconds: Option<u64>,
+    #[serde(default)]
+    ai_scoring: Option<AiScoringConfig>,
 }
 
 type ApiResult<T> = std::result::Result<T, ApiError>;

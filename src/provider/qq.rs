@@ -285,6 +285,7 @@ impl LyricProvider for QqProvider {
                     albumname,
                     interval,
                     singer,
+                    has_singing_annotations,
                 } = song;
                 let song_mid = mid?;
                 let song_id = id?;
@@ -304,7 +305,8 @@ impl LyricProvider for QqProvider {
                     duration_ms: Some(interval.saturating_mul(1_000)),
                     extra: json!({
                         "songmid": song_mid,
-                        "songid": song_id
+                        "songid": song_id,
+                        "has_singing_annotations": has_singing_annotations,
                     }),
                 })
             })
@@ -395,6 +397,21 @@ fn looks_like_qrc_response(raw: &[u8]) -> bool {
         || trimmed.starts_with("<QrcInfos")
         || trimmed.contains("LyricContent=")
         || (trimmed.contains("<content") && trimmed.contains("<![CDATA["))
+}
+
+fn deserialize_annotation_flag<'de, D>(deserializer: D) -> std::result::Result<bool, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Value::deserialize(deserializer)?;
+    Ok(match value {
+        Value::Bool(value) => value,
+        Value::Number(value) => value.as_i64().is_some_and(|value| value != 0),
+        Value::String(value) => !value.trim().is_empty() && value != "0" && !value.eq_ignore_ascii_case("false"),
+        Value::Array(value) => !value.is_empty(),
+        Value::Object(value) => !value.is_empty(),
+        Value::Null => false,
+    })
 }
 
 fn parse_json_or_jsonp<T>(text: &str) -> Result<T>
@@ -578,6 +595,8 @@ struct QqSong {
     interval: u32,
     #[serde(default)]
     singer: Vec<QqSinger>,
+    #[serde(default, alias = "hasSingingAnnotations", alias = "has_singing_annotations", alias = "hasSingingAnnotationsLyric", deserialize_with = "deserialize_annotation_flag")]
+    has_singing_annotations: bool,
 }
 
 #[derive(Debug, Deserialize)]

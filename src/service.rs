@@ -2,7 +2,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use clap::ValueEnum;
+use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 use crate::cache::{default_ttl, UpstreamCache};
 use crate::cached_provider::CachedProvider;
@@ -17,6 +19,7 @@ use crate::provider::{
 use crate::{Error, Result};
 
 const DEFAULT_TRANSLATION_LANG: &str = "zh-Hans";
+const DEFAULT_OPENAI_MODEL: &str = "gpt-4o-mini";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
 #[serde(rename_all = "snake_case")]
@@ -98,6 +101,20 @@ pub struct AggregateFetchRequest {
     pub force: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ttl_seconds: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_scoring: Option<AiScoringConfig>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AiScoringConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -220,13 +237,24 @@ impl ServiceContext {
         }
         warnings.retain(|warning| !is_low_signal_aggregate_warning(warning));
 
-        candidates.sort_by(|left, right| {
-            right
-                .quality
-                .score
-                .partial_cmp(&left.quality.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        candidates.sort_by(compare_candidate_quality);
+        match self
+            .select_best_candidate_with_ai(&candidates, request.ai_scoring.as_ref())
+            .await
+        {
+            Ok(Some(selection)) => {
+                warnings.push(format!(
+                    "AI lyric selection chose {} with score {:.1}: {}",
+                    candidates[selection.index].source.cli_name(),
+                    selection.score,
+                    selection.reason
+                ));
+                let selected = candidates.remove(selection.index);
+                candidates.insert(0, selected);
+            }
+            Ok(None) => {}
+            Err(err) => warnings.push(format!("AI lyric selection skipped: {err}")),
+        }
 
         let results = candidates
             .iter()
@@ -468,6 +496,7 @@ impl ServiceContext {
         merge_mode: MergeMode,
         ttl: Option<Duration>,
         force: bool,
+        ai_scoring: Option<&AiScoringConfig>,
     ) -> Result<UnifiedLyric> {
         if members.is_empty() {
             return Err(Error::Service(
@@ -492,13 +521,21 @@ impl ServiceContext {
             )));
         }
 
-        candidates.sort_by(|left, right| {
-            right
-                .quality
-                .score
-                .partial_cmp(&left.quality.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        candidates.sort_by(compare_candidate_quality);
+        match self.select_best_candidate_with_ai(&candidates, ai_scoring).await {
+            Ok(Some(selection)) => {
+                warnings.push(format!(
+                    "AI lyric selection chose {} with score {:.1}: {}",
+                    candidates[selection.index].source.cli_name(),
+                    selection.score,
+                    selection.reason
+                ));
+                let selected = candidates.remove(selection.index);
+                candidates.insert(0, selected);
+            }
+            Ok(None) => {}
+            Err(err) => warnings.push(format!("AI lyric selection skipped: {err}")),
+        }
 
         let mut unified = build_unified(&candidates[0], &candidates, merge_mode);
         unified.meta.source = Some(format!(
@@ -507,6 +544,55 @@ impl ServiceContext {
         ));
         unified.warnings = warnings;
         Ok(unified)
+    }
+
+    async fn select_best_candidate_with_ai(
+        &self,
+        candidates: &[SourceCandidate],
+        config: Option<&AiScoringConfig>,
+    ) -> Result<Option<AiCandidateSelection>> {
+        let Some(config) = resolve_ai_scoring_config(config) else {
+            return Ok(None);
+        };
+        if candidates.len() < 2 {
+            return Ok(None);
+        }
+
+        let request = json!({
+            "model": config.model,
+            "response_format": { "type": "json_object" },
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You score synced lyric candidates. Return strict JSON only: {\"best_index\":number,\"scores\":[{\"index\":number,\"score\":number,\"reason\":string}]}"
+                },
+                {
+                    "role": "user",
+                    "content": serde_json::to_string(&candidate_summaries(candidates))?
+                }
+            ]
+        });
+        let response = reqwest::Client::new()
+            .post(openai_chat_completions_url(&config.base_url)?)
+            .header(AUTHORIZATION, format!("Bearer {}", config.api_key))
+            .header(CONTENT_TYPE, "application/json")
+            .json(&request)
+            .send()
+            .await?;
+        let status = response.status();
+        let body = response.text().await?;
+        if !status.is_success() {
+            return Err(Error::Provider(format!("OpenAI compatible endpoint returned {status}: {body}")));
+        }
+        let value: serde_json::Value = serde_json::from_str(&body)?;
+        let content = value
+            .get("choices")
+            .and_then(|choices| choices.get(0))
+            .and_then(|choice| choice.get("message"))
+            .and_then(|message| message.get("content"))
+            .and_then(|content| content.as_str())
+            .ok_or_else(|| Error::Provider("OpenAI compatible response missing message content".into()))?;
+        parse_ai_candidate_selection(content, candidates.len())
     }
 
     pub async fn provider(
@@ -661,6 +747,153 @@ struct SourceCandidate {
     document: LyricDocument,
     quality: LyricTrackQuality,
     annotations: Vec<Annotation>,
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedAiScoringConfig {
+    base_url: String,
+    api_key: String,
+    model: String,
+}
+
+#[derive(Debug, Clone)]
+struct AiCandidateSelection {
+    index: usize,
+    score: f32,
+    reason: String,
+}
+
+#[derive(Debug, Serialize)]
+struct AiCandidateSummary {
+    index: usize,
+    source: String,
+    title: String,
+    artist: String,
+    line_count: usize,
+    timed_line_count: usize,
+    word_timing_count: usize,
+    heuristic_score: f32,
+    sample_lines: Vec<String>,
+}
+
+fn compare_candidate_quality(left: &SourceCandidate, right: &SourceCandidate) -> std::cmp::Ordering {
+    right
+        .quality
+        .score
+        .partial_cmp(&left.quality.score)
+        .unwrap_or(std::cmp::Ordering::Equal)
+}
+
+fn resolve_ai_scoring_config(config: Option<&AiScoringConfig>) -> Option<ResolvedAiScoringConfig> {
+    let enabled = config.is_some_and(|config| config.enabled)
+        || std::env::var("ROSETTRISM_OPENAI_API_KEY").is_ok();
+    if !enabled {
+        return None;
+    }
+    let base_url = config
+        .and_then(|config| config.base_url.as_deref())
+        .filter(|value| !value.trim().is_empty())
+        .map(str::trim)
+        .map(ToOwned::to_owned)
+        .or_else(|| std::env::var("ROSETTRISM_OPENAI_BASE_URL").ok())
+        .unwrap_or_else(|| "https://api.openai.com/v1".into());
+    let api_key = config
+        .and_then(|config| config.api_key.as_deref())
+        .filter(|value| !value.trim().is_empty())
+        .map(str::trim)
+        .map(ToOwned::to_owned)
+        .or_else(|| std::env::var("ROSETTRISM_OPENAI_API_KEY").ok())?;
+    let model = config
+        .and_then(|config| config.model.as_deref())
+        .filter(|value| !value.trim().is_empty())
+        .map(str::trim)
+        .map(ToOwned::to_owned)
+        .or_else(|| std::env::var("ROSETTRISM_OPENAI_MODEL").ok())
+        .unwrap_or_else(|| DEFAULT_OPENAI_MODEL.into());
+
+    Some(ResolvedAiScoringConfig {
+        base_url,
+        api_key,
+        model,
+    })
+}
+
+fn openai_chat_completions_url(base_url: &str) -> Result<String> {
+    let base = base_url.trim().trim_end_matches('/');
+    if base.is_empty() {
+        return Err(Error::Service("OpenAI compatible base URL is empty".into()));
+    }
+    if base.ends_with("/chat/completions") {
+        return Ok(base.to_string());
+    }
+    Ok(format!("{base}/chat/completions"))
+}
+
+fn candidate_summaries(candidates: &[SourceCandidate]) -> Vec<AiCandidateSummary> {
+    candidates
+        .iter()
+        .enumerate()
+        .map(|(index, candidate)| AiCandidateSummary {
+            index,
+            source: candidate.source.cli_name().to_string(),
+            title: candidate.result.title.clone(),
+            artist: candidate.result.artist.clone(),
+            line_count: candidate.quality.line_count,
+            timed_line_count: candidate.quality.timed_line_count,
+            word_timing_count: candidate.quality.word_timing_count,
+            heuristic_score: candidate.quality.score,
+            sample_lines: candidate
+                .document
+                .lines
+                .iter()
+                .filter_map(|line| {
+                    let text = line.text.trim();
+                    (!text.is_empty()).then(|| text.chars().take(120).collect::<String>())
+                })
+                .take(18)
+                .collect(),
+        })
+        .collect()
+}
+
+fn parse_ai_candidate_selection(content: &str, candidate_len: usize) -> Result<Option<AiCandidateSelection>> {
+    let value: serde_json::Value = serde_json::from_str(content.trim())?;
+    let best_index = value
+        .get("best_index")
+        .and_then(|value| value.as_u64())
+        .ok_or_else(|| Error::Provider("AI response missing best_index".into()))? as usize;
+    if best_index >= candidate_len {
+        return Err(Error::Provider(format!(
+            "AI response best_index {best_index} is out of range"
+        )));
+    }
+    let score_item = value
+        .get("scores")
+        .and_then(|value| value.as_array())
+        .and_then(|scores| {
+            scores.iter().find(|score| {
+                score
+                    .get("index")
+                    .and_then(|index| index.as_u64())
+                    .is_some_and(|index| index as usize == best_index)
+            })
+        });
+    let score = score_item
+        .and_then(|item| item.get("score"))
+        .and_then(|score| score.as_f64())
+        .unwrap_or(0.0) as f32;
+    let reason = score_item
+        .and_then(|item| item.get("reason"))
+        .and_then(|reason| reason.as_str())
+        .unwrap_or("selected by AI")
+        .chars()
+        .take(180)
+        .collect();
+    Ok(Some(AiCandidateSelection {
+        index: best_index,
+        score,
+        reason,
+    }))
 }
 
 fn build_unified(

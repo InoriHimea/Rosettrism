@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { createPortal } from 'react-dom';
 import { LyricPlaybackView } from './LyricPlaybackView.jsx';
 import { defaultLyricSettings, normalizeLyricPayload, readLyricSettings, resolveLyricGradient } from './lyricPlayback.js';
 import {
@@ -111,6 +112,11 @@ const dictionaries = {
     restart: '重播',
     timeline: '时间轴',
     annotations: '助唱标注',
+    singingAnnotationTag: '助唱标注',
+    previousPage: '上一页',
+    nextPage: '下一页',
+    pageStatus: '第 {page} / {total} 页',
+    resultRange: '{start}-{end} / {total}',
     annotationsAvailable: '已包含 QQ 助唱标注',
     annotationsUnavailable: '未发现助唱标注',
     annotationStress: '重音',
@@ -130,6 +136,13 @@ const dictionaries = {
     aurora: '极光',
     sunset: '日落',
     classic: '经典',
+    aiScoring: 'AI 歌词优选',
+    aiScoringHint: '聚合歌词时使用 OpenAI 兼容接口为候选打分。',
+    aiEnabled: '启用 AI 优选',
+    aiBaseUrl: 'OpenAI 兼容基地址',
+    aiApiKey: 'API Key',
+    aiModel: '模型名',
+    aiApiKeyHint: '留空时后端使用 ROSETTRISM_OPENAI_API_KEY。',
     collapseSidebar: '收起菜单',
     expandSidebar: '展开菜单',
     qualityPending: 'AI 评分入口已预留；配置模型后可接入重新评分。',
@@ -230,6 +243,11 @@ const dictionaries = {
     restart: 'Restart',
     timeline: 'Timeline',
     annotations: 'Singing annotations',
+    singingAnnotationTag: 'Singing annotations',
+    previousPage: 'Previous',
+    nextPage: 'Next',
+    pageStatus: 'Page {page} / {total}',
+    resultRange: '{start}-{end} / {total}',
     annotationsAvailable: 'QQ singing annotations available',
     annotationsUnavailable: 'No singing annotations found',
     annotationStress: 'Stress',
@@ -249,6 +267,13 @@ const dictionaries = {
     aurora: 'Aurora',
     sunset: 'Sunset',
     classic: 'Classic',
+    aiScoring: 'AI lyric selection',
+    aiScoringHint: 'Use an OpenAI-compatible endpoint to score aggregate candidates.',
+    aiEnabled: 'Enable AI selection',
+    aiBaseUrl: 'OpenAI-compatible base URL',
+    aiApiKey: 'API key',
+    aiModel: 'Model',
+    aiApiKeyHint: 'Leave empty to use ROSETTRISM_OPENAI_API_KEY on the server.',
     collapseSidebar: 'Collapse menu',
     expandSidebar: 'Expand menu',
     qualityPending: 'AI scoring is ready to be wired once a model is configured.',
@@ -280,6 +305,22 @@ const defaultBody = {
   ttl_seconds: 604800,
 };
 
+const defaultAiSettings = {
+  enabled: false,
+  baseUrl: '',
+  apiKey: '',
+  model: '',
+};
+
+function readAiSettings() {
+  try {
+    const stored = JSON.parse(localStorage.getItem('rosettrism-ai-settings') || 'null');
+    return { ...defaultAiSettings, ...(stored || {}) };
+  } catch {
+    return defaultAiSettings;
+  }
+}
+
 function App() {
   const [language, setLanguage] = useState(localStorage.getItem('rosettrism-language') || 'zh');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(localStorage.getItem('rosettrism-sidebar') === 'collapsed');
@@ -298,6 +339,7 @@ function App() {
   const [resultDetailData, setResultDetailData] = useState(null);
   const [resultDetailBusy, setResultDetailBusy] = useState(false);
   const [lyricSettings, setLyricSettings] = useState(readLyricSettings);
+  const [aiSettings, setAiSettings] = useState(readAiSettings);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [selectedCacheEntry, setSelectedCacheEntry] = useState(null);
@@ -321,6 +363,12 @@ function App() {
     localStorage.setItem('rosettrism-lyric-settings', JSON.stringify(lyricSettings));
   }, [lyricSettings]);
 
+  useEffect(() => {
+    localStorage.setItem('rosettrism-ai-settings', JSON.stringify(aiSettings));
+  }, [aiSettings]);
+
+  const aiScoringPayload = useMemo(() => buildAiScoringPayload(aiSettings), [aiSettings]);
+
   const aggregatePayload = useMemo(() => {
     const aggregateQuery = [body.title, body.artist]
       .map((value) => String(value || '').trim())
@@ -336,8 +384,11 @@ function App() {
     }
     delete next.source;
     delete next.format;
+    if (aiScoringPayload) {
+      next.ai_scoring = aiScoringPayload;
+    }
     return next;
-  }, [body]);
+  }, [body, aiScoringPayload]);
 
   const searchPayload = useMemo(() => {
     const next = {
@@ -453,6 +504,7 @@ function App() {
           format: requestedFormat,
           ttl_seconds: body.ttl_seconds,
           force: Boolean(body.force),
+          ...(aiScoringPayload ? { ai_scoring: aiScoringPayload } : {}),
         }),
       });
       const text = await response.text();
@@ -598,6 +650,8 @@ function App() {
             setLanguage={setLanguage}
             lyricSettings={lyricSettings}
             setLyricSettings={setLyricSettings}
+            aiSettings={aiSettings}
+            setAiSettings={setAiSettings}
             payload={searchPayload}
           />
         )}
@@ -944,7 +998,15 @@ function FetchView({
   );
 }
 
+const SEARCH_RESULTS_PAGE_SIZE = 10;
+
 function SearchResultsList({ t, results, warnings, busy, touched, openResultDetail }) {
+  const [page, setPage] = useState(1);
+  const pageCount = Math.max(1, Math.ceil(results.length / SEARCH_RESULTS_PAGE_SIZE));
+  const safePage = Math.min(page, pageCount);
+  const startIndex = (safePage - 1) * SEARCH_RESULTS_PAGE_SIZE;
+  const endIndex = Math.min(results.length, startIndex + SEARCH_RESULTS_PAGE_SIZE);
+  const pagedResults = results.slice(startIndex, endIndex);
   const statusText = busy
     ? t.searchingResults
     : results.length > 0
@@ -952,6 +1014,10 @@ function SearchResultsList({ t, results, warnings, busy, touched, openResultDeta
       : touched
         ? t.noResults
         : t.searchHint;
+
+  useEffect(() => {
+    setPage(1);
+  }, [results, busy]);
 
   return (
     <div className="search-results-panel" aria-live="polite">
@@ -980,8 +1046,9 @@ function SearchResultsList({ t, results, warnings, busy, touched, openResultDeta
       ) : results.length === 0 ? (
         <span className="empty-state">{touched ? t.noResults : t.searchHint}</span>
       ) : (
-        <div className="result-table">
-          {results.map((entry) => (
+        <>
+          <div className="result-table">
+          {pagedResults.map((entry) => (
             <button
               type="button"
               className="result-card"
@@ -991,7 +1058,10 @@ function SearchResultsList({ t, results, warnings, busy, touched, openResultDeta
             >
               <span className="result-source-pill">{displaySource(entry)}</span>
               <span className="result-main">
-                <strong>{entry.title || '-'}</strong>
+                <span className="result-title-row">
+                  <strong>{entry.title || '-'}</strong>
+                  {hasSingingAnnotations(entry) ? <span className="result-tag result-tag-annotation">{t.singingAnnotationTag}</span> : null}
+                </span>
                 <span>{entry.artist || '-'}</span>
               </span>
               <span className="result-meta">
@@ -1000,7 +1070,22 @@ function SearchResultsList({ t, results, warnings, busy, touched, openResultDeta
               </span>
             </button>
           ))}
-        </div>
+          </div>
+          {pageCount > 1 ? (
+          <div className="result-pagination">
+            <button className="button-secondary" type="button" onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={safePage <= 1}>
+              {t.previousPage}
+            </button>
+            <span>
+              {t.pageStatus.replace('{page}', safePage).replace('{total}', pageCount)}
+              <small>{t.resultRange.replace('{start}', startIndex + 1).replace('{end}', endIndex).replace('{total}', results.length)}</small>
+            </span>
+            <button className="button-secondary" type="button" onClick={() => setPage((value) => Math.min(pageCount, value + 1))} disabled={safePage >= pageCount}>
+              {t.nextPage}
+            </button>
+          </div>
+          ) : null}
+        </>
       )}
     </div>
   );
@@ -1039,7 +1124,7 @@ function ResultDialog({ t, entry, detail, detailData, busy, lyricSettings, close
     .map((member) => displaySource(member))
     .filter((source, index, sources) => source && sources.indexOf(source) === index);
 
-  return (
+  return createPortal(
     <div className="dialog-backdrop" role="presentation" onMouseDown={close}>
       <section
         className="result-dialog"
@@ -1108,7 +1193,8 @@ function ResultDialog({ t, entry, detail, detailData, busy, lyricSettings, close
           <pre className="cache-preview result-preview">{detail || t.resultEmpty}</pre>
         </details>
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -1304,8 +1390,42 @@ function isAggregateResult(entry) {
   return entry?.extra?.result_kind === 'aggregate';
 }
 
+function hasSingingAnnotations(entry) {
+  if (!entry) {
+    return false;
+  }
+  if (isAggregateResult(entry)) {
+    return aggregateMembers(entry).some(hasSingingAnnotations);
+  }
+  const extra = entry.extra || {};
+  return Boolean(
+    extra.has_singing_annotations
+      || extra.hasSingingAnnotations
+      || extra.hasSingingAnnotationsLyric
+      || extra.singing_annotations
+      || extra.singingAnnotationsLyric,
+  );
+}
+
 function aggregateMembers(entry) {
   return Array.isArray(entry?.extra?.aggregate_members) ? entry.extra.aggregate_members : [];
+}
+
+function buildAiScoringPayload(settings) {
+  if (!settings?.enabled) {
+    return null;
+  }
+  const payload = { enabled: true };
+  if (settings.baseUrl?.trim()) {
+    payload.base_url = settings.baseUrl.trim();
+  }
+  if (settings.apiKey?.trim()) {
+    payload.api_key = settings.apiKey.trim();
+  }
+  if (settings.model?.trim()) {
+    payload.model = settings.model.trim();
+  }
+  return payload;
 }
 
 function formatTimestamp(timestamp) {
@@ -1327,7 +1447,7 @@ function InspectorView({ t, result }) {
   );
 }
 
-function SettingsView({ t, language, setLanguage, lyricSettings, setLyricSettings, payload }) {
+function SettingsView({ t, language, setLanguage, lyricSettings, setLyricSettings, aiSettings, setAiSettings, payload }) {
   const previewStyle = {
     '--lyric-solid-color': lyricSettings.solidColor,
     '--lyric-gradient': resolveLyricGradient(lyricSettings.colorPreset),
@@ -1344,6 +1464,47 @@ function SettingsView({ t, language, setLanguage, lyricSettings, setLyricSetting
             <option value="en">{t.english}</option>
           </select>
         </label>
+        <div className="settings-group">
+          <strong>{t.aiScoring}</strong>
+          <p className="hint">{t.aiScoringHint}</p>
+          <label className="field-label settings-checkbox-row">
+            <input
+              type="checkbox"
+              checked={Boolean(aiSettings.enabled)}
+              onChange={(event) => setAiSettings({ ...aiSettings, enabled: event.target.checked })}
+            />
+            {t.aiEnabled}
+          </label>
+          <label className="field-label">
+            {t.aiBaseUrl}
+            <input
+              type="url"
+              value={aiSettings.baseUrl}
+              placeholder="https://api.openai.com/v1"
+              onChange={(event) => setAiSettings({ ...aiSettings, baseUrl: event.target.value })}
+            />
+          </label>
+          <label className="field-label">
+            {t.aiModel}
+            <input
+              type="text"
+              value={aiSettings.model}
+              placeholder="gpt-4o-mini"
+              onChange={(event) => setAiSettings({ ...aiSettings, model: event.target.value })}
+            />
+          </label>
+          <label className="field-label">
+            {t.aiApiKey}
+            <input
+              type="password"
+              value={aiSettings.apiKey}
+              autoComplete="off"
+              placeholder="sk-..."
+              onChange={(event) => setAiSettings({ ...aiSettings, apiKey: event.target.value })}
+            />
+            <span>{t.aiApiKeyHint}</span>
+          </label>
+        </div>
         <div className="settings-group">
           <strong>{t.lyricColor}</strong>
           <label className="field-label">

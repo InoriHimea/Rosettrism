@@ -204,6 +204,7 @@ pub async fn run() -> anyhow::Result<()> {
                         sources: None,
                         force: force_refresh,
                         ttl_seconds: Some(ttl.as_secs()),
+                        ai_scoring: None,
                     })
                     .await?;
                 let rendered = serde_json::to_vec_pretty(&response)?;
@@ -312,6 +313,7 @@ pub async fn run() -> anyhow::Result<()> {
                         sources: None,
                         force: force_refresh,
                         ttl_seconds: Some(ttl.as_secs()),
+                        ai_scoring: None,
                     })
                     .await?;
                 let rendered = serde_json::to_vec_pretty(&response)?;

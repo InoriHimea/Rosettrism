@@ -979,8 +979,7 @@ nav button.nav-active::before {
   padding: 7px 10px;
 }
 
-.lyric-annotation-legend,
-.lyric-annotation-row {
+.lyric-annotation-legend {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -999,16 +998,86 @@ nav button.nav-active::before {
   padding: 5px 10px;
 }
 
-.lyric-annotation-chip b {
-  color: #5f563f;
-  font-size: 14px;
+.lyric-annotation-chip .annotation-glyph {
+  height: 12px;
+  width: 12px;
 }
 
-.annotation-stress { box-shadow: inset 0 0 18px rgba(244, 114, 182, 0.12); }
-.annotation-breath { box-shadow: inset 0 0 18px rgba(34, 197, 94, 0.12); }
-.annotation-long-tone { box-shadow: inset 0 0 18px rgba(250, 204, 21, 0.16); }
-.annotation-portamento-up,
-.annotation-portamento-down { box-shadow: inset 0 0 18px rgba(167, 139, 250, 0.12); }
+/* Inline annotation marks (QQ Music style) — tiny glyphs sitting above the
+   annotated character, following the karaoke highlight color as the line
+   progresses. */
+.lyric-annotation-layer {
+  color: rgba(72, 68, 58, 0.7);
+  display: flex;
+  gap: 2px;
+  justify-content: center;
+  left: 50%;
+  line-height: 1;
+  pointer-events: none;
+  position: absolute;
+  top: -0.55em;
+  transform: translateX(-50%);
+  transition: color 180ms ease, transform 180ms ease, opacity 180ms ease;
+  white-space: nowrap;
+  z-index: 2;
+}
+
+.lyric-annotation-mark {
+  align-items: center;
+  display: inline-flex;
+  height: 0.5em;
+  justify-content: center;
+  width: 0.5em;
+}
+
+.lyric-annotation-mark .annotation-glyph {
+  display: block;
+  fill: currentColor;
+  stroke: currentColor;
+  height: 100%;
+  overflow: visible;
+  width: 100%;
+}
+
+/* Per-type nuances — QQ Music tints each annotation symbol distinctly while
+   keeping them muted on idle lines and vivid once the karaoke fill arrives. */
+.annotation-stress { --annotation-tint: #ec4899; }
+.annotation-breath { --annotation-tint: #16a34a; }
+.annotation-long-tone { --annotation-tint: #f59e0b; }
+.annotation-portamento-up { --annotation-tint: #0ea5e9; }
+.annotation-portamento-down { --annotation-tint: #a855f7; }
+
+.lyric-annotation-chip.annotation-stress { box-shadow: inset 0 0 18px rgba(244, 114, 182, 0.14); }
+.lyric-annotation-chip.annotation-breath { box-shadow: inset 0 0 18px rgba(34, 197, 94, 0.14); }
+.lyric-annotation-chip.annotation-long-tone { box-shadow: inset 0 0 18px rgba(250, 204, 21, 0.18); }
+.lyric-annotation-chip.annotation-portamento-up,
+.lyric-annotation-chip.annotation-portamento-down { box-shadow: inset 0 0 18px rgba(167, 139, 250, 0.14); }
+
+.lyric-annotation-chip .annotation-glyph {
+  color: var(--annotation-tint, currentColor);
+}
+
+.lyric-line-active .lyric-annotation-layer {
+  color: var(--annotation-tint, #1db954);
+  top: -0.62em;
+  transform: translateX(-50%) scale(1.12);
+}
+
+.lyric-line-past .lyric-annotation-layer {
+  opacity: 0.55;
+}
+
+/* Karaoke-driven pop: once the fill progress on a word passes ~60% the stress
+   glyph briefly emphasises, mirroring QQ Music's behaviour where the mark
+   pulses as the singer hits the note. */
+.lyric-line-active .lyric-word-annotated {
+  position: relative;
+}
+
+.lyric-line-active .lyric-word-annotated .lyric-annotation-layer {
+  transform: translateX(-50%) scale(calc(1 + 0.22 * var(--lyric-progress, 0)));
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, calc(0.12 * var(--lyric-progress, 0))));
+}
 
 .lyric-current-strip {
   color: #1db954;
@@ -1034,7 +1103,7 @@ nav button.nav-active::before {
 
 .lyric-lines {
   display: grid;
-  gap: 20px;
+  gap: 26px;
   max-height: 360px;
   overflow: auto;
   padding: 112px 28px 160px 40px;
@@ -1117,6 +1186,11 @@ nav button.nav-active::before {
   position: relative;
 }
 
+.lyric-line-text.lyric-progress-text,
+.lyric-word.lyric-progress-text {
+  position: relative;
+}
+
 .lyric-progress-base,
 .lyric-progress-fill {
   grid-area: 1 / 1;
@@ -1146,13 +1220,19 @@ nav button.nav-active::before {
 .lyric-words {
   display: inline-flex;
   flex-wrap: wrap;
-  gap: 0 0.12em;
+  gap: 0.32em 0.12em;
   justify-content: flex-start;
+  padding-top: 0.42em;
 }
 
 .lyric-word {
   color: inherit;
   display: inline-block;
+  position: relative;
+}
+
+.lyric-word-orphan {
+  min-width: 0.5em;
 }
 
 .lyric-line:not(.lyric-line-active) .lyric-progress-text,

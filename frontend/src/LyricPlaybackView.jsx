@@ -21,7 +21,6 @@ export function LyricPlaybackView({ lyric, settings, t }) {
   const activeLine = lyric.lines[activeLineIndex];
   const visibleLine = lyric.lines[visibleLineIndex];
   const inLine = activeLine && currentMs >= activeLine.startMs && currentMs < activeLine.endMs;
-  const annotationLine = inLine ? activeLine : null;
   const annotationTypes = [...new Map(lyric.annotations.map((annotation) => [annotation.type, annotation])).values()];
   const lineProgress = inLine ? lyricLineProgress(activeLine, currentMs) : 0;
 
@@ -88,7 +87,7 @@ export function LyricPlaybackView({ lyric, settings, t }) {
         <div className="lyric-annotation-legend" aria-label={t.annotations}>
           {annotationTypes.map((annotation) => (
             <span className={`lyric-annotation-chip ${annotation.className}`} key={annotation.type}>
-              <b>{annotation.symbol}</b>
+              <AnnotationGlyph type={annotation.type} />
               {t[annotation.labelKey] || annotation.type}
             </span>
           ))}
@@ -115,17 +114,8 @@ export function LyricPlaybackView({ lyric, settings, t }) {
                 }
               }}
             >
-              {index === activeLineIndex && annotationLine?.id === line.id && line.annotations.length > 0 ? (
-                <span className="lyric-annotation-row">
-                  {activeAnnotations(line, currentMs).map((annotation) => (
-                    <span className={`lyric-annotation-chip ${annotation.className}`} key={annotation.id} title={t[annotation.labelKey] || annotation.type}>
-                      {annotation.text || t[annotation.labelKey] || annotation.type}
-                    </span>
-                  ))}
-                </span>
-              ) : null}
               {index === activeLineIndex && !inLine ? <span className="lyric-gap-dots">•••</span> : null}
-              <LineText line={line} currentMs={currentMs} active={index === activeLineIndex && inLine} />
+              <LineText line={line} currentMs={currentMs} active={index === activeLineIndex && inLine} t={t} />
               {line.reading || line.romanized ? <small>{line.reading || line.romanized}</small> : null}
             </button>
           ))}
@@ -172,34 +162,120 @@ export function LyricPlaybackView({ lyric, settings, t }) {
   );
 }
 
-function LineText({ line, currentMs, active }) {
+function LineText({ line, currentMs, active, t }) {
+  // Build a lookup: annotations that couldn't attach to a specific word
+  const wordAnnotationIds = new Set();
+  for (const word of line.words) {
+    for (const annotation of word.annotations || []) {
+      wordAnnotationIds.add(annotation.id);
+    }
+  }
+  const orphanAnnotations = (line.annotations || []).filter((annotation) => !wordAnnotationIds.has(annotation.id));
+
   if (!line.words.length) {
     const progress = active ? lyricLineProgress(line, currentMs) : 0;
+    const text = line.text || '· · ·';
+    // With no word timing, overlay any line-level annotations at the text start
+    const lineAnnotations = line.annotations || [];
     return (
       <span className="lyric-line-text lyric-progress-text" style={{ '--lyric-progress': progress }}>
-        <span className="lyric-progress-base">{line.text || '· · ·'}</span>
-        <span className="lyric-progress-fill" aria-hidden="true">{line.text || '· · ·'}</span>
+        {lineAnnotations.length > 0 ? (
+          <AnnotationLayer annotations={lineAnnotations} t={t} />
+        ) : null}
+        <span className="lyric-progress-base">{text}</span>
+        <span className="lyric-progress-fill" aria-hidden="true">{text}</span>
       </span>
     );
   }
+
   return (
     <span className="lyric-words">
       {line.words.map((word) => {
         const progress = active ? wordProgress(word, currentMs) : 0;
+        const annotations = word.annotations || [];
         return (
-          <span className="lyric-word lyric-progress-text" style={{ '--lyric-progress': progress }} key={word.id}>
+          <span
+            className={`lyric-word lyric-progress-text${annotations.length ? ' lyric-word-annotated' : ''}`}
+            style={{ '--lyric-progress': progress }}
+            key={word.id}
+          >
+            {annotations.length > 0 ? <AnnotationLayer annotations={annotations} t={t} /> : null}
             <span className="lyric-progress-base">{word.text}</span>
             <span className="lyric-progress-fill" aria-hidden="true">{word.text}</span>
           </span>
         );
       })}
+      {orphanAnnotations.length > 0 ? (
+        <span className="lyric-word lyric-word-orphan" aria-hidden="true">
+          <AnnotationLayer annotations={orphanAnnotations} t={t} />
+          <span className="lyric-progress-base">&nbsp;</span>
+        </span>
+      ) : null}
     </span>
   );
 }
 
-function activeAnnotations(line, currentMs) {
-  const active = line.annotations.filter((annotation) => currentMs >= annotation.startMs - 450 && currentMs <= annotation.endMs + 450);
-  return active.length ? active : line.annotations;
+function AnnotationLayer({ annotations, t }) {
+  // De-duplicate by type so we don't stack identical marks on a single character
+  const unique = [...new Map(annotations.map((annotation) => [annotation.type, annotation])).values()];
+  return (
+    <span className="lyric-annotation-layer" aria-hidden="true">
+      {unique.map((annotation) => (
+        <span
+          key={annotation.id}
+          className={`lyric-annotation-mark ${annotation.className}`}
+          title={t ? t[annotation.labelKey] || annotation.type : annotation.type}
+        >
+          <AnnotationGlyph type={annotation.type} />
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function AnnotationGlyph({ type }) {
+  // SVG glyphs mirroring QQ Music's small inline marks (重音/换气/长音/上滑/下滑)
+  switch (type) {
+    case 'stress':
+      // Small filled dot with a subtle halo — "accent mark"
+      return (
+        <svg className="annotation-glyph" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+          <circle cx="6" cy="6" r="3" />
+        </svg>
+      );
+    case 'breath':
+      // Comma-like breath mark (QQ uses a small apostrophe / check shape)
+      return (
+        <svg className="annotation-glyph" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+          <path d="M7 2 C 7 2, 4 3.2, 4 5.4 C 4 6.8, 5.2 7.6, 6.2 7.6 L 5.2 10.6" fill="none" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    case 'long_tone':
+      // Long horizontal bar
+      return (
+        <svg className="annotation-glyph" viewBox="0 0 14 12" aria-hidden="true" focusable="false">
+          <rect x="1" y="5" width="12" height="2" rx="1" />
+        </svg>
+      );
+    case 'portamento_up':
+      return (
+        <svg className="annotation-glyph" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+          <path d="M2 9 L 6 3 L 10 9" fill="none" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    case 'portamento_down':
+      return (
+        <svg className="annotation-glyph" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+          <path d="M2 3 L 6 9 L 10 3" fill="none" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    default:
+      return (
+        <svg className="annotation-glyph" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+          <circle cx="6" cy="6" r="2" />
+        </svg>
+      );
+  }
 }
 
 function lyricLineProgress(line, currentMs) {

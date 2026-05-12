@@ -358,12 +358,14 @@ async fn fetch_result(
             source,
             result,
             document,
+            annotations,
         } => {
             let body = serde_json::to_vec_pretty(&json!({
                 "source": source,
                 "format": "json",
                 "result": result,
                 "document": document,
+                "annotations": annotations,
             }))?;
             Ok(response_with_body(
                 StatusCode::OK,

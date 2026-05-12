@@ -344,11 +344,13 @@ impl ServiceContext {
                     })
                 }
                 SpecificFetchFormat::Json => {
+                    let annotations = fetched.annotations.clone();
                     let document = decode_fetched(fetched)?;
                     Ok(SpecificFetchResult::Json {
                         source,
                         result,
                         document,
+                        annotations,
                     })
                 }
             };
@@ -385,8 +387,9 @@ impl ServiceContext {
                 for result in selected {
                     match provider.fetch(&result).await {
                         Ok(fetched) => {
+                            let annotations = fetched.annotations.clone();
                             let document = decode_fetched(fetched)?;
-                            items.push(SpecificJsonItem { result, document });
+                            items.push(SpecificJsonItem { result, document, annotations });
                         }
                         Err(err) => warnings.push(format!("{}: {err}", result.id)),
                     }
@@ -447,11 +450,13 @@ impl ServiceContext {
                 })
             }
             SpecificFetchFormat::Json => {
+                let annotations = fetched.annotations.clone();
                 let document = decode_fetched(fetched)?;
                 Ok(SpecificFetchResult::Json {
                     source,
                     result,
                     document,
+                    annotations,
                 })
             }
         }
@@ -605,6 +610,7 @@ pub enum SpecificFetchResult {
         source: Source,
         result: SearchResult,
         document: LyricDocument,
+        annotations: Vec<Annotation>,
     },
     RawMany {
         source: Source,
@@ -636,6 +642,8 @@ pub struct SpecificRawItem {
 pub struct SpecificJsonItem {
     pub result: SearchResult,
     pub document: LyricDocument,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub annotations: Vec<Annotation>,
 }
 
 fn serialize_raw_text<S>(raw: &[u8], serializer: S) -> std::result::Result<S::Ok, S::Error>

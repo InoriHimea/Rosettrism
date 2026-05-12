@@ -981,26 +981,23 @@ function SearchResultsList({ t, results, warnings, busy, touched, openResultDeta
         <span className="empty-state">{touched ? t.noResults : t.searchHint}</span>
       ) : (
         <div className="result-table">
-          <div className="result-row result-row-head">
-            <strong>{t.title}</strong>
-            <span>{t.artist}</span>
-            <span>{t.source}</span>
-            <span>{t.itemId}</span>
-            <span>{t.duration}</span>
-          </div>
           {results.map((entry) => (
             <button
               type="button"
-              className="result-row"
+              className="result-card"
               key={`${entry.source}:${entry.id}:${entry.title}`}
               onClick={() => openResultDetail(entry)}
               title={t.openDetail}
             >
-              <strong>{entry.title || '-'}</strong>
-              <span>{entry.artist || '-'}</span>
-              <span>{displaySource(entry)}</span>
-              <span>{entry.id}</span>
-              <span>{formatDurationMs(entry.duration_ms)}</span>
+              <span className="result-source-pill">{displaySource(entry)}</span>
+              <span className="result-main">
+                <strong>{entry.title || '-'}</strong>
+                <span>{entry.artist || '-'}</span>
+              </span>
+              <span className="result-meta">
+                <span>{entry.id}</span>
+                <b>{formatDurationMs(entry.duration_ms)}</b>
+              </span>
             </button>
           ))}
         </div>
@@ -1019,6 +1016,8 @@ function ErrorMessage({ t, error }) {
 }
 
 function ResultDialog({ t, entry, detail, detailData, busy, lyricSettings, close, fetchSelectedResult }) {
+  const lyricPlayback = useMemo(() => normalizeLyricPayload(detailData), [detailData]);
+
   useEffect(() => {
     if (!entry) {
       return undefined;
@@ -1039,7 +1038,6 @@ function ResultDialog({ t, entry, detail, detailData, busy, lyricSettings, close
   const aggregateSources = aggregateMembers(entry)
     .map((member) => displaySource(member))
     .filter((source, index, sources) => source && sources.indexOf(source) === index);
-  const lyricPlayback = useMemo(() => normalizeLyricPayload(detailData), [detailData]);
 
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={close}>

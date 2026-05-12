@@ -80,14 +80,16 @@ export function normalizeUnifiedLyric(unified, context = {}) {
 }
 
 export function normalizeLyricDocument(document, context = {}) {
-  const lines = deriveLineEndTimes((document.lines || []).map((line, index) => normalizeLine(line, index, 'document')));
+  let lines = deriveLineEndTimes((document.lines || []).map((line, index) => normalizeLine(line, index, 'document')));
+  const annotations = normalizeAnnotations(context.annotations || document.annotations || context.result?.annotations || []);
+  lines = attachAnnotationsToLines(lines, annotations);
   return buildNormalizedLyric({
     kind: 'document',
     source: context.source || document.meta?.source || context.result?.source || '',
     title: document.meta?.title || context.result?.title || '',
     artist: document.meta?.artist || context.result?.artist || '',
     warnings: [],
-  }, lines, []);
+  }, lines, annotations);
 }
 
 function buildNormalizedLyric(base, lines, annotations) {
@@ -163,12 +165,13 @@ export function deriveLineEndTimes(lines) {
 export function normalizeAnnotations(annotations) {
   return annotations
     .map((annotation, index) => {
-      const meta = annotationMeta(annotation.annotation_type || annotation.type);
+      const type = normalizeAnnotationType(annotation.annotation_type || annotation.annotationType || annotation.type);
+      const meta = annotationMeta(type);
       const startMs = Number(annotation.start_ms ?? annotation.startMs ?? 0);
       const durationMs = optionalNumber(annotation.duration_ms ?? annotation.durationMs) || 800;
       return {
         id: `annotation-${index}-${startMs}`,
-        type: annotation.annotation_type || annotation.type || 'unknown',
+        type,
         startMs,
         durationMs,
         endMs: startMs + durationMs,
@@ -187,13 +190,13 @@ export function attachAnnotationsToLines(lines, annotations) {
   }));
 
   for (const annotation of annotations) {
-    const lineIndex = findActiveLineIndex(nextLines, annotation.startMs);
+    const lineIndex = findAnnotationLineIndex(nextLines, annotation);
     const line = nextLines[lineIndex];
     if (!line) {
       continue;
     }
     const words = line.words.map((word) => {
-      const timedMatch = annotation.startMs >= word.startMs && annotation.startMs < Math.max(word.endMs, word.startMs + 1);
+      const timedMatch = annotation.startMs >= word.startMs - 120 && annotation.startMs < Math.max(word.endMs, word.startMs + 1) + 120;
       const textMatch = annotation.text && word.text.includes(annotation.text);
       return timedMatch || textMatch ? { ...word, annotations: [...word.annotations, annotation] } : word;
     });
@@ -201,6 +204,30 @@ export function attachAnnotationsToLines(lines, annotations) {
   }
 
   return nextLines;
+}
+
+function findAnnotationLineIndex(lines, annotation) {
+  const midpoint = annotation.startMs + annotation.durationMs / 2;
+  let bestIndex = findActiveLineIndex(lines, annotation.startMs);
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const contains = annotation.startMs >= line.startMs - 180 && annotation.startMs <= line.endMs + 180;
+    const center = line.startMs + (line.endMs - line.startMs) / 2;
+    const distance = Math.abs(midpoint - center);
+    if (contains && distance < bestDistance) {
+      bestIndex = index;
+      bestDistance = distance;
+    }
+  }
+  return bestIndex;
+}
+
+function normalizeAnnotationType(type) {
+  return String(type || 'unknown')
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/-/g, '_')
+    .toLowerCase();
 }
 
 export function annotationMeta(type) {
@@ -218,13 +245,25 @@ export function findActiveLineIndex(lines, currentMs) {
   if (!lines.length) {
     return -1;
   }
-  let active = 0;
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
     if (currentMs >= line.startMs && currentMs < line.endMs) {
       return index;
     }
-    if (currentMs >= line.startMs) {
+  }
+  if (currentMs < lines[0].startMs) {
+    return 0;
+  }
+  return lines.length - 1;
+}
+
+export function findVisibleLineIndex(lines, currentMs) {
+  if (!lines.length) {
+    return -1;
+  }
+  let active = 0;
+  for (let index = 0; index < lines.length; index += 1) {
+    if (currentMs >= lines[index].startMs) {
       active = index;
     }
   }

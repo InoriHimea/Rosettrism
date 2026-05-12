@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Pause, Play, RotateCcw } from 'lucide-react';
 import {
   findActiveLineIndex,
+  findVisibleLineIndex,
   formatPlaybackTime,
   resolveLyricGradient,
 } from './lyricPlayback.js';
@@ -16,8 +17,13 @@ export function LyricPlaybackView({ lyric, settings, t }) {
   const reducedMotion = useMemo(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || false, []);
   const durationMs = Math.max(lyric.durationMs || 0, 1000);
   const activeLineIndex = findActiveLineIndex(lyric.lines, currentMs);
+  const visibleLineIndex = findVisibleLineIndex(lyric.lines, currentMs);
   const activeLine = lyric.lines[activeLineIndex];
+  const visibleLine = lyric.lines[visibleLineIndex];
+  const inLine = activeLine && currentMs >= activeLine.startMs && currentMs < activeLine.endMs;
+  const annotationLine = inLine ? activeLine : null;
   const annotationTypes = [...new Map(lyric.annotations.map((annotation) => [annotation.type, annotation])).values()];
+  const lineProgress = inLine ? lyricLineProgress(activeLine, currentMs) : 0;
 
   useEffect(() => {
     if (!isPlaying) {
@@ -36,20 +42,20 @@ export function LyricPlaybackView({ lyric, settings, t }) {
     }
     frameRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frameRef.current);
-  }, [isPlaying, currentMs, durationMs]);
+  }, [isPlaying, durationMs]);
 
   useEffect(() => {
     const container = linesRef.current;
-    const node = activeLine ? lineRefs.current.get(activeLine.id) : null;
+    const node = visibleLine ? lineRefs.current.get(visibleLine.id) : null;
     if (!container || !node) {
       return;
     }
-    const target = node.offsetTop - container.clientHeight / 3 + node.clientHeight / 2;
+    const target = node.offsetTop - container.clientHeight / 3 + node.clientHeight * (0.35 + lineProgress * 0.3);
     container.scrollTo({
       top: Math.max(0, target),
-      behavior: reducedMotion ? 'auto' : 'smooth',
+      behavior: reducedMotion || isPlaying ? 'auto' : 'smooth',
     });
-  }, [activeLine?.id, reducedMotion]);
+  }, [visibleLine?.id, lineProgress, isPlaying, reducedMotion]);
 
   function seek(nextMs) {
     setCurrentMs(Math.max(0, Math.min(Number(nextMs), durationMs)));
@@ -90,7 +96,7 @@ export function LyricPlaybackView({ lyric, settings, t }) {
       ) : null}
 
       <div className="lyric-current-strip" aria-live="polite">
-        {activeLine?.text || t.preview}
+        {inLine ? activeLine?.text : '•••'}
       </div>
 
       <div className="lyric-stage lyric-stage-qq">
@@ -109,16 +115,17 @@ export function LyricPlaybackView({ lyric, settings, t }) {
                 }
               }}
             >
-              {index === activeLineIndex && line.annotations.length > 0 ? (
+              {index === activeLineIndex && annotationLine?.id === line.id && line.annotations.length > 0 ? (
                 <span className="lyric-annotation-row">
-                  {line.annotations.map((annotation) => (
+                  {activeAnnotations(line, currentMs).map((annotation) => (
                     <span className={`lyric-annotation-chip ${annotation.className}`} key={annotation.id} title={t[annotation.labelKey] || annotation.type}>
                       {annotation.text || t[annotation.labelKey] || annotation.type}
                     </span>
                   ))}
                 </span>
               ) : null}
-              <LineText line={line} currentMs={currentMs} active={index === activeLineIndex} />
+              {index === activeLineIndex && !inLine ? <span className="lyric-gap-dots">•••</span> : null}
+              <LineText line={line} currentMs={currentMs} active={index === activeLineIndex && inLine} />
               {line.reading || line.romanized ? <small>{line.reading || line.romanized}</small> : null}
             </button>
           ))}
@@ -167,22 +174,48 @@ export function LyricPlaybackView({ lyric, settings, t }) {
 
 function LineText({ line, currentMs, active }) {
   if (!line.words.length) {
-    const sung = active && currentMs > line.startMs;
-    return <span className={`lyric-line-text ${sung ? 'lyric-word-sung' : ''}`}>{line.text || '· · ·'}</span>;
+    const progress = active ? lyricLineProgress(line, currentMs) : 0;
+    return (
+      <span className="lyric-line-text lyric-progress-text" style={{ '--lyric-progress': progress }}>
+        <span className="lyric-progress-base">{line.text || '· · ·'}</span>
+        <span className="lyric-progress-fill" aria-hidden="true">{line.text || '· · ·'}</span>
+      </span>
+    );
   }
   return (
     <span className="lyric-words">
       {line.words.map((word) => {
-        const sung = active && currentMs >= word.startMs;
-        const singing = active && currentMs >= word.startMs && currentMs < Math.max(word.endMs, word.startMs + 1);
+        const progress = active ? wordProgress(word, currentMs) : 0;
         return (
-          <span className={`lyric-word ${sung ? 'lyric-word-sung' : ''} ${singing ? 'lyric-word-active' : ''}`} key={word.id}>
-            {word.text}
+          <span className="lyric-word lyric-progress-text" style={{ '--lyric-progress': progress }} key={word.id}>
+            <span className="lyric-progress-base">{word.text}</span>
+            <span className="lyric-progress-fill" aria-hidden="true">{word.text}</span>
           </span>
         );
       })}
     </span>
   );
+}
+
+function activeAnnotations(line, currentMs) {
+  const active = line.annotations.filter((annotation) => currentMs >= annotation.startMs - 450 && currentMs <= annotation.endMs + 450);
+  return active.length ? active : line.annotations;
+}
+
+function lyricLineProgress(line, currentMs) {
+  const start = line.startMs;
+  const end = Math.max(line.endMs || start + 1, start + 1);
+  return clampProgress((currentMs - start) / (end - start));
+}
+
+function wordProgress(word, currentMs) {
+  const start = word.startMs;
+  const end = Math.max(word.endMs || start + 1, start + 1);
+  return clampProgress((currentMs - start) / (end - start));
+}
+
+function clampProgress(value) {
+  return Math.max(0, Math.min(1, value));
 }
 
 function lineClassName(index, activeLineIndex) {

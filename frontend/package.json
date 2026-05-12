@@ -1,7 +1,7 @@
 {
   "name": "rosettrism-dashboard",
   "private": true,
-  "version": "4.4.0",
+  "version": "4.5.0",
   "type": "module",
   "scripts": {
     "build": "vite build",
@@ -14,7 +14,8 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
-    "vite": "^6.0.0",
-    "tailwindcss": "^4.1.0"
+    "@playwright/test": "^1.60.0",
+    "tailwindcss": "^4.1.0",
+    "vite": "^6.0.0"
   }
 }

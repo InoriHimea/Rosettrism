@@ -571,6 +571,20 @@ nav button.nav-active::before {
   color: #0e7490;
 }
 
+.result-tag-muted {
+  background: rgba(148, 163, 184, 0.12);
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  color: #64748b;
+}
+
+.result-title-row .result-tag-annotation {
+  color: #0e7490;
+}
+
+.result-title-row .result-tag-muted {
+  color: #64748b;
+}
+
 .result-main span,
 .result-meta span {
   color: var(--color-muted);
@@ -1156,6 +1170,26 @@ nav button.nav-active::before {
   border: 1px solid rgba(103, 78, 18, 0.12);
 }
 
+.lyric-meta-panel {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(255, 250, 221, 0.56));
+  display: grid;
+  gap: 4px;
+  left: 0;
+  padding: 22px 38px 10px;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+  top: 0;
+  z-index: 2;
+}
+
+.lyric-meta-row {
+  color: rgba(64, 61, 54, 0.58);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
 .lyric-lines {
   display: grid;
   gap: 26px;
@@ -1163,6 +1197,10 @@ nav button.nav-active::before {
   overflow: auto;
   padding: 112px 28px 160px 40px;
   scroll-behavior: smooth;
+}
+
+.lyric-lines-with-meta {
+  padding-top: 134px;
 }
 
 .lyric-line {
@@ -1199,19 +1237,17 @@ nav button.nav-active::before {
   transform: scale(1);
 }
 
-.lyric-line-meta,
-.lyric-line-meta.lyric-line-active {
-  color: rgba(64, 61, 54, 0.58);
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: 0;
-}
-
-.lyric-gap-dots {
+.lyric-gap-dots,
+.lyric-header-separator {
   color: #1db954;
   font-size: 32px;
   font-weight: 900;
   letter-spacing: 0.12em;
+}
+
+.lyric-header-separator {
+  line-height: 1;
+  padding: 4px 10px 8px;
 }
 
 .lyric-dots-flashing {
@@ -1593,17 +1629,24 @@ nav button.nav-active::before {
     min-height: 320px;
   }
 
+  .lyric-meta-panel {
+    padding: 18px 24px 8px;
+  }
+
+  .lyric-meta-row {
+    font-size: 16px;
+  }
+
   .lyric-lines {
     padding: 96px 12px 132px 24px;
   }
 
-  .lyric-line-active {
-    font-size: 26px;
+  .lyric-lines-with-meta {
+    padding-top: 124px;
   }
 
-  .lyric-line-meta,
-  .lyric-line-meta.lyric-line-active {
-    font-size: 16px;
+  .lyric-line-active {
+    font-size: 26px;
   }
 
   .lyric-line-past,

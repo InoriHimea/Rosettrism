@@ -112,7 +112,8 @@ const dictionaries = {
     restart: '重播',
     timeline: '时间轴',
     annotations: '助唱标注',
-    singingAnnotationTag: '助唱标注',
+    singingAnnotationTag: '有助唱标注',
+    singingAnnotationUnavailableTag: '无助唱标注',
     previousPage: '上一页',
     nextPage: '下一页',
     pageStatus: '第 {page} / {total} 页',
@@ -243,7 +244,8 @@ const dictionaries = {
     restart: 'Restart',
     timeline: 'Timeline',
     annotations: 'Singing annotations',
-    singingAnnotationTag: 'Singing annotations',
+    singingAnnotationTag: 'Has singing annotations',
+    singingAnnotationUnavailableTag: 'No singing annotations',
     previousPage: 'Previous',
     nextPage: 'Next',
     pageStatus: 'Page {page} / {total}',
@@ -406,21 +408,33 @@ function App() {
   }, [body, source]);
 
   async function refreshMeta() {
-    const [healthRes, statsRes, cacheRes] = await Promise.all([
-      fetch('/api/health'),
-      fetch('/api/stats'),
-      fetch('/api/cache'),
-    ]);
-    setHealth(await healthRes.json());
-    setStats(await statsRes.json());
-    const entries = (await cacheRes.json()).entries || [];
-    setCache(entries);
-    setSelectedCacheEntry((selected) => {
-      if (!selected) {
-        return selected;
+    try {
+      const [healthRes, statsRes, cacheRes] = await Promise.all([
+        fetch('/api/health'),
+        fetch('/api/stats'),
+        fetch('/api/cache'),
+      ]);
+      if (!healthRes.ok || !statsRes.ok || !cacheRes.ok) {
+        return;
       }
-      return entries.find((entry) => entry.id === selected.id) || selected;
-    });
+      const [healthData, statsData, cacheData] = await Promise.all([
+        readJsonResponse(healthRes),
+        readJsonResponse(statsRes),
+        readJsonResponse(cacheRes),
+      ]);
+      setHealth(healthData);
+      setStats(statsData);
+      const entries = cacheData.entries || [];
+      setCache(entries);
+      setSelectedCacheEntry((selected) => {
+        if (!selected) {
+          return selected;
+        }
+        return entries.find((entry) => entry.id === selected.id) || selected;
+      });
+    } catch {
+      return;
+    }
   }
 
   async function searchLyric(event) {
@@ -1060,7 +1074,11 @@ function SearchResultsList({ t, results, warnings, busy, touched, openResultDeta
               <span className="result-main">
                 <span className="result-title-row">
                   <strong>{entry.title || '-'}</strong>
-                  {hasSingingAnnotations(entry) ? <span className="result-tag result-tag-annotation">{t.singingAnnotationTag}</span> : null}
+                  {isQqResult(entry) ? (
+                    <span className={`result-tag ${hasSingingAnnotations(entry) ? 'result-tag-annotation' : 'result-tag-muted'}`}>
+                      {hasSingingAnnotations(entry) ? t.singingAnnotationTag : t.singingAnnotationUnavailableTag}
+                    </span>
+                  ) : null}
                 </span>
                 <span>{entry.artist || '-'}</span>
               </span>
@@ -1372,6 +1390,14 @@ function formatBytes(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+async function readJsonResponse(response) {
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    throw new Error('Expected JSON response');
+  }
+  return response.json();
+}
+
 function formatDurationMs(durationMs) {
   if (!Number.isFinite(durationMs) || durationMs <= 0) {
     return '-';
@@ -1390,6 +1416,16 @@ function isAggregateResult(entry) {
   return entry?.extra?.result_kind === 'aggregate';
 }
 
+function isQqResult(entry) {
+  if (!entry) {
+    return false;
+  }
+  if (isAggregateResult(entry)) {
+    return aggregateMembers(entry).some(isQqResult);
+  }
+  return String(entry.source || entry.extra?.source || entry.extra?.display_source || '').toLowerCase() === 'qq';
+}
+
 function hasSingingAnnotations(entry) {
   if (!entry) {
     return false;
@@ -1398,13 +1434,20 @@ function hasSingingAnnotations(entry) {
     return aggregateMembers(entry).some(hasSingingAnnotations);
   }
   const extra = entry.extra || {};
-  return Boolean(
-    extra.has_singing_annotations
-      || extra.hasSingingAnnotations
-      || extra.hasSingingAnnotationsLyric
-      || extra.singing_annotations
-      || extra.singingAnnotationsLyric,
-  );
+  return [
+    extra.has_singing_annotations,
+    extra.hasSingingAnnotations,
+    extra.hasSingingAnnotationsLyric,
+    extra.singing_annotations,
+    extra.singingAnnotationsLyric,
+  ].some(hasPositiveAnnotationSignal);
+}
+
+function hasPositiveAnnotationSignal(value) {
+  if (Array.isArray(value)) {
+    return value.length > 0;
+  }
+  return value === true || value === 1 || value === '1' || String(value).toLowerCase() === 'true';
 }
 
 function aggregateMembers(entry) {

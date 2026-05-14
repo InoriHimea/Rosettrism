@@ -25,7 +25,12 @@ export function LyricPlaybackView({ lyric, settings, t }) {
   const countdown = lyricCountdown(lyric.lines, currentMs);
   const stripText = inBodyLine ? activeLine?.text : countdown.text;
   const annotationTypes = [...new Map(lyric.annotations.map((annotation) => [annotation.type, annotation])).values()];
-  const lineProgress = inLine ? lyricLineProgress(activeLine, currentMs) : 0;
+  const lineProgress = inLine && !activeLine?.isMeta ? lyricLineProgress(activeLine, currentMs) : 0;
+  const metaLines = lyric.lines.filter((line) => line.isMeta);
+  const bodyLines = lyric.lines.filter((line) => !line.isMeta);
+  const visibleBodyLine = visibleLine && !visibleLine.isMeta
+    ? visibleLine
+    : bodyLines.find((line) => line.startMs >= currentMs) || bodyLines[bodyLines.length - 1];
 
   useEffect(() => {
     if (!isPlaying) {
@@ -48,7 +53,7 @@ export function LyricPlaybackView({ lyric, settings, t }) {
 
   useEffect(() => {
     const container = linesRef.current;
-    const node = visibleLine ? lineRefs.current.get(visibleLine.id) : null;
+    const node = visibleBodyLine ? lineRefs.current.get(visibleBodyLine.id) : null;
     if (!container || !node) {
       return;
     }
@@ -57,7 +62,7 @@ export function LyricPlaybackView({ lyric, settings, t }) {
       top: Math.max(0, target),
       behavior: reducedMotion || isPlaying ? 'auto' : 'smooth',
     });
-  }, [visibleLine?.id, lineProgress, isPlaying, reducedMotion]);
+  }, [visibleBodyLine?.id, lineProgress, isPlaying, reducedMotion]);
 
   function seek(nextMs) {
     setCurrentMs(Math.max(0, Math.min(Number(nextMs), durationMs)));
@@ -102,26 +107,38 @@ export function LyricPlaybackView({ lyric, settings, t }) {
       </div>
 
       <div className="lyric-stage lyric-stage-qq">
-        <div className="lyric-lines" ref={linesRef}>
-          {lyric.lines.map((line, index) => (
-            <button
-              className={lineClassName(index, activeLineIndex, line)}
-              key={line.id}
-              type="button"
-              onClick={() => seek(line.startMs)}
-              ref={(node) => {
-                if (node) {
-                  lineRefs.current.set(line.id, node);
-                } else {
-                  lineRefs.current.delete(line.id);
-                }
-              }}
-            >
-              {index === activeLineIndex && !inLine ? <span className={`lyric-gap-dots${countdown.flashing ? ' lyric-dots-flashing' : ''}`}>{countdown.text || '•••'}</span> : null}
-              <LineText line={line} currentMs={currentMs} active={index === activeLineIndex && inLine} t={t} />
-              {line.reading || line.romanized ? <small>{line.reading || line.romanized}</small> : null}
-            </button>
-          ))}
+        {metaLines.length > 0 ? (
+          <div className="lyric-meta-panel">
+            {metaLines.map((line) => (
+              <div className="lyric-meta-row" key={line.id}>{line.text}</div>
+            ))}
+            <div className="lyric-header-separator" aria-hidden="true">•••</div>
+          </div>
+        ) : null}
+        <div className={`lyric-lines${metaLines.length > 0 ? ' lyric-lines-with-meta' : ''}`} ref={linesRef}>
+          {bodyLines.map((line) => {
+            const index = lyric.lines.indexOf(line);
+            const isActive = index === activeLineIndex;
+            return (
+              <button
+                className={lineClassName(index, activeLineIndex, line)}
+                type="button"
+                onClick={() => seek(line.startMs)}
+                ref={(node) => {
+                  if (node) {
+                    lineRefs.current.set(line.id, node);
+                  } else {
+                    lineRefs.current.delete(line.id);
+                  }
+                }}
+                key={line.id}
+              >
+                {isActive && !inLine ? <span className={`lyric-gap-dots${countdown.flashing ? ' lyric-dots-flashing' : ''}`}>{countdown.text || '•••'}</span> : null}
+                <LineText line={line} currentMs={currentMs} active={isActive && inLine} t={t} />
+                {line.reading || line.romanized ? <small>{line.reading || line.romanized}</small> : null}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -175,10 +192,13 @@ function LineText({ line, currentMs, active, t }) {
   }
   const orphanAnnotations = (line.annotations || []).filter((annotation) => !wordAnnotationIds.has(annotation.id));
 
-  if (line.isMeta || !line.words.length) {
-    const progress = line.isMeta ? (active ? 1 : 0) : active ? lyricLineProgress(line, currentMs) : 0;
+  if (line.isMeta) {
+    return <span className="lyric-line-text lyric-meta-text">{line.text || '· · ·'}</span>;
+  }
+
+  if (!line.words.length) {
+    const progress = active ? lyricLineProgress(line, currentMs) : 0;
     const text = line.text || '· · ·';
-    // With no word timing, overlay any line-level annotations at the text start
     const lineAnnotations = line.annotations || [];
     return (
       <span className="lyric-line-text lyric-progress-text" style={{ '--lyric-progress': progress }}>

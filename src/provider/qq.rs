@@ -190,36 +190,12 @@ impl QqProvider {
         ))
     }
 
-    async fn fetch_singing_annotations(&self, song_id: u64) -> Result<Vec<Annotation>> {
-        let request = json!({
-            "comm": {
-                "ct": "19",
-                "cv": "1859",
-                "uin": "0"
-            },
-            "req": {
-                "module": "music.musichallSong.PlayLyricInfo",
-                "method": "GetPlayLyricInfo",
-                "param": {
-                    "songID": song_id,
-                    "type": 0,
-                    "cmd": 1,
-                    "qrc": 1,
-                    "trans": 1,
-                    "roma": 1,
-                    "crypt": 0,
-                    "needSingingAnnotations": true,
-                    "singingAnnotationsTs": 0,
-                    "needLTLyric": false,
-                    "lrc_t": 0,
-                    "qrc_t": 0,
-                    "trans_t": 0,
-                    "roma_t": 0,
-                    "lt_lyric_t": 0
-                }
-            }
-        });
+    async fn has_singing_annotations(&self, song_id: u64) -> Result<bool> {
+        Ok(!self.fetch_singing_annotations_lyric(song_id).await?.is_empty())
+    }
 
+    async fn fetch_singing_annotations_lyric(&self, song_id: u64) -> Result<String> {
+        let request = singing_annotations_request(song_id);
         let response = self
             .client
             .post(&self.annotations_url)
@@ -230,12 +206,17 @@ impl QqProvider {
             .json::<Value>()
             .await?;
 
-        let lyric = response
+        Ok(response
             .get("req")
             .and_then(|req| req.get("data"))
             .and_then(|data| data.get("singingAnnotationsLyric"))
             .and_then(Value::as_str)
-            .unwrap_or("");
+            .unwrap_or("")
+            .to_string())
+    }
+
+    async fn fetch_singing_annotations(&self, song_id: u64) -> Result<Vec<Annotation>> {
+        let lyric = self.fetch_singing_annotations_lyric(song_id).await?;
 
         if lyric.is_empty() {
             return Ok(Vec::new());
@@ -273,44 +254,51 @@ impl QqProvider {
 impl LyricProvider for QqProvider {
     async fn search(&self, query: &str) -> Result<Vec<SearchResult>> {
         let songs = self.search_songs(query).await?;
-        let results = songs
-            .into_iter()
-            .filter_map(|song| {
-                let QqSong {
-                    mid,
-                    id,
-                    name,
-                    title,
-                    album,
-                    albumname,
-                    interval,
-                    singer,
-                    has_singing_annotations,
-                } = song;
-                let song_mid = mid?;
-                let song_id = id?;
-                let title = name.or(title).unwrap_or_default();
-                let album = albumname.or_else(|| album.as_ref().and_then(QqAlbum::display_name));
-                let artist = singer
-                    .iter()
-                    .filter_map(|singer| singer.display_name())
-                    .collect::<Vec<_>>()
-                    .join("/");
-                Some(SearchResult {
-                    source: Source::Qq,
-                    id: song_mid.clone(),
-                    title,
-                    artist,
-                    album,
-                    duration_ms: Some(interval.saturating_mul(1_000)),
-                    extra: json!({
-                        "songmid": song_mid,
-                        "songid": song_id,
-                        "has_singing_annotations": has_singing_annotations,
-                    }),
-                })
-            })
-            .collect();
+        let mut results = Vec::new();
+        for song in songs {
+            let QqSong {
+                mid,
+                id,
+                name,
+                title,
+                album,
+                albumname,
+                interval,
+                singer,
+                has_singing_annotations,
+            } = song;
+            let Some(song_mid) = mid else {
+                continue;
+            };
+            let Some(song_id) = id else {
+                continue;
+            };
+            let has_singing_annotations = has_singing_annotations
+                || self
+                    .has_singing_annotations(song_id)
+                    .await
+                    .unwrap_or(false);
+            let title = name.or(title).unwrap_or_default();
+            let album = albumname.or_else(|| album.as_ref().and_then(QqAlbum::display_name));
+            let artist = singer
+                .iter()
+                .filter_map(|singer| singer.display_name())
+                .collect::<Vec<_>>()
+                .join("/");
+            results.push(SearchResult {
+                source: Source::Qq,
+                id: song_mid.clone(),
+                title,
+                artist,
+                album,
+                duration_ms: Some(interval.saturating_mul(1_000)),
+                extra: json!({
+                    "songmid": song_mid,
+                    "songid": song_id,
+                    "has_singing_annotations": has_singing_annotations,
+                }),
+            });
+        }
 
         Ok(results)
     }
@@ -397,6 +385,37 @@ fn looks_like_qrc_response(raw: &[u8]) -> bool {
         || trimmed.starts_with("<QrcInfos")
         || trimmed.contains("LyricContent=")
         || (trimmed.contains("<content") && trimmed.contains("<![CDATA["))
+}
+
+fn singing_annotations_request(song_id: u64) -> Value {
+    json!({
+        "comm": {
+            "ct": "19",
+            "cv": "1859",
+            "uin": "0"
+        },
+        "req": {
+            "module": "music.musichallSong.PlayLyricInfo",
+            "method": "GetPlayLyricInfo",
+            "param": {
+                "songID": song_id,
+                "type": 0,
+                "cmd": 1,
+                "qrc": 1,
+                "trans": 1,
+                "roma": 1,
+                "crypt": 0,
+                "needSingingAnnotations": true,
+                "singingAnnotationsTs": 0,
+                "needLTLyric": false,
+                "lrc_t": 0,
+                "qrc_t": 0,
+                "trans_t": 0,
+                "roma_t": 0,
+                "lt_lyric_t": 0
+            }
+        }
+    })
 }
 
 fn deserialize_annotation_flag<'de, D>(deserializer: D) -> std::result::Result<bool, D::Error>
@@ -486,6 +505,15 @@ mod tests {
             .mount(&server)
             .await;
 
+        Mock::given(method("POST"))
+            .and(path("/annotations"))
+            .and(header("cookie", "qq=1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "req": { "data": { "singingAnnotationsLyric": "abc" } }
+            })))
+            .mount(&server)
+            .await;
+
         Mock::given(method("GET"))
             .and(path("/qrc"))
             .and(header("cookie", "qq=1"))
@@ -515,6 +543,7 @@ mod tests {
         let results = provider.search("Song Artist").await.unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].artist, "Artist");
+        assert_eq!(results[0].extra["has_singing_annotations"], true);
 
         let fetched = provider.fetch(&results[0]).await.unwrap();
         assert_eq!(fetched.input_format, InputFormat::Lrc);

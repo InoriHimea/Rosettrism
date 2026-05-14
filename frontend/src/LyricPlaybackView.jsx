@@ -31,6 +31,7 @@ export function LyricPlaybackView({ lyric, settings, t }) {
   const visibleBodyLine = visibleLine && !visibleLine.isMeta
     ? visibleLine
     : bodyLines.find((line) => line.startMs >= currentMs) || bodyLines[bodyLines.length - 1];
+  const activeBodyIndex = activeLine && !activeLine.isMeta ? bodyLines.findIndex((line) => line.id === activeLine.id) : -1;
 
   useEffect(() => {
     if (!isPlaying) {
@@ -57,12 +58,12 @@ export function LyricPlaybackView({ lyric, settings, t }) {
     if (!container || !node) {
       return;
     }
-    const target = node.offsetTop - container.clientHeight / 3 + node.clientHeight * (0.35 + lineProgress * 0.3);
+    const target = node.offsetTop - container.clientHeight * 0.48 + node.clientHeight / 2;
     container.scrollTo({
       top: Math.max(0, target),
-      behavior: reducedMotion || isPlaying ? 'auto' : 'smooth',
+      behavior: reducedMotion ? 'auto' : 'smooth',
     });
-  }, [visibleBodyLine?.id, lineProgress, isPlaying, reducedMotion]);
+  }, [visibleBodyLine?.id, reducedMotion]);
 
   function seek(nextMs) {
     setCurrentMs(Math.max(0, Math.min(Number(nextMs), durationMs)));
@@ -116,12 +117,12 @@ export function LyricPlaybackView({ lyric, settings, t }) {
           </div>
         ) : null}
         <div className={`lyric-lines${metaLines.length > 0 ? ' lyric-lines-with-meta' : ''}`} ref={linesRef}>
-          {bodyLines.map((line) => {
+          {bodyLines.map((line, bodyIndex) => {
             const index = lyric.lines.indexOf(line);
             const isActive = index === activeLineIndex;
             return (
               <button
-                className={lineClassName(index, activeLineIndex, line)}
+                className={lineClassName(index, activeLineIndex, line, bodyIndex, activeBodyIndex)}
                 type="button"
                 onClick={() => seek(line.startMs)}
                 ref={(node) => {
@@ -317,9 +318,10 @@ function clampProgress(value) {
   return Math.max(0, Math.min(1, value));
 }
 
-function lineClassName(index, activeLineIndex, line) {
+function lineClassName(index, activeLineIndex, line, bodyIndex, activeBodyIndex) {
   const state = index === activeLineIndex ? 'lyric-line-active' : index < activeLineIndex ? 'lyric-line-past' : 'lyric-line-future';
-  return `lyric-line ${state}${line?.isMeta ? ' lyric-line-meta' : ''}`;
+  const distance = activeBodyIndex < 0 ? 4 : Math.min(4, Math.abs(bodyIndex - activeBodyIndex));
+  return `lyric-line ${state} lyric-line-distance-${distance}${line?.isMeta ? ' lyric-line-meta' : ''}`;
 }
 
 function lyricCountdown(lines, currentMs) {

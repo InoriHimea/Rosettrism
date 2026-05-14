@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Pause, Play, RotateCcw } from 'lucide-react';
 import {
   findActiveLineIndex,
-  findVisibleLineIndex,
   formatPlaybackTime,
   resolveLyricGradient,
 } from './lyricPlayback.js';
@@ -17,21 +16,20 @@ export function LyricPlaybackView({ lyric, settings, t }) {
   const reducedMotion = useMemo(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || false, []);
   const durationMs = Math.max(lyric.durationMs || 0, 1000);
   const activeLineIndex = findActiveLineIndex(lyric.lines, currentMs);
-  const visibleLineIndex = findVisibleLineIndex(lyric.lines, currentMs);
   const activeLine = lyric.lines[activeLineIndex];
-  const visibleLine = lyric.lines[visibleLineIndex];
   const inLine = activeLine && currentMs >= activeLine.startMs && currentMs < activeLine.endMs;
   const inBodyLine = inLine && !activeLine?.isMeta;
   const countdown = lyricCountdown(lyric.lines, currentMs);
-  const stripText = inBodyLine ? activeLine?.text : countdown.text;
   const annotationTypes = [...new Map(lyric.annotations.map((annotation) => [annotation.type, annotation])).values()];
-  const lineProgress = inLine && !activeLine?.isMeta ? lyricLineProgress(activeLine, currentMs) : 0;
   const metaLines = lyric.lines.filter((line) => line.isMeta);
   const bodyLines = lyric.lines.filter((line) => !line.isMeta);
-  const visibleBodyLine = visibleLine && !visibleLine.isMeta
-    ? visibleLine
-    : bodyLines.find((line) => line.startMs >= currentMs) || bodyLines[bodyLines.length - 1];
-  const activeBodyIndex = activeLine && !activeLine.isMeta ? bodyLines.findIndex((line) => line.id === activeLine.id) : -1;
+  const activeBodyIndex = inBodyLine ? bodyLines.findIndex((line) => line.id === activeLine.id) : -1;
+  const nextBodyLine = bodyLines.find((line) => line.startMs > currentMs);
+  const nextBodyIndex = nextBodyLine ? bodyLines.findIndex((line) => line.id === nextBodyLine.id) : -1;
+  const visibleBodyLine = inBodyLine ? activeLine : nextBodyLine || bodyLines[bodyLines.length - 1];
+  const showCountdownRow = Boolean(!inBodyLine && nextBodyLine && countdown.text);
+  const focusBodyIndex = activeBodyIndex >= 0 ? activeBodyIndex : nextBodyIndex >= 0 ? nextBodyIndex : bodyLines.length - 1;
+  const scrollTargetId = showCountdownRow && nextBodyLine ? `countdown-${nextBodyLine.id}` : visibleBodyLine?.id;
 
   useEffect(() => {
     if (!isPlaying) {
@@ -54,7 +52,7 @@ export function LyricPlaybackView({ lyric, settings, t }) {
 
   useEffect(() => {
     const container = linesRef.current;
-    const node = visibleBodyLine ? lineRefs.current.get(visibleBodyLine.id) : null;
+    const node = scrollTargetId ? lineRefs.current.get(scrollTargetId) : null;
     if (!container || !node) {
       return;
     }
@@ -63,7 +61,7 @@ export function LyricPlaybackView({ lyric, settings, t }) {
       top: Math.max(0, target),
       behavior: reducedMotion ? 'auto' : 'smooth',
     });
-  }, [visibleBodyLine?.id, reducedMotion]);
+  }, [scrollTargetId, reducedMotion]);
 
   function seek(nextMs) {
     setCurrentMs(Math.max(0, Math.min(Number(nextMs), durationMs)));
@@ -86,6 +84,13 @@ export function LyricPlaybackView({ lyric, settings, t }) {
           <span>{t.playback}</span>
           <h4>{lyric.title || t.preview}</h4>
           <p>{[lyric.artist, lyric.source].filter(Boolean).join(' / ')}</p>
+          {metaLines.length > 0 ? (
+            <div className="lyric-credit-list">
+              {metaLines.map((line) => (
+                <span className="lyric-credit-row" key={line.id}>{line.text}</span>
+              ))}
+            </div>
+          ) : null}
         </div>
         <span className={`lyric-playback-status ${lyric.annotations.length ? 'status-fresh' : ''}`}>
           {lyric.annotations.length ? t.annotationsAvailable : t.annotationsUnavailable}
@@ -103,41 +108,45 @@ export function LyricPlaybackView({ lyric, settings, t }) {
         </div>
       ) : null}
 
-      <div className={`lyric-current-strip${countdown.flashing ? ' lyric-dots-flashing' : ''}`} aria-live="polite">
-        {stripText || '•••'}
-      </div>
-
       <div className="lyric-stage lyric-stage-qq">
-        {metaLines.length > 0 ? (
-          <div className="lyric-meta-panel">
-            {metaLines.map((line) => (
-              <div className="lyric-meta-row" key={line.id}>{line.text}</div>
-            ))}
-            <div className="lyric-header-separator" aria-hidden="true">•••</div>
-          </div>
-        ) : null}
-        <div className={`lyric-lines${metaLines.length > 0 ? ' lyric-lines-with-meta' : ''}`} ref={linesRef}>
+        <div className="lyric-lines" ref={linesRef} aria-live="polite">
           {bodyLines.map((line, bodyIndex) => {
             const index = lyric.lines.indexOf(line);
             const isActive = index === activeLineIndex;
+            const countdownBeforeLine = showCountdownRow && nextBodyLine?.id === line.id;
             return (
-              <button
-                className={lineClassName(index, activeLineIndex, line, bodyIndex, activeBodyIndex)}
-                type="button"
-                onClick={() => seek(line.startMs)}
-                ref={(node) => {
-                  if (node) {
-                    lineRefs.current.set(line.id, node);
-                  } else {
-                    lineRefs.current.delete(line.id);
-                  }
-                }}
-                key={line.id}
-              >
-                {isActive && !inLine ? <span className={`lyric-gap-dots${countdown.flashing ? ' lyric-dots-flashing' : ''}`}>{countdown.text || '•••'}</span> : null}
-                <LineText line={line} currentMs={currentMs} active={isActive && inLine} t={t} />
-                {line.reading || line.romanized ? <small>{line.reading || line.romanized}</small> : null}
-              </button>
+              <React.Fragment key={line.id}>
+                {countdownBeforeLine ? (
+                  <div
+                    className={`lyric-line lyric-line-countdown lyric-line-distance-0${countdown.flashing ? ' lyric-dots-flashing' : ''}`}
+                    ref={(node) => {
+                      const countdownId = `countdown-${line.id}`;
+                      if (node) {
+                        lineRefs.current.set(countdownId, node);
+                      } else {
+                        lineRefs.current.delete(countdownId);
+                      }
+                    }}
+                  >
+                    <span className="lyric-gap-dots">{countdown.text || '•••'}</span>
+                  </div>
+                ) : null}
+                <button
+                  className={lineClassName(line, currentMs, isActive && inLine, bodyIndex, focusBodyIndex)}
+                  type="button"
+                  onClick={() => seek(line.startMs)}
+                  ref={(node) => {
+                    if (node) {
+                      lineRefs.current.set(line.id, node);
+                    } else {
+                      lineRefs.current.delete(line.id);
+                    }
+                  }}
+                >
+                  <LineText line={line} currentMs={currentMs} active={isActive && inLine} t={t} />
+                  {line.reading || line.romanized ? <small>{line.reading || line.romanized}</small> : null}
+                </button>
+              </React.Fragment>
             );
           })}
         </div>
@@ -318,9 +327,9 @@ function clampProgress(value) {
   return Math.max(0, Math.min(1, value));
 }
 
-function lineClassName(index, activeLineIndex, line, bodyIndex, activeBodyIndex) {
-  const state = index === activeLineIndex ? 'lyric-line-active' : index < activeLineIndex ? 'lyric-line-past' : 'lyric-line-future';
-  const distance = activeBodyIndex < 0 ? 4 : Math.min(4, Math.abs(bodyIndex - activeBodyIndex));
+function lineClassName(line, currentMs, active, bodyIndex, focusBodyIndex) {
+  const state = active ? 'lyric-line-active' : line.endMs <= currentMs ? 'lyric-line-past' : 'lyric-line-future';
+  const distance = focusBodyIndex < 0 ? 4 : Math.min(4, Math.abs(bodyIndex - focusBodyIndex));
   return `lyric-line ${state} lyric-line-distance-${distance}${line?.isMeta ? ' lyric-line-meta' : ''}`;
 }
 

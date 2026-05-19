@@ -128,6 +128,13 @@ const dictionaries = {
     rawJson: '原始 JSON',
     lyricPreviewUnavailable: '获取 JSON 后可预览同步歌词。',
     lyricColor: '歌词颜色',
+    lyricRenderMode: '歌词显示模式',
+    lyricRenderVertical: '竖向滚动',
+    lyricRenderKaraoke: '交替双行卡拉 OK',
+    lyricStageBackground: '歌词舞台背景',
+    lyricTranslationOff: '原文',
+    lyricTranslationOnly: '译文',
+    lyricTranslationBilingual: '双语',
     lyricColorMode: '颜色模式',
     lyricColorPreset: '颜色预设',
     solidColor: '纯色',
@@ -260,6 +267,13 @@ const dictionaries = {
     rawJson: 'Raw JSON',
     lyricPreviewUnavailable: 'Fetch JSON to preview synced lyrics.',
     lyricColor: 'Lyric color',
+    lyricRenderMode: 'Lyric display mode',
+    lyricRenderVertical: 'Vertical scroll',
+    lyricRenderKaraoke: 'Alternating two-line karaoke',
+    lyricStageBackground: 'Lyric stage background',
+    lyricTranslationOff: 'Original',
+    lyricTranslationOnly: 'Translation',
+    lyricTranslationBilingual: 'Bilingual',
     lyricColorMode: 'Color mode',
     lyricColorPreset: 'Color preset',
     solidColor: 'Solid color',
@@ -1119,7 +1133,10 @@ function ErrorMessage({ t, error }) {
 }
 
 function ResultDialog({ t, entry, detail, detailData, busy, lyricSettings, close, fetchSelectedResult }) {
-  const lyricPlayback = useMemo(() => normalizeLyricPayload(detailData), [detailData]);
+  const lyricPlayback = useMemo(
+    () => normalizeLyricPayload(detailData ? { ...detailData, selectedEntry: entry } : detailData),
+    [detailData, entry],
+  );
 
   useEffect(() => {
     if (!entry) {
@@ -1494,6 +1511,7 @@ function SettingsView({ t, language, setLanguage, lyricSettings, setLyricSetting
   const previewStyle = {
     '--lyric-solid-color': lyricSettings.solidColor,
     '--lyric-gradient': resolveLyricGradient(lyricSettings.colorPreset),
+    '--lyric-stage-background': lyricSettings.stageBackgroundColor || defaultLyricSettings.stageBackgroundColor,
   };
 
   return (
@@ -1550,6 +1568,24 @@ function SettingsView({ t, language, setLanguage, lyricSettings, setLyricSetting
         </div>
         <div className="settings-group">
           <strong>{t.lyricColor}</strong>
+          <label className="field-label">
+            {t.lyricRenderMode}
+            <select
+              value={lyricSettings.renderMode || defaultLyricSettings.renderMode}
+              onChange={(event) => setLyricSettings({ ...lyricSettings, renderMode: event.target.value })}
+            >
+              <option value="vertical">{t.lyricRenderVertical}</option>
+              <option value="karaoke">{t.lyricRenderKaraoke}</option>
+            </select>
+          </label>
+          <label className="field-label settings-color-row">
+            {t.lyricStageBackground}
+            <input
+              type="color"
+              value={lyricSettings.stageBackgroundColor || defaultLyricSettings.stageBackgroundColor}
+              onChange={(event) => setLyricSettings({ ...lyricSettings, stageBackgroundColor: event.target.value })}
+            />
+          </label>
           <label className="field-label">
             {t.lyricColorMode}
             <select

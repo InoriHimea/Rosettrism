@@ -1,11 +1,13 @@
 export const defaultLyricSettings = {
   colorMode: 'gradient',
   colorPreset: 'qq-prism',
-  solidColor: '#f8fbff',
+  solidColor: '#14c9a2',
+  renderMode: 'vertical',
+  stageBackgroundColor: '#fff0a6',
 };
 
 const gradients = {
-  'qq-prism': 'linear-gradient(90deg, #67e8f9, #c084fc 48%, #f9a8d4)',
+  'qq-prism': 'linear-gradient(90deg, #10c8a0, #22c55e 48%, #f1c84b)',
   aurora: 'linear-gradient(90deg, #86efac, #22d3ee 48%, #60a5fa)',
   sunset: 'linear-gradient(90deg, #fbbf24, #fb7185 48%, #a78bfa)',
   classic: 'linear-gradient(90deg, #ffffff, #cffafe 56%, #e0e7ff)',
@@ -73,15 +75,16 @@ export function normalizeUnifiedLyric(unified, context = {}) {
     }
   }
 
-  lines = deriveLineEndTimes(lines);
-  const annotations = normalizeAnnotations(unified.annotations || []);
+  lines = enrichLinesFromTracks(lines, unified.tracks || []);
+  lines = deriveLineEndTimes(markLeadingMetadataLines(lines));
+  const annotations = normalizeAnnotations(collectAnnotationSources(context, unified, null));
   lines = attachAnnotationsToLines(lines, annotations);
   return buildNormalizedLyric(base, lines, annotations);
 }
 
 export function normalizeLyricDocument(document, context = {}) {
-  let lines = deriveLineEndTimes((document.lines || []).map((line, index) => normalizeLine(line, index, 'document')));
-  const annotations = normalizeAnnotations(context.annotations || document.annotations || context.result?.annotations || []);
+  let lines = deriveLineEndTimes(markLeadingMetadataLines((document.lines || []).map((line, index) => normalizeLine(line, index, 'document'))));
+  const annotations = normalizeAnnotations(collectAnnotationSources(context, null, document));
   lines = attachAnnotationsToLines(lines, annotations);
   return buildNormalizedLyric({
     kind: 'document',
@@ -90,6 +93,73 @@ export function normalizeLyricDocument(document, context = {}) {
     artist: document.meta?.artist || context.result?.artist || '',
     warnings: [],
   }, lines, annotations);
+}
+
+function collectAnnotationSources(context = {}, unified = null, document = null) {
+  const selectedEntry = context.selectedEntry || {};
+  const result = context.result || {};
+  const sources = [
+    unified?.annotations,
+    unified?.singing_annotations,
+    unified?.singingAnnotations,
+    unified?.singingAnnotationsLyric,
+    document?.annotations,
+    document?.singing_annotations,
+    document?.singingAnnotations,
+    document?.singingAnnotationsLyric,
+    context.annotations,
+    context.singing_annotations,
+    context.singingAnnotations,
+    context.singingAnnotationsLyric,
+    result.annotations,
+    result.singing_annotations,
+    result.singingAnnotations,
+    result.singingAnnotationsLyric,
+    selectedEntry.annotations,
+    selectedEntry.singing_annotations,
+    selectedEntry.singingAnnotations,
+    selectedEntry.singingAnnotationsLyric,
+    context.extra?.annotations,
+    result.extra?.annotations,
+    result.extra?.singing_annotations,
+    result.extra?.singingAnnotations,
+    result.extra?.singingAnnotationsLyric,
+    selectedEntry.extra?.annotations,
+    selectedEntry.extra?.singing_annotations,
+    selectedEntry.extra?.singingAnnotations,
+    selectedEntry.extra?.singingAnnotationsLyric,
+  ];
+
+  if (Array.isArray(selectedEntry.extra?.aggregate_members)) {
+    for (const member of selectedEntry.extra.aggregate_members) {
+      sources.push(
+        member.annotations,
+        member.singing_annotations,
+        member.singingAnnotations,
+        member.singingAnnotationsLyric,
+        member.extra?.annotations,
+        member.extra?.singing_annotations,
+        member.extra?.singingAnnotations,
+        member.extra?.singingAnnotationsLyric,
+      );
+    }
+  }
+
+  const seen = new Set();
+  return sources
+    .filter(Array.isArray)
+    .flat()
+    .filter((annotation) => {
+      if (!annotation || typeof annotation !== 'object') {
+        return false;
+      }
+      const key = `${annotation.annotation_type || annotation.annotationType || annotation.type || ''}:${annotation.start_ms ?? annotation.startMs ?? ''}:${annotation.duration_ms ?? annotation.durationMs ?? ''}:${annotation.text || ''}`;
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
 }
 
 function buildNormalizedLyric(base, lines, annotations) {
@@ -117,6 +187,41 @@ function pickPrimaryTrack(tracks) {
     || null;
 }
 
+function enrichLinesFromTracks(lines, tracks) {
+  const translationTracks = tracks.filter((track) => track.kind === 'translation' && track.document?.lines?.length);
+  if (!translationTracks.length) {
+    return lines;
+  }
+  return lines.map((line) => {
+    if (line.translation || line.englishTranslation) {
+      return line;
+    }
+    const match = translationTracks
+      .map((track) => nearestTimedLine(track.document.lines || [], line.startMs))
+      .find(Boolean);
+    if (!match?.text) {
+      return line;
+    }
+    return looksEnglish(match.text)
+      ? { ...line, englishTranslation: match.text }
+      : { ...line, translation: match.text };
+  });
+}
+
+function nearestTimedLine(lines, startMs) {
+  let bestLine = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const line of lines) {
+    const lineStart = Number(line.start_ms ?? line.startMs ?? 0);
+    const distance = Math.abs(lineStart - startMs);
+    if (distance < bestDistance) {
+      bestLine = line;
+      bestDistance = distance;
+    }
+  }
+  return bestDistance <= 1800 ? bestLine : null;
+}
+
 function normalizeLine(line, index, trackId) {
   const startMs = Number(line.start_ms ?? line.startMs ?? 0);
   const durationMs = optionalNumber(line.duration_ms ?? line.durationMs);
@@ -128,13 +233,29 @@ function normalizeLine(line, index, trackId) {
     endMs: durationMs ? startMs + durationMs : startMs,
     text,
     isMeta: isMetaLyricLine(text),
-    translation: line.translation || '',
-    reading: line.reading || '',
-    romanized: line.romanized || '',
+    translation: textValue(line.translation ?? line.translation_text ?? line.translationText ?? line.translated ?? line.trans ?? line.extra?.translation),
+    englishTranslation: textValue(line.english_translation ?? line.englishTranslation ?? line.english ?? line.en_translation ?? line.enTranslation ?? line.extra?.englishTranslation ?? line.extra?.english),
+    reading: textValue(line.reading),
+    romanized: textValue(line.romanized),
     ruby: line.ruby || [],
     words: normalizeWords(line.words || [], startMs, index),
     annotations: [],
   };
+}
+
+function markLeadingMetadataLines(lines) {
+  let metadataOpen = true;
+  const hasLeadingCredits = lines.slice(1, 6).some((line) => isMetaLyricLine(line.text));
+  return lines.map((line, index) => {
+    const isLeadingTitle = index === 0 && (hasLeadingCredits || looksLikeLyricTitle(line.text));
+    const isLeadingCredit = metadataOpen && isMetaLyricLine(line.text);
+    const isMeta = metadataOpen && (isLeadingTitle || isLeadingCredit);
+    if (!isMeta) {
+      metadataOpen = false;
+      return { ...line, isMeta: false };
+    }
+    return { ...line, isMeta: true, words: [] };
+  });
 }
 
 function isMetaLyricLine(text) {
@@ -144,6 +265,17 @@ function isMetaLyricLine(text) {
   }
   return /^(作词|作曲|编曲|词|曲|制作人|制作|监制|原唱|翻唱|演唱|歌手|Lyricist|Lyrics|Composer|Music|Arranger|Producer|Vocal)\s*[:：]/i.test(value)
     || /^\[[a-z]{2,}\s*[:：].+\]$/i.test(value);
+}
+
+function looksLikeLyricTitle(text) {
+  const value = String(text || '').trim();
+  if (!value || isMetaLyricLine(value)) {
+    return false;
+  }
+  if (value.length > 64 || /[。！？!?，,、；;]/.test(value)) {
+    return false;
+  }
+  return /[-－—–]/.test(value) || /\s(?:DaveWang|Wang|王杰|歌手|演唱)/i.test(value);
 }
 
 function normalizeWords(words, lineStartMs, lineIndex) {
@@ -206,15 +338,41 @@ export function attachAnnotationsToLines(lines, annotations) {
     if (!line) {
       continue;
     }
+    let matchedWord = false;
     const words = line.words.map((word) => {
-      const timedMatch = annotation.startMs >= word.startMs - 120 && annotation.startMs < Math.max(word.endMs, word.startMs + 1) + 120;
+      const timedMatch = annotation.startMs >= word.startMs - 240 && annotation.startMs <= Math.max(word.endMs, word.startMs + 1) + 240;
+      const overlapMatch = annotation.endMs > word.startMs - 180 && annotation.startMs < Math.max(word.endMs, word.startMs + 1) + 180;
       const textMatch = annotation.text && word.text.includes(annotation.text);
-      return timedMatch || textMatch ? { ...word, annotations: [...word.annotations, annotation] } : word;
+      const matches = timedMatch || overlapMatch || textMatch;
+      if (matches) {
+        matchedWord = true;
+      }
+      return matches ? { ...word, annotations: [...word.annotations, annotation] } : word;
     });
+    if (!matchedWord && words.length > 0) {
+      const nearestIndex = findNearestWordIndex(words, annotation);
+      words[nearestIndex] = { ...words[nearestIndex], annotations: [...words[nearestIndex].annotations, annotation] };
+    }
     nextLines[lineIndex] = { ...line, words, annotations: [...line.annotations, annotation] };
   }
 
   return nextLines;
+}
+
+function findNearestWordIndex(words, annotation) {
+  const midpoint = annotation.startMs + annotation.durationMs / 2;
+  let bestIndex = 0;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (let index = 0; index < words.length; index += 1) {
+    const word = words[index];
+    const center = word.startMs + (word.endMs - word.startMs) / 2;
+    const distance = Math.abs(midpoint - center);
+    if (distance < bestDistance) {
+      bestIndex = index;
+      bestDistance = distance;
+    }
+  }
+  return bestIndex;
 }
 
 function findAnnotationLineIndex(lines, annotation) {
@@ -293,6 +451,21 @@ export function formatPlaybackTime(ms) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = String(totalSeconds % 60).padStart(2, '0');
   return `${minutes}:${seconds}`;
+}
+
+function textValue(value) {
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+  if (value && typeof value === 'object') {
+    return textValue(value.text ?? value.value ?? value.content);
+  }
+  return '';
+}
+
+function looksEnglish(value) {
+  const text = String(value || '').trim();
+  return /[A-Za-z]/.test(text) && !/[一-鿿]/.test(text);
 }
 
 function optionalNumber(value) {

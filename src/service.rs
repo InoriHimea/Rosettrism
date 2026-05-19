@@ -969,6 +969,16 @@ fn build_unified(
         enrichment_score: enrichment_score.min(1.0) * 100.0,
     };
 
+    let annotations = if base.annotations.is_empty() {
+        candidates
+            .iter()
+            .find(|candidate| !candidate.annotations.is_empty())
+            .map(|candidate| candidate.annotations.clone())
+            .unwrap_or_default()
+    } else {
+        base.annotations.clone()
+    };
+
     UnifiedLyric {
         meta: merged_meta(base),
         mode: merge_mode.into(),
@@ -978,7 +988,7 @@ fn build_unified(
         score,
         cache_refs,
         warnings: Vec::new(),
-        annotations: base.annotations.clone(),
+        annotations,
     }
 }
 

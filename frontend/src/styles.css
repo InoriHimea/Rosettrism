@@ -1113,13 +1113,13 @@ nav button.nav-active::before {
 .lyric-annotation-layer {
   color: rgba(72, 68, 58, 0.72);
   display: flex;
-  gap: 5px;
+  gap: 0.16em;
   justify-content: center;
   left: 50%;
   line-height: 1;
   pointer-events: none;
   position: absolute;
-  top: -0.9em;
+  top: -0.82em;
   transform: translateX(-50%);
   transition: color 180ms ease, filter 180ms ease, opacity 180ms ease;
   white-space: nowrap;
@@ -1128,19 +1128,19 @@ nav button.nav-active::before {
 
 .lyric-annotation-mark {
   align-items: center;
-  background: color-mix(in srgb, var(--annotation-tint, #10b957) 10%, rgba(255, 255, 255, 0.72));
-  border: 1px solid color-mix(in srgb, var(--annotation-tint, #10b957) 36%, rgba(255, 255, 255, 0.58));
+  background: color-mix(in srgb, var(--annotation-tint, #10b957) 8%, rgba(255, 255, 255, 0.62));
+  border: 1px solid color-mix(in srgb, var(--annotation-tint, #10b957) 28%, rgba(255, 255, 255, 0.52));
   border-radius: 999px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.62), 0 5px 14px rgba(70, 49, 9, 0.1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.52), 0 4px 10px rgba(70, 49, 9, 0.08);
   color: var(--annotation-tint, currentColor);
   display: inline-flex;
-  font-size: 0.25em;
+  font-size: 0.28em;
   font-weight: 950;
   gap: 0.28em;
   justify-content: center;
   letter-spacing: 0.02em;
-  min-height: 1.55em;
-  padding: 0.24em 0.58em;
+  min-height: 1.35em;
+  padding: 0.18em 0.42em;
 }
 
 .lyric-annotation-mark .annotation-glyph {
@@ -1151,6 +1151,16 @@ nav button.nav-active::before {
   overflow: visible;
   stroke: currentColor;
   width: 0.86em;
+}
+
+.lyric-annotation-mark .annotation-glyph-text {
+  align-items: center;
+  display: inline-flex;
+  font-size: 1em;
+  height: 1em;
+  justify-content: center;
+  line-height: 1;
+  width: auto;
 }
 
 .lyric-annotation-text {
@@ -1175,7 +1185,7 @@ nav button.nav-active::before {
 
 .lyric-line-active .lyric-annotation-layer {
   color: var(--annotation-tint, #10b957);
-  top: -0.68em;
+  top: -0.62em;
 }
 
 .lyric-line-past .lyric-annotation-layer,
@@ -1194,6 +1204,38 @@ nav button.nav-active::before {
 .lyric-line-past .lyric-annotation-text,
 .lyric-line-future .lyric-annotation-text {
   color: rgba(82, 78, 68, 0.58);
+}
+
+.lyric-annotation-mark.annotation-stress {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+}
+
+.lyric-annotation-mark.annotation-stress .annotation-glyph-text {
+  font-size: 1.35em;
+}
+
+.lyric-annotation-layer:has(.annotation-stress) {
+  top: auto;
+  bottom: -0.76em;
+}
+
+.lyric-line-active .lyric-annotation-layer:has(.annotation-stress) {
+  bottom: -0.58em;
+  top: auto;
+}
+
+.lyric-annotation-mark.annotation-breath {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  padding: 0 0.12em;
+}
+
+.lyric-word-annotated:has(.annotation-breath) {
+  margin-left: 0.26em;
 }
 
 .lyric-line-active .lyric-word-annotated {
@@ -1290,18 +1332,18 @@ nav button.nav-active::before {
   color: rgba(38, 31, 12, 0.58);
   display: grid;
   gap: 8px;
-  justify-items: center;
+  justify-items: start;
   padding: 10px 0 2px;
   position: relative;
-  text-align: center;
+  text-align: left;
   z-index: 1;
 }
 
 .lyric-stage-credit-list {
   display: grid;
   gap: 8px;
-  justify-items: center;
-  max-width: min(100%, 520px);
+  justify-items: start;
+  max-width: min(100%, 620px);
 }
 
 .lyric-stage-credit-list span {

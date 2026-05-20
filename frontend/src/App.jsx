@@ -505,15 +505,16 @@ function App() {
   }
 
   function openResultDetail(entry) {
+    const sameResult = sameSearchResult(entry, selectedResult) || sameSearchResult(entry, resultDetailData?.result);
     setSelectedResult(entry);
-    setResultDetail('');
-    setResultDetailData(null);
+    if (!sameResult) {
+      setResultDetail('');
+      setResultDetailData(null);
+    }
   }
 
   function closeResultDetail() {
     setSelectedResult(null);
-    setResultDetail('');
-    setResultDetailData(null);
     setResultDetailBusy(false);
   }
 
@@ -1134,7 +1135,7 @@ function ErrorMessage({ t, error }) {
 
 function ResultDialog({ t, entry, detail, detailData, busy, lyricSettings, close, fetchSelectedResult }) {
   const lyricPlayback = useMemo(
-    () => normalizeLyricPayload(detailData ? { ...detailData, selectedEntry: entry } : detailData),
+    () => normalizeLyricPayload({ ...(detailData || {}), selectedEntry: entry }),
     [detailData, entry],
   );
 
@@ -1431,6 +1432,10 @@ function displaySource(entry) {
 
 function isAggregateResult(entry) {
   return entry?.extra?.result_kind === 'aggregate';
+}
+
+function sameSearchResult(a, b) {
+  return Boolean(a && b && a.id === b.id && displaySource(a) === displaySource(b));
 }
 
 function isQqResult(entry) {

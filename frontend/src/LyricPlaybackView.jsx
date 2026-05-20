@@ -41,7 +41,7 @@ export function LyricPlaybackView({ lyric, settings, t }) {
   const currentStripText = activeFlowLine?.text || (showCountdown ? countdown.text : visibleBodyLine?.text);
   const focusFlowIndex = activeFlowIndex >= 0 ? activeFlowIndex : nextFlowIndex >= 0 ? nextFlowIndex : flowLines.length - 1;
   const scrollTargetId = renderMode === 'vertical'
-    ? (showCountdown && nextBodyLine ? `countdown-${nextBodyLine.id}` : visibleFlowLine?.id)
+    ? (activeFlowLine ? activeFlowLine.id : visibleFlowLine?.id)
     : null;
 
   useEffect(() => {
@@ -112,7 +112,7 @@ export function LyricPlaybackView({ lyric, settings, t }) {
       <div className="lyric-playback-head">
         <div>
           <span>{t.playback}</span>
-          <h4>{lyric.title || t.preview}</h4>
+          <h4>{lyric.displayTitle || lyric.title || t.preview}</h4>
           <p>{[lyric.artist, lyric.source].filter(Boolean).join(' / ')}</p>
         </div>
         <span className={`lyric-playback-status ${lyric.annotations.length ? 'status-fresh' : ''}`}>
@@ -310,7 +310,7 @@ function KaraokeStage({
   return (
     <div className="lyric-karaoke-lines lyric-karaoke-three-line" aria-live="polite">
       <div className="lyric-karaoke-meta-line">
-        {metaSlot ? <span>{metaSlot.text}</span> : null}
+        {metaSlot ? <span>{metaSlot.text}</span> : lyric.displayTitle ? <span>{lyric.displayTitle}</span> : null}
       </div>
       <div className="lyric-karaoke-lane lyric-karaoke-lane-left lyric-karaoke-lane-current">
         {showCountdown ? <CountdownRow countdown={countdown} /> : null}
@@ -398,7 +398,7 @@ function LineText({ line, currentMs, active, translationMode, t }) {
     const lineAnnotations = line.annotations || [];
     return (
       <span className="lyric-line-text lyric-progress-text" style={lyricProgressStyle(progress)}>
-        {lineAnnotations.length > 0 ? <AnnotationLayer annotations={lineAnnotations} t={t} /> : null}
+        {lineAnnotations.length > 0 ? <AnnotationLayer annotations={lineAnnotations} active={active} t={t} /> : null}
         <span className="lyric-progress-base">{text}</span>
         <span className="lyric-progress-fill" aria-hidden="true">{text}</span>
       </span>
@@ -417,7 +417,7 @@ function LineText({ line, currentMs, active, translationMode, t }) {
             style={lyricProgressStyle(progress)}
             key={word.id}
           >
-            {annotations.length > 0 ? <AnnotationLayer annotations={annotations} t={t} /> : null}
+            {annotations.length > 0 ? <AnnotationLayer annotations={annotations} active={active} t={t} /> : null}
             <span className="lyric-progress-base">{word.text}</span>
             <span className="lyric-progress-fill" aria-hidden="true">{word.text}</span>
           </span>
@@ -425,7 +425,7 @@ function LineText({ line, currentMs, active, translationMode, t }) {
       })}
       {orphanAnnotations.length > 0 ? (
         <span className="lyric-word lyric-word-orphan" aria-hidden="true">
-          <AnnotationLayer annotations={orphanAnnotations} t={t} />
+          <AnnotationLayer annotations={orphanAnnotations} active={active} t={t} />
           <span className="lyric-progress-base">&nbsp;</span>
         </span>
       ) : null}
@@ -459,7 +459,7 @@ function translationModeLabel(mode, t) {
   return t.lyricTranslationOff || '原文';
 }
 
-function AnnotationLayer({ annotations, t }) {
+function AnnotationLayer({ annotations, active, t }) {
   const unique = [...new Map(annotations.map((annotation) => [annotation.type, annotation])).values()];
   return (
     <span className="lyric-annotation-layer" aria-hidden="true">
@@ -472,7 +472,7 @@ function AnnotationLayer({ annotations, t }) {
             title={annotation.text ? `${label}: ${annotation.text}` : label}
           >
             <AnnotationGlyph type={annotation.type} />
-            <span className="lyric-annotation-text">{annotation.text || label}</span>
+            {active ? <span className="lyric-annotation-text">{annotation.text || label}</span> : null}
           </span>
         );
       })}
@@ -483,17 +483,9 @@ function AnnotationLayer({ annotations, t }) {
 function AnnotationGlyph({ type }) {
   switch (type) {
     case 'stress':
-      return (
-        <svg className="annotation-glyph" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
-          <circle cx="6" cy="6" r="3" />
-        </svg>
-      );
+      return <span className="annotation-glyph annotation-glyph-text">·</span>;
     case 'breath':
-      return (
-        <svg className="annotation-glyph" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
-          <path d="M7 2 C 7 2, 4 3.2, 4 5.4 C 4 6.8, 5.2 7.6, 6.2 7.6 L 5.2 10.6" fill="none" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      );
+      return <span className="annotation-glyph annotation-glyph-text">V</span>;
     case 'long_tone':
       return (
         <svg className="annotation-glyph" viewBox="0 0 14 12" aria-hidden="true" focusable="false">

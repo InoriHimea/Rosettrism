@@ -45,11 +45,26 @@ export function normalizeLyricPayload(payload) {
     return normalizeLyricDocument(document, payload);
   }
 
-  return { playable: false, lines: [], annotations: [], warnings: [] };
+  return normalizeEntryPreview(payload.selectedEntry || payload.result || payload);
 }
 
 function isUnifiedLyric(value) {
   return Boolean(value && typeof value === 'object' && (Array.isArray(value.inline_lines) || Array.isArray(value.tracks)));
+}
+
+function normalizeEntryPreview(entry) {
+  if (!entry || typeof entry !== 'object') {
+    return { playable: false, lines: [], annotations: [], warnings: [] };
+  }
+  const unified = entry.unified || entry.extra?.unified || (isUnifiedLyric(entry.document) ? entry.document : null);
+  if (unified) {
+    return normalizeUnifiedLyric(unified, { selectedEntry: entry, result: entry });
+  }
+  const document = entry.document || entry.extra?.document;
+  if (document?.lines) {
+    return normalizeLyricDocument(document, { selectedEntry: entry, result: entry });
+  }
+  return { playable: false, lines: [], annotations: normalizeAnnotations(collectAnnotationSources({ selectedEntry: entry, result: entry })), warnings: [] };
 }
 
 export function normalizeUnifiedLyric(unified, context = {}) {
@@ -57,8 +72,9 @@ export function normalizeUnifiedLyric(unified, context = {}) {
     kind: 'unified',
     source: context.source || 'aggregate',
     mode: unified.mode,
-    title: unified.meta?.title || context.result?.title || '',
-    artist: unified.meta?.artist || context.result?.artist || '',
+    title: unified.meta?.title || context.result?.title || context.selectedEntry?.title || '',
+    artist: unified.meta?.artist || context.result?.artist || context.selectedEntry?.artist || '',
+    artistAlias: pickArtistAlias(unified.meta, context.result, context.selectedEntry),
     warnings: unified.warnings || [],
   };
 
@@ -72,6 +88,7 @@ export function normalizeUnifiedLyric(unified, context = {}) {
       base.source = track.source || base.source;
       base.title = track.document.meta?.title || base.title;
       base.artist = track.document.meta?.artist || base.artist;
+      base.artistAlias = pickArtistAlias(track.document.meta, unified.meta, context.result, context.selectedEntry);
     }
   }
 
@@ -90,7 +107,8 @@ export function normalizeLyricDocument(document, context = {}) {
     kind: 'document',
     source: context.source || document.meta?.source || context.result?.source || '',
     title: document.meta?.title || context.result?.title || '',
-    artist: document.meta?.artist || context.result?.artist || '',
+    artist: document.meta?.artist || context.result?.artist || context.selectedEntry?.artist || '',
+    artistAlias: pickArtistAlias(document.meta, context.result, context.selectedEntry),
     warnings: [],
   }, lines, annotations);
 }
@@ -160,6 +178,7 @@ function isAnnotationLike(value, forced = false) {
 }
 
 function buildNormalizedLyric(base, lines, annotations) {
+  const displayTitle = formatDisplayTitle(base.title, base.artist, base.artistAlias);
   const playableLines = lines.filter((line) => Number.isFinite(line.startMs));
   const lastLine = playableLines[playableLines.length - 1];
   const durationMs = Math.max(
@@ -171,10 +190,96 @@ function buildNormalizedLyric(base, lines, annotations) {
   return {
     ...base,
     playable: playableLines.length > 0,
+    displayTitle,
     durationMs,
-    lines: playableLines,
+    lines: ensureLeadingTitleLine(playableLines, displayTitle),
     annotations,
   };
+}
+
+function formatDisplayTitle(title, artist, artistAlias) {
+  const cleanTitle = textValue(title);
+  const cleanArtist = textValue(artist);
+  const cleanAlias = textValue(artistAlias);
+  if (!cleanTitle) {
+    return '';
+  }
+  if (!cleanArtist) {
+    return cleanTitle;
+  }
+  return `${cleanTitle} - ${cleanArtist}${cleanAlias ? `（${cleanAlias}）` : ''}`;
+}
+
+function ensureLeadingTitleLine(lines, displayTitle) {
+  if (!displayTitle || !lines.length) {
+    return lines;
+  }
+  const firstLine = lines[0];
+  if (firstLine.isMeta) {
+    return firstLine.text === displayTitle ? lines : [{ ...firstLine, text: displayTitle }, ...lines.slice(1)];
+  }
+  return [
+    {
+      id: `meta-title-${firstLine.startMs}`,
+      startMs: 0,
+      durationMs: 0,
+      endMs: Math.max(firstLine.startMs, 1),
+      text: displayTitle,
+      isMeta: true,
+      translation: '',
+      englishTranslation: '',
+      reading: '',
+      romanized: '',
+      ruby: [],
+      words: [],
+      annotations: [],
+    },
+    ...lines,
+  ];
+}
+
+function pickArtistAlias(...sources) {
+  for (const source of sources) {
+    const alias = firstText(
+      source?.artist_alias,
+      source?.artistAlias,
+      source?.artist_en,
+      source?.artistEn,
+      source?.english_artist,
+      source?.englishArtist,
+      source?.singer_alias,
+      source?.singerAlias,
+      source?.extra?.artist_alias,
+      source?.extra?.artistAlias,
+      source?.extra?.artist_en,
+      source?.extra?.artistEn,
+      source?.extra?.english_artist,
+      source?.extra?.englishArtist,
+      source?.extra?.singer_alias,
+      source?.extra?.singerAlias,
+    );
+    if (alias) {
+      return alias;
+    }
+  }
+  return '';
+}
+
+function firstText(...values) {
+  for (const value of values) {
+    if (Array.isArray(value)) {
+      const text = value.map((item) => textValue(item)).find(Boolean);
+      if (text) {
+        return text;
+      }
+      continue;
+    }
+    const text = textValue(value);
+    if (text) {
+      return text;
+    }
+  }
+  return '';
 }
 
 function pickPrimaryTrack(tracks) {
@@ -398,8 +503,8 @@ function normalizeAnnotationType(type) {
 
 export function annotationMeta(type) {
   const map = {
-    stress: { symbol: '`', labelKey: 'annotationStress', className: 'annotation-stress' },
-    breath: { symbol: '^', labelKey: 'annotationBreath', className: 'annotation-breath' },
+    stress: { symbol: '·', labelKey: 'annotationStress', className: 'annotation-stress' },
+    breath: { symbol: 'V', labelKey: 'annotationBreath', className: 'annotation-breath' },
     long_tone: { symbol: '_', labelKey: 'annotationLongTone', className: 'annotation-long-tone' },
     portamento_up: { symbol: '↑', labelKey: 'annotationPortamentoUp', className: 'annotation-portamento-up' },
     portamento_down: { symbol: '↓', labelKey: 'annotationPortamentoDown', className: 'annotation-portamento-down' },

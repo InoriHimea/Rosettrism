@@ -98,68 +98,65 @@ export function normalizeLyricDocument(document, context = {}) {
 function collectAnnotationSources(context = {}, unified = null, document = null) {
   const selectedEntry = context.selectedEntry || {};
   const result = context.result || {};
-  const sources = [
-    unified?.annotations,
-    unified?.singing_annotations,
-    unified?.singingAnnotations,
-    unified?.singingAnnotationsLyric,
-    document?.annotations,
-    document?.singing_annotations,
-    document?.singingAnnotations,
-    document?.singingAnnotationsLyric,
-    context.annotations,
-    context.singing_annotations,
-    context.singingAnnotations,
-    context.singingAnnotationsLyric,
-    result.annotations,
-    result.singing_annotations,
-    result.singingAnnotations,
-    result.singingAnnotationsLyric,
-    selectedEntry.annotations,
-    selectedEntry.singing_annotations,
-    selectedEntry.singingAnnotations,
-    selectedEntry.singingAnnotationsLyric,
-    context.extra?.annotations,
-    result.extra?.annotations,
-    result.extra?.singing_annotations,
-    result.extra?.singingAnnotations,
-    result.extra?.singingAnnotationsLyric,
-    selectedEntry.extra?.annotations,
-    selectedEntry.extra?.singing_annotations,
-    selectedEntry.extra?.singingAnnotations,
-    selectedEntry.extra?.singingAnnotationsLyric,
-  ];
+  const roots = [context, result, selectedEntry, unified, document, context.extra, result.extra, selectedEntry.extra];
+  const directSources = [];
+
+  for (const root of roots) {
+    collectAnnotationArrays(root, directSources);
+  }
 
   if (Array.isArray(selectedEntry.extra?.aggregate_members)) {
     for (const member of selectedEntry.extra.aggregate_members) {
-      sources.push(
-        member.annotations,
-        member.singing_annotations,
-        member.singingAnnotations,
-        member.singingAnnotationsLyric,
-        member.extra?.annotations,
-        member.extra?.singing_annotations,
-        member.extra?.singingAnnotations,
-        member.extra?.singingAnnotationsLyric,
-      );
+      collectAnnotationArrays(member, directSources);
+      collectAnnotationArrays(member.extra, directSources);
     }
   }
 
   const seen = new Set();
-  return sources
-    .filter(Array.isArray)
+  return directSources
     .flat()
     .filter((annotation) => {
       if (!annotation || typeof annotation !== 'object') {
         return false;
       }
-      const key = `${annotation.annotation_type || annotation.annotationType || annotation.type || ''}:${annotation.start_ms ?? annotation.startMs ?? ''}:${annotation.duration_ms ?? annotation.durationMs ?? ''}:${annotation.text || ''}`;
+      const key = `${annotation.annotation_type || annotation.annotationType || annotation.type || annotation.kind || ''}:${annotation.start_ms ?? annotation.startMs ?? annotation.time_ms ?? annotation.timeMs ?? ''}:${annotation.duration_ms ?? annotation.durationMs ?? annotation.duration ?? ''}:${annotation.text || annotation.label || ''}`;
       if (seen.has(key)) {
         return false;
       }
       seen.add(key);
       return true;
     });
+}
+
+function collectAnnotationArrays(value, sources, depth = 0, seen = new Set(), forced = false) {
+  if (!value || typeof value !== 'object' || depth > 6 || seen.has(value)) {
+    return;
+  }
+  seen.add(value);
+  if (Array.isArray(value)) {
+    const annotations = value.filter((item) => isAnnotationLike(item, forced));
+    if (annotations.length) {
+      sources.push(annotations);
+    }
+    for (const item of value) {
+      collectAnnotationArrays(item, sources, depth + 1, seen, forced);
+    }
+    return;
+  }
+  for (const [key, child] of Object.entries(value)) {
+    const annotationKey = /annotation|singing|assist|vocal/i.test(key);
+    collectAnnotationArrays(child, sources, depth + 1, seen, forced || annotationKey);
+  }
+}
+
+function isAnnotationLike(value, forced = false) {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const hasTime = Number.isFinite(Number(value.start_ms ?? value.startMs ?? value.time_ms ?? value.timeMs));
+  const hasAnnotationType = Boolean(value.annotation_type || value.annotationType || value.annotation_kind || value.annotationKind);
+  const explicitAnnotation = Object.keys(value).some((key) => /annotation|singing|assist|vocal/i.test(key));
+  return hasTime && (forced || hasAnnotationType || explicitAnnotation);
 }
 
 function buildNormalizedLyric(base, lines, annotations) {
@@ -308,10 +305,10 @@ export function deriveLineEndTimes(lines) {
 export function normalizeAnnotations(annotations) {
   return annotations
     .map((annotation, index) => {
-      const type = normalizeAnnotationType(annotation.annotation_type || annotation.annotationType || annotation.type);
+      const type = normalizeAnnotationType(annotation.annotation_type || annotation.annotationType || annotation.annotation_kind || annotation.annotationKind || annotation.kind || annotation.type);
       const meta = annotationMeta(type);
-      const startMs = Number(annotation.start_ms ?? annotation.startMs ?? 0);
-      const durationMs = optionalNumber(annotation.duration_ms ?? annotation.durationMs) || 800;
+      const startMs = Number(annotation.start_ms ?? annotation.startMs ?? annotation.time_ms ?? annotation.timeMs ?? 0);
+      const durationMs = optionalNumber(annotation.duration_ms ?? annotation.durationMs ?? annotation.duration) || 800;
       return {
         id: `annotation-${index}-${startMs}`,
         type,
@@ -340,8 +337,8 @@ export function attachAnnotationsToLines(lines, annotations) {
     }
     let matchedWord = false;
     const words = line.words.map((word) => {
-      const timedMatch = annotation.startMs >= word.startMs - 240 && annotation.startMs <= Math.max(word.endMs, word.startMs + 1) + 240;
-      const overlapMatch = annotation.endMs > word.startMs - 180 && annotation.startMs < Math.max(word.endMs, word.startMs + 1) + 180;
+      const timedMatch = annotation.startMs >= word.startMs - 420 && annotation.startMs <= Math.max(word.endMs, word.startMs + 1) + 420;
+      const overlapMatch = annotation.endMs > word.startMs - 320 && annotation.startMs < Math.max(word.endMs, word.startMs + 1) + 320;
       const textMatch = annotation.text && word.text.includes(annotation.text);
       const matches = timedMatch || overlapMatch || textMatch;
       if (matches) {
@@ -381,7 +378,7 @@ function findAnnotationLineIndex(lines, annotation) {
   let bestDistance = Number.POSITIVE_INFINITY;
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
-    const contains = annotation.startMs >= line.startMs - 180 && annotation.startMs <= line.endMs + 180;
+    const contains = annotation.startMs >= line.startMs - 600 && annotation.startMs <= line.endMs + 600;
     const center = line.startMs + (line.endMs - line.startMs) / 2;
     const distance = Math.abs(midpoint - center);
     if (contains && distance < bestDistance) {

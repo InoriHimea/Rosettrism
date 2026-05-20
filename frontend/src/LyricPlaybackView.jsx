@@ -21,20 +21,27 @@ export function LyricPlaybackView({ lyric, settings, t }) {
   const activeLine = lyric.lines[activeLineIndex];
   const inLine = Boolean(activeLine && currentMs >= activeLine.startMs && currentMs < activeLine.endMs);
   const annotationTypes = [...new Map(lyric.annotations.map((annotation) => [annotation.type, annotation])).values()];
-  const metaLines = lyric.lines.filter((line) => line.isMeta);
+  const timedMetaLines = lyric.lines.filter((line) => line.isMeta && hasUsableLineTime(line));
+  const staticMetaLines = lyric.lines.filter((line) => line.isMeta && !hasUsableLineTime(line));
   const bodyLines = lyric.lines.filter((line) => !line.isMeta);
+  const flowLines = [...timedMetaLines, ...bodyLines].sort((a, b) => a.startMs - b.startMs);
   const hasTranslations = bodyLines.some((line) => hasLineTranslation(line));
-  const activeBodyIndex = inLine && !activeLine?.isMeta ? bodyLines.findIndex((line) => line.id === activeLine.id) : -1;
+  const activeFlowIndex = inLine ? flowLines.findIndex((line) => line.id === activeLine.id) : -1;
+  const activeFlowLine = activeFlowIndex >= 0 ? flowLines[activeFlowIndex] : null;
+  const activeBodyIndex = activeFlowLine && !activeFlowLine.isMeta ? bodyLines.findIndex((line) => line.id === activeFlowLine.id) : -1;
   const activeBodyLine = activeBodyIndex >= 0 ? bodyLines[activeBodyIndex] : null;
   const nextBodyIndex = bodyLines.findIndex((line) => line.startMs > currentMs);
   const nextBodyLine = nextBodyIndex >= 0 ? bodyLines[nextBodyIndex] : null;
+  const nextFlowIndex = flowLines.findIndex((line) => line.startMs > currentMs);
+  const nextFlowLine = nextFlowIndex >= 0 ? flowLines[nextFlowIndex] : null;
   const countdown = lyricCountdown(bodyLines, currentMs);
-  const showCountdown = shouldShowCountdown(bodyLines, currentMs, activeBodyLine, nextBodyIndex);
+  const showCountdown = shouldShowCountdown(bodyLines, currentMs, activeFlowLine, nextBodyIndex);
+  const visibleFlowLine = activeFlowLine || nextFlowLine || flowLines[flowLines.length - 1];
   const visibleBodyLine = activeBodyLine || nextBodyLine || bodyLines[bodyLines.length - 1];
-  const currentStripText = activeBodyLine?.text || (showCountdown ? countdown.text : visibleBodyLine?.text);
-  const focusBodyIndex = activeBodyIndex >= 0 ? activeBodyIndex : nextBodyIndex >= 0 ? nextBodyIndex : bodyLines.length - 1;
+  const currentStripText = activeFlowLine?.text || (showCountdown ? countdown.text : visibleBodyLine?.text);
+  const focusFlowIndex = activeFlowIndex >= 0 ? activeFlowIndex : nextFlowIndex >= 0 ? nextFlowIndex : flowLines.length - 1;
   const scrollTargetId = renderMode === 'vertical'
-    ? (showCountdown && nextBodyLine ? `countdown-${nextBodyLine.id}` : visibleBodyLine?.id)
+    ? (showCountdown && nextBodyLine ? `countdown-${nextBodyLine.id}` : visibleFlowLine?.id)
     : null;
 
   useEffect(() => {
@@ -128,14 +135,18 @@ export function LyricPlaybackView({ lyric, settings, t }) {
         {renderMode === 'karaoke' ? (
           <KaraokeStage
             lyric={lyric}
-            metaLines={metaLines}
+            staticMetaLines={staticMetaLines}
+            flowLines={flowLines}
             bodyLines={bodyLines}
             currentMs={currentMs}
+            activeFlowLine={activeFlowLine}
             activeBodyLine={activeBodyLine}
             activeBodyIndex={activeBodyIndex}
             nextBodyLine={nextBodyLine}
             nextBodyIndex={nextBodyIndex}
-            focusBodyIndex={focusBodyIndex}
+            nextFlowLine={nextFlowLine}
+            nextFlowIndex={nextFlowIndex}
+            focusFlowIndex={focusFlowIndex}
             showCountdown={showCountdown}
             countdown={countdown}
             translationMode={translationMode}
@@ -144,9 +155,9 @@ export function LyricPlaybackView({ lyric, settings, t }) {
           />
         ) : (
           <div className="lyric-lines" ref={linesRef} aria-live="polite">
-            <StageMeta metaLines={metaLines} refCallback={bindLineRef('stage-meta')} />
-            {bodyLines.map((line, bodyIndex) => {
-              const isActive = activeBodyLine?.id === line.id;
+            <StageMeta metaLines={staticMetaLines} refCallback={bindLineRef('stage-meta')} />
+            {flowLines.map((line, flowIndex) => {
+              const isActive = activeFlowLine?.id === line.id;
               const countdownBeforeLine = showCountdown && nextBodyLine?.id === line.id;
               return (
                 <React.Fragment key={line.id}>
@@ -154,13 +165,13 @@ export function LyricPlaybackView({ lyric, settings, t }) {
                     <CountdownRow countdown={countdown} refCallback={bindLineRef(`countdown-${line.id}`)} />
                   ) : null}
                   <button
-                    className={lineClassName(line, currentMs, isActive, bodyIndex, focusBodyIndex)}
+                    className={lineClassName(line, currentMs, isActive, flowIndex, focusFlowIndex)}
                     type="button"
                     onClick={() => seek(line.startMs)}
                     ref={bindLineRef(line.id)}
                   >
                     <LineText line={line} currentMs={currentMs} active={isActive} translationMode={translationMode} t={t} />
-                    <LineSubtext line={line} translationMode={translationMode} />
+                    {!line.isMeta ? <LineSubtext line={line} translationMode={translationMode} /> : null}
                   </button>
                 </React.Fragment>
               );
@@ -240,31 +251,45 @@ function StageMeta({ metaLines, refCallback }) {
 function CountdownRow({ countdown, refCallback }) {
   return (
     <div
-      className={`lyric-line lyric-line-countdown lyric-line-distance-0${countdown.flashing ? ' lyric-dots-flashing' : ''}`}
+      className={`lyric-line lyric-line-countdown lyric-line-distance-0${countdown.flashing ? ' lyric-dots-flashing' : ''}${countdown.exiting ? ' lyric-dots-exiting' : ''}`}
       ref={refCallback || null}
     >
-      <span className="lyric-gap-dots">{countdown.text || '•••'}</span>
+      <CountdownDots count={countdown.count || 3} />
     </div>
+  );
+}
+
+function CountdownDots({ count }) {
+  return (
+    <span className="lyric-gap-dots" aria-label="•••">
+      {[0, 1, 2].map((index) => (
+        <span className={index >= count ? 'lyric-gap-dot lyric-gap-dot-hidden' : 'lyric-gap-dot'} key={index}>•</span>
+      ))}
+    </span>
   );
 }
 
 function KaraokeStage({
   lyric,
-  metaLines,
+  staticMetaLines,
+  flowLines,
   bodyLines,
   currentMs,
+  activeFlowLine,
   activeBodyLine,
   activeBodyIndex,
   nextBodyLine,
   nextBodyIndex,
-  focusBodyIndex,
+  nextFlowLine,
+  nextFlowIndex,
+  focusFlowIndex,
   showCountdown,
   countdown,
   translationMode,
   seek,
   t,
 }) {
-  const metaSlot = karaokeMetaSlot(metaLines, showCountdown, countdown, nextBodyIndex, currentMs);
+  const metaSlot = karaokeMetaSlot(staticMetaLines, activeFlowLine, nextFlowLine, nextBodyIndex, currentMs);
   const focusIndex = activeBodyIndex >= 0 ? activeBodyIndex : nextBodyIndex >= 0 ? nextBodyIndex : bodyLines.length - 1;
   const nextIndex = focusIndex + 1;
   const leftIndex = showCountdown && nextBodyIndex >= 0
@@ -285,17 +310,14 @@ function KaraokeStage({
   return (
     <div className="lyric-karaoke-lines lyric-karaoke-three-line" aria-live="polite">
       <div className="lyric-karaoke-meta-line">
-        {metaSlot.type === 'countdown' ? (
-          <span className={`lyric-gap-dots${countdown.flashing ? ' lyric-dots-flashing' : ''}`}>{countdown.text || '•••'}</span>
-        ) : (
-          <span>{metaSlot.text}</span>
-        )}
+        {metaSlot ? <span>{metaSlot.text}</span> : null}
       </div>
       <div className="lyric-karaoke-lane lyric-karaoke-lane-left lyric-karaoke-lane-current">
+        {showCountdown ? <CountdownRow countdown={countdown} /> : null}
         <KaraokeSlot
           slot={leftSlot}
           currentMs={currentMs}
-          focusBodyIndex={focusBodyIndex}
+          focusBodyIndex={focusFlowIndex}
           translationMode={translationMode}
           seek={seek}
           t={t}
@@ -305,7 +327,7 @@ function KaraokeStage({
         <KaraokeSlot
           slot={rightSlot}
           currentMs={currentMs}
-          focusBodyIndex={focusBodyIndex}
+          focusBodyIndex={focusFlowIndex}
           translationMode={translationMode}
           seek={seek}
           t={t}
@@ -315,21 +337,20 @@ function KaraokeStage({
   );
 }
 
-function karaokeMetaSlot(metaLines, showCountdown, countdown, nextBodyIndex, currentMs) {
-  if (showCountdown) {
-    return { type: 'countdown', countdown };
+function karaokeMetaSlot(staticMetaLines, activeFlowLine, nextFlowLine, nextBodyIndex, currentMs) {
+  if (activeFlowLine?.isMeta) {
+    return { type: 'text', text: activeFlowLine.text };
   }
-  if (!metaLines.length) {
-    return { type: 'text', text: '•••' };
+  if (nextFlowLine?.isMeta && currentMs < nextFlowLine.startMs) {
+    return { type: 'text', text: nextFlowLine.text };
   }
-  const activeMeta = metaLines.find((line) => currentMs >= line.startMs && currentMs < line.endMs);
-  if (activeMeta) {
-    return { type: 'text', text: activeMeta.text };
+  if (nextBodyIndex <= 0 && staticMetaLines.length) {
+    return { type: 'text', text: staticMetaLines[0].text };
   }
-  if (nextBodyIndex <= 0) {
-    return { type: 'text', text: metaLines[0].text };
+  if (!staticMetaLines.length) {
+    return null;
   }
-  return { type: 'text', text: metaLines.slice(1).map((line) => line.text).join(' / ') || metaLines[0].text };
+  return { type: 'text', text: staticMetaLines.slice(1).map((line) => line.text).join(' / ') || staticMetaLines[0].text };
 }
 
 function KaraokeSlot({ slot, currentMs, focusBodyIndex, translationMode, seek, t }) {
@@ -533,29 +554,39 @@ function lineClassName(line, currentMs, active, bodyIndex, focusBodyIndex) {
   return `lyric-line ${state} lyric-line-distance-${distance}${line?.isMeta ? ' lyric-line-meta' : ''}`;
 }
 
+function hasUsableLineTime(line) {
+  return Number.isFinite(line.startMs) && line.startMs > 0;
+}
+
 function shouldShowCountdown(lines, currentMs, activeLine, nextIndex) {
   if (activeLine || nextIndex < 0) {
+    return false;
+  }
+  const nextLine = lines[nextIndex];
+  if (!nextLine || currentMs >= nextLine.startMs) {
     return false;
   }
   if (nextIndex === 0) {
     return true;
   }
   const previousLine = lines[nextIndex - 1];
-  const nextLine = lines[nextIndex];
-  return Boolean(previousLine && nextLine && nextLine.startMs - previousLine.endMs >= 9000);
+  return Boolean(previousLine && nextLine.startMs - previousLine.endMs >= 9000);
 }
 
 function lyricCountdown(lines, currentMs) {
   const nextLine = lines.find((line) => line.startMs > currentMs);
   if (!nextLine) {
-    return { text: '•••', flashing: false, remainingMs: 0 };
+    return { count: 3, flashing: false, exiting: false, remainingMs: 0 };
   }
   const remainingMs = nextLine.startMs - currentMs;
+  if (remainingMs <= 260) {
+    return { count: 0, flashing: false, exiting: true, remainingMs };
+  }
   if (remainingMs <= 1000) {
-    return { text: '•', flashing: false, remainingMs };
+    return { count: 1, flashing: false, exiting: false, remainingMs };
   }
   if (remainingMs <= 2000) {
-    return { text: '••', flashing: false, remainingMs };
+    return { count: 2, flashing: false, exiting: false, remainingMs };
   }
-  return { text: '•••', flashing: remainingMs > 3000, remainingMs };
+  return { count: 3, flashing: remainingMs > 3000, exiting: false, remainingMs };
 }

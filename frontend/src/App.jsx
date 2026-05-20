@@ -540,7 +540,7 @@ function App() {
       if (!response.ok) {
         throw new Error(text);
       }
-      const data = JSON.parse(text);
+      const data = preserveEntrySingingAnnotations(JSON.parse(text), selectedResult);
       setResultDetailData(data);
       setResultDetail(JSON.stringify(data, null, 2));
       await refreshMeta();
@@ -1135,7 +1135,10 @@ function ErrorMessage({ t, error }) {
 
 function ResultDialog({ t, entry, detail, detailData, busy, lyricSettings, close, fetchSelectedResult }) {
   const lyricPlayback = useMemo(
-    () => normalizeLyricPayload({ ...(detailData || {}), selectedEntry: entry }),
+    () => normalizeLyricPayload({
+      ...(detailData || {}),
+      selectedEntry: mergeEntryExtra(entry, detailData?.selectedEntry),
+    }),
     [detailData, entry],
   );
 
@@ -1470,6 +1473,48 @@ function hasPositiveAnnotationSignal(value) {
     return value.length > 0;
   }
   return value === true || value === 1 || value === '1' || String(value).toLowerCase() === 'true';
+}
+
+function preserveEntrySingingAnnotations(data, entry) {
+  const annotations = pickSingingAnnotations(entry?.extra || {});
+  if (!annotations.length) {
+    return data;
+  }
+  const selectedEntry = mergeEntryExtra(entry, data?.selectedEntry || data?.result || entry);
+  return {
+    ...data,
+    selectedEntry: {
+      ...selectedEntry,
+      extra: {
+        ...(selectedEntry?.extra || {}),
+        singing_annotations: selectedEntry?.extra?.singing_annotations || annotations,
+        singingAnnotationsLyric: selectedEntry?.extra?.singingAnnotationsLyric || annotations,
+      },
+    },
+  };
+}
+
+function mergeEntryExtra(fallbackEntry, entry) {
+  if (!fallbackEntry && !entry) {
+    return entry;
+  }
+  return {
+    ...(fallbackEntry || {}),
+    ...(entry || {}),
+    extra: {
+      ...(fallbackEntry?.extra || {}),
+      ...(entry?.extra || {}),
+    },
+  };
+}
+
+function pickSingingAnnotations(extra) {
+  return [
+    extra.singing_annotations,
+    extra.singingAnnotationsLyric,
+    extra.singingAnnotations,
+    extra.hasSingingAnnotationsLyric,
+  ].find((value) => Array.isArray(value) && value.length) || [];
 }
 
 function aggregateMembers(entry) {

@@ -35,10 +35,11 @@ export function LyricPlaybackView({ lyric, settings, t }) {
   const nextFlowIndex = flowLines.findIndex((line) => line.startMs > currentMs);
   const nextFlowLine = nextFlowIndex >= 0 ? flowLines[nextFlowIndex] : null;
   const countdown = lyricCountdown(bodyLines, currentMs);
-  const showCountdown = shouldShowCountdown(bodyLines, currentMs, activeFlowLine, nextBodyIndex);
+  const showCountdown = shouldShowCountdown(bodyLines, currentMs, activeBodyLine, nextBodyIndex);
+  const showFloatingCountdown = showCountdown && activeFlowLine?.isMeta;
   const visibleFlowLine = activeFlowLine || nextFlowLine || flowLines[flowLines.length - 1];
   const visibleBodyLine = activeBodyLine || nextBodyLine || bodyLines[bodyLines.length - 1];
-  const currentStripText = activeFlowLine?.text || (showCountdown ? countdown.text : visibleBodyLine?.text);
+  const currentStripText = showCountdown ? '' : activeFlowLine?.text || visibleBodyLine?.text;
   const focusFlowIndex = activeFlowIndex >= 0 ? activeFlowIndex : nextFlowIndex >= 0 ? nextFlowIndex : flowLines.length - 1;
   const scrollTargetId = renderMode === 'vertical'
     ? (activeFlowLine ? activeFlowLine.id : visibleFlowLine?.id)
@@ -156,9 +157,10 @@ export function LyricPlaybackView({ lyric, settings, t }) {
         ) : (
           <div className="lyric-lines" ref={linesRef} aria-live="polite">
             <StageMeta metaLines={staticMetaLines} refCallback={bindLineRef('stage-meta')} />
+            {showFloatingCountdown ? <CountdownRow countdown={countdown} refCallback={bindLineRef('countdown-floating')} /> : null}
             {flowLines.map((line, flowIndex) => {
               const isActive = activeFlowLine?.id === line.id;
-              const countdownBeforeLine = showCountdown && nextBodyLine?.id === line.id;
+              const countdownBeforeLine = showCountdown && !showFloatingCountdown && nextBodyLine?.id === line.id;
               return (
                 <React.Fragment key={line.id}>
                   {countdownBeforeLine ? (
@@ -178,8 +180,8 @@ export function LyricPlaybackView({ lyric, settings, t }) {
             })}
           </div>
         )}
-        <div className={`lyric-current-strip${countdown.flashing ? ' lyric-dots-flashing' : ''}`} aria-live="polite">
-          {currentStripText || '•••'}
+        <div className={`lyric-current-strip${showCountdown ? ' lyric-current-strip-countdown' : ''}${countdown.flashing ? ' lyric-dots-flashing' : ''}`} aria-live="polite">
+          {showCountdown ? <CountdownDots count={countdown.count || 3} /> : currentStripText || '•••'}
         </div>
       </div>
 
@@ -240,8 +242,8 @@ function StageMeta({ metaLines, refCallback }) {
   return (
     <div className="lyric-stage-meta" ref={refCallback}>
       <div className="lyric-stage-credit-list">
-        {metaLines.map((line) => (
-          <span key={line.id}>{line.text}</span>
+        {metaLines.map((line, index) => (
+          <span className={index === 0 ? 'lyric-stage-title-line' : 'lyric-stage-credit-line'} key={line.id}>{line.text}</span>
         ))}
       </div>
     </div>
@@ -407,9 +409,9 @@ function LineText({ line, currentMs, active, translationMode, t }) {
 
   return (
     <span className="lyric-words">
-      {line.words.map((word) => {
+      {line.words.map((word, wordIndex) => {
         const progress = active ? wordProgress(word, currentMs) : 0;
-        const annotations = word.annotations || [];
+        const annotations = visibleWordAnnotations(line.words, word, wordIndex);
         const wordState = progress >= 1 ? ' lyric-word-complete' : progress > 0 ? ' lyric-word-current' : '';
         return (
           <span
@@ -431,6 +433,23 @@ function LineText({ line, currentMs, active, translationMode, t }) {
       ) : null}
     </span>
   );
+}
+
+function visibleWordAnnotations(words, word, wordIndex) {
+  const annotations = word.annotations || [];
+  if (!annotations.length) {
+    return annotations;
+  }
+  return annotations.filter((annotation) => {
+    if (!isSingleWordAnnotation(annotation)) {
+      return true;
+    }
+    return words.findIndex((item) => (item.annotations || []).some((candidate) => candidate.id === annotation.id)) === wordIndex;
+  });
+}
+
+function isSingleWordAnnotation() {
+  return true;
 }
 
 function LineSubtext({ line, translationMode }) {
@@ -465,14 +484,24 @@ function AnnotationLayer({ annotations, active, t }) {
     <span className="lyric-annotation-layer" aria-hidden="true">
       {unique.map((annotation) => {
         const label = t ? t[annotation.labelKey] || annotation.type : annotation.type;
+        const text = annotation.text || label;
         return (
           <span
             key={annotation.id}
             className={`lyric-annotation-mark ${annotation.className}`}
             title={annotation.text ? `${label}: ${annotation.text}` : label}
           >
-            <AnnotationGlyph type={annotation.type} />
-            {active ? <span className="lyric-annotation-text">{annotation.text || label}</span> : null}
+            {annotation.type === 'breath' || annotation.type === 'stress' ? (
+              <>
+                {active ? <span className="lyric-annotation-text lyric-annotation-label">{text}</span> : null}
+                <AnnotationGlyph type={annotation.type} />
+              </>
+            ) : (
+              <>
+                <AnnotationGlyph type={annotation.type} />
+                {active ? <span className="lyric-annotation-text">{text}</span> : null}
+              </>
+            )}
           </span>
         );
       })}

@@ -1117,9 +1117,10 @@ nav button.nav-active::before {
   justify-content: center;
   left: 50%;
   line-height: 1;
+  overflow: visible;
   pointer-events: none;
   position: absolute;
-  top: -0.82em;
+  top: -0.9em;
   transform: translateX(-50%);
   transition: color 180ms ease, filter 180ms ease, opacity 180ms ease;
   white-space: nowrap;
@@ -1140,6 +1141,7 @@ nav button.nav-active::before {
   justify-content: center;
   letter-spacing: 0.02em;
   min-height: 1.35em;
+  overflow: visible;
   padding: 0.18em 0.42em;
 }
 
@@ -1206,36 +1208,54 @@ nav button.nav-active::before {
   color: rgba(82, 78, 68, 0.58);
 }
 
-.lyric-annotation-mark.annotation-stress {
-  background: transparent;
-  border: 0;
-  box-shadow: none;
-  padding: 0;
-}
-
-.lyric-annotation-mark.annotation-stress .annotation-glyph-text {
-  font-size: 1.35em;
-}
-
-.lyric-annotation-layer:has(.annotation-stress) {
-  top: auto;
-  bottom: -0.76em;
-}
-
-.lyric-line-active .lyric-annotation-layer:has(.annotation-stress) {
-  bottom: -0.58em;
-  top: auto;
-}
-
+.lyric-annotation-mark.annotation-stress,
 .lyric-annotation-mark.annotation-breath {
   background: transparent;
   border: 0;
   box-shadow: none;
-  padding: 0 0.12em;
+  display: grid;
+  gap: 0.1em;
+  justify-items: center;
+  min-height: 0;
+  padding: 0;
+}
+
+.lyric-annotation-label {
+  color: color-mix(in srgb, var(--annotation-tint, #10b957) 42%, #2b2513);
+  font-size: 0.86em;
+  font-weight: 900;
+  line-height: 1;
+  min-height: 1em;
+}
+
+.lyric-annotation-mark.annotation-breath {
+  transform: translateX(-46%);
+}
+
+.lyric-annotation-mark.annotation-breath .annotation-glyph-text {
+  font-size: 1.12em;
+}
+
+.lyric-annotation-mark.annotation-stress .annotation-glyph-text {
+  font-size: 1.35em;
+  grid-row: 2;
+  transform: translateY(1.52em);
+}
+
+.lyric-annotation-mark.annotation-stress .lyric-annotation-label {
+  grid-row: 1;
+}
+
+.lyric-annotation-layer:has(.annotation-stress) {
+  top: -0.9em;
+}
+
+.lyric-line-active .lyric-annotation-layer:has(.annotation-stress) {
+  top: -0.72em;
 }
 
 .lyric-word-annotated:has(.annotation-breath) {
-  margin-left: 0.26em;
+  margin-left: 0.18em;
 }
 
 .lyric-line-active .lyric-word-annotated {
@@ -1265,7 +1285,7 @@ nav button.nav-active::before {
   line-height: 1.35;
   max-width: min(76%, 560px);
   min-height: 34px;
-  overflow: hidden;
+  overflow: visible;
   padding: 7px 18px;
   position: absolute;
   text-align: center;
@@ -1319,7 +1339,7 @@ nav button.nav-active::before {
   max-height: 430px;
   min-height: 430px;
   overflow: auto;
-  padding: 82px 40px 196px;
+  padding: 82px 48px 196px 44px;
   scroll-behavior: smooth;
   scrollbar-width: none;
 }
@@ -1352,7 +1372,20 @@ nav button.nav-active::before {
   font-weight: 880;
   letter-spacing: -0.045em;
   line-height: 1.28;
-  padding: 0;
+  padding: 0 16px 0 12px;
+  position: relative;
+}
+
+.lyric-stage-credit-list span::before {
+  background: linear-gradient(180deg, #14c9a2, #f1c84b);
+  border-radius: 999px;
+  content: "";
+  height: 0.9em;
+  left: -2px;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 4px;
 }
 
 .lyric-line {
@@ -1366,7 +1399,8 @@ nav button.nav-active::before {
   justify-items: start;
   line-height: 1.28;
   min-height: auto;
-  padding: 7px 12px;
+  overflow: visible;
+  padding: 7px 16px 7px 12px;
   position: relative;
   text-align: left;
   text-shadow: none;
@@ -1582,17 +1616,22 @@ nav button.nav-active::before {
   --lyric-active-fill-end: #f1c84b;
   color: inherit;
   display: inline-grid;
+  overflow: visible;
+  padding-right: 0.04em;
   position: relative;
 }
 
 .lyric-line-text.lyric-progress-text,
 .lyric-word.lyric-progress-text {
+  overflow: visible;
+  padding-right: 0.04em;
   position: relative;
 }
 
 .lyric-progress-base,
 .lyric-progress-fill {
   grid-area: 1 / 1;
+  overflow: visible;
 }
 
 .lyric-line-active .lyric-progress-base {
@@ -2042,7 +2081,7 @@ nav button.nav-active::before {
   }
 
   .lyric-lines {
-    padding: 62px 18px 162px;
+    padding: 62px 24px 162px 22px;
   }
 
   .lyric-stage-meta {

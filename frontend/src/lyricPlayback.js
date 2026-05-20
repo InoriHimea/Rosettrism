@@ -201,13 +201,14 @@ function formatDisplayTitle(title, artist, artistAlias) {
   const cleanTitle = textValue(title);
   const cleanArtist = textValue(artist);
   const cleanAlias = textValue(artistAlias);
+  const displayAlias = cleanAlias && cleanAlias !== cleanArtist ? cleanAlias : '';
   if (!cleanTitle) {
     return '';
   }
   if (!cleanArtist) {
     return cleanTitle;
   }
-  return `${cleanTitle} - ${cleanArtist}${cleanAlias ? `（${cleanAlias}）` : ''}`;
+  return `${cleanTitle} - ${cleanArtist}${displayAlias ? `（${displayAlias}）` : ''}`;
 }
 
 function ensureLeadingTitleLine(lines, displayTitle) {
@@ -249,6 +250,13 @@ function pickArtistAlias(...sources) {
       source?.englishArtist,
       source?.singer_alias,
       source?.singerAlias,
+      source?.subtitle,
+      source?.sub_title,
+      source?.subTitle,
+      source?.trans_name,
+      source?.transName,
+      source?.singer_trans_name,
+      source?.singerTransName,
       source?.extra?.artist_alias,
       source?.extra?.artistAlias,
       source?.extra?.artist_en,
@@ -257,6 +265,13 @@ function pickArtistAlias(...sources) {
       source?.extra?.englishArtist,
       source?.extra?.singer_alias,
       source?.extra?.singerAlias,
+      source?.extra?.subtitle,
+      source?.extra?.sub_title,
+      source?.extra?.subTitle,
+      source?.extra?.trans_name,
+      source?.extra?.transName,
+      source?.extra?.singer_trans_name,
+      source?.extra?.singerTransName,
     );
     if (alias) {
       return alias;

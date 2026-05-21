@@ -36,10 +36,9 @@ export function LyricPlaybackView({ lyric, settings, t }) {
   const nextFlowLine = nextFlowIndex >= 0 ? flowLines[nextFlowIndex] : null;
   const countdown = lyricCountdown(bodyLines, currentMs);
   const showCountdown = shouldShowCountdown(bodyLines, currentMs, activeBodyLine, nextBodyIndex);
-  const showFloatingCountdown = showCountdown && activeFlowLine?.isMeta;
   const visibleFlowLine = activeFlowLine || nextFlowLine || flowLines[flowLines.length - 1];
   const visibleBodyLine = activeBodyLine || nextBodyLine || bodyLines[bodyLines.length - 1];
-  const currentStripText = showCountdown ? '' : activeFlowLine?.text || visibleBodyLine?.text;
+  const currentStripText = activeFlowLine?.text || (showCountdown ? countdown.text : visibleBodyLine?.text);
   const focusFlowIndex = activeFlowIndex >= 0 ? activeFlowIndex : nextFlowIndex >= 0 ? nextFlowIndex : flowLines.length - 1;
   const scrollTargetId = renderMode === 'vertical'
     ? (activeFlowLine ? activeFlowLine.id : visibleFlowLine?.id)
@@ -157,10 +156,9 @@ export function LyricPlaybackView({ lyric, settings, t }) {
         ) : (
           <div className="lyric-lines" ref={linesRef} aria-live="polite">
             <StageMeta metaLines={staticMetaLines} refCallback={bindLineRef('stage-meta')} />
-            {showFloatingCountdown ? <CountdownRow countdown={countdown} refCallback={bindLineRef('countdown-floating')} /> : null}
             {flowLines.map((line, flowIndex) => {
               const isActive = activeFlowLine?.id === line.id;
-              const countdownBeforeLine = showCountdown && !showFloatingCountdown && nextBodyLine?.id === line.id;
+              const countdownBeforeLine = showCountdown && nextBodyLine?.id === line.id;
               return (
                 <React.Fragment key={line.id}>
                   {countdownBeforeLine ? (
@@ -180,8 +178,8 @@ export function LyricPlaybackView({ lyric, settings, t }) {
             })}
           </div>
         )}
-        <div className={`lyric-current-strip${showCountdown ? ' lyric-current-strip-countdown' : ''}${countdown.flashing ? ' lyric-dots-flashing' : ''}`} aria-live="polite">
-          {showCountdown ? <CountdownDots count={countdown.count || 3} /> : currentStripText || '•••'}
+        <div className={`lyric-current-strip${countdown.flashing ? ' lyric-dots-flashing' : ''}`} aria-live="polite">
+          {currentStripText || '•••'}
         </div>
       </div>
 
@@ -256,7 +254,7 @@ function CountdownRow({ countdown, refCallback }) {
       className={`lyric-line lyric-line-countdown lyric-line-distance-0${countdown.flashing ? ' lyric-dots-flashing' : ''}${countdown.exiting ? ' lyric-dots-exiting' : ''}`}
       ref={refCallback || null}
     >
-      <CountdownDots count={countdown.count || 3} />
+      <CountdownDots count={countdown.count} />
     </div>
   );
 }
@@ -600,14 +598,14 @@ function lyricCountdown(lines, currentMs) {
     return { count: 3, flashing: false, exiting: false, remainingMs: 0 };
   }
   const remainingMs = nextLine.startMs - currentMs;
-  if (remainingMs <= 260) {
+  if (remainingMs <= 360) {
     return { count: 0, flashing: false, exiting: true, remainingMs };
   }
-  if (remainingMs <= 1000) {
+  if (remainingMs <= 1200) {
     return { count: 1, flashing: false, exiting: false, remainingMs };
   }
-  if (remainingMs <= 2000) {
+  if (remainingMs <= 2200) {
     return { count: 2, flashing: false, exiting: false, remainingMs };
   }
-  return { count: 3, flashing: remainingMs > 3000, exiting: false, remainingMs };
+  return { count: 3, flashing: remainingMs > 3200, exiting: false, remainingMs };
 }

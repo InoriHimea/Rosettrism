@@ -178,8 +178,9 @@ function isAnnotationLike(value, forced = false) {
 }
 
 function buildNormalizedLyric(base, lines, annotations) {
-  const displayTitle = formatDisplayTitle(base.title, base.artist, base.artistAlias);
   const playableLines = lines.filter((line) => Number.isFinite(line.startMs));
+  const titleParts = inferTitleParts(base, playableLines[0]);
+  const displayTitle = formatDisplayTitle(titleParts.title, titleParts.artist, titleParts.artistAlias);
   const lastLine = playableLines[playableLines.length - 1];
   const durationMs = Math.max(
     lastLine?.endMs || 0,
@@ -197,6 +198,28 @@ function buildNormalizedLyric(base, lines, annotations) {
   };
 }
 
+function inferTitleParts(base, firstLine) {
+  const inferred = splitInlineArtistAlias(firstLine?.text);
+  return {
+    title: base.title || inferred.title,
+    artist: base.artist || inferred.artist,
+    artistAlias: base.artistAlias || inferred.artistAlias,
+  };
+}
+
+function splitInlineArtistAlias(value) {
+  const text = textValue(value);
+  const match = text.match(/^(.+?)-([^\x00-\x7F\s()（）-]+)([A-Za-z][\w .'-]*)$/);
+  if (!match) {
+    return {};
+  }
+  return {
+    title: match[1].trim(),
+    artist: match[2].trim(),
+    artistAlias: match[3].trim(),
+  };
+}
+
 function formatDisplayTitle(title, artist, artistAlias) {
   const cleanTitle = textValue(title);
   const cleanArtist = textValue(artist);
@@ -208,7 +231,7 @@ function formatDisplayTitle(title, artist, artistAlias) {
   if (!cleanArtist) {
     return cleanTitle;
   }
-  return `${cleanTitle} - ${cleanArtist}${displayAlias ? `（${displayAlias}）` : ''}`;
+  return `${cleanTitle}-${cleanArtist}${displayAlias ? `（${displayAlias}）` : ''}`;
 }
 
 function ensureLeadingTitleLine(lines, displayTitle) {
@@ -218,6 +241,10 @@ function ensureLeadingTitleLine(lines, displayTitle) {
   const firstLine = lines[0];
   if (firstLine.isMeta) {
     return firstLine.text === displayTitle ? lines : [{ ...firstLine, text: displayTitle }, ...lines.slice(1)];
+  }
+  const titleLikeFirstLine = firstLine.startMs === 0 && firstLine.words?.length > 1 && looksLikeTitleLine(firstLine.text);
+  if (titleLikeFirstLine) {
+    return [{ ...firstLine, text: displayTitle, isMeta: true }, ...lines.slice(1)];
   }
   return [
     {
@@ -237,6 +264,10 @@ function ensureLeadingTitleLine(lines, displayTitle) {
     },
     ...lines,
   ];
+}
+
+function looksLikeTitleLine(value) {
+  return /^.+?-.+$/.test(textValue(value));
 }
 
 function pickArtistAlias(...sources) {
@@ -455,20 +486,10 @@ export function attachAnnotationsToLines(lines, annotations) {
     if (!line) {
       continue;
     }
-    let matchedWord = false;
-    const words = line.words.map((word) => {
-      const timedMatch = annotation.startMs >= word.startMs - 420 && annotation.startMs <= Math.max(word.endMs, word.startMs + 1) + 420;
-      const overlapMatch = annotation.endMs > word.startMs - 320 && annotation.startMs < Math.max(word.endMs, word.startMs + 1) + 320;
-      const textMatch = annotation.text && word.text.includes(annotation.text);
-      const matches = timedMatch || overlapMatch || textMatch;
-      if (matches) {
-        matchedWord = true;
-      }
-      return matches ? { ...word, annotations: [...word.annotations, annotation] } : word;
-    });
-    if (!matchedWord && words.length > 0) {
-      const nearestIndex = findNearestWordIndex(words, annotation);
-      words[nearestIndex] = { ...words[nearestIndex], annotations: [...words[nearestIndex].annotations, annotation] };
+    const words = line.words.map((word) => ({ ...word }));
+    if (words.length > 0) {
+      const anchorIndex = findAnnotationAnchorWordIndex(words, annotation);
+      words[anchorIndex] = { ...words[anchorIndex], annotations: [...words[anchorIndex].annotations, annotation] };
     }
     nextLines[lineIndex] = { ...line, words, annotations: [...line.annotations, annotation] };
   }
@@ -476,14 +497,20 @@ export function attachAnnotationsToLines(lines, annotations) {
   return nextLines;
 }
 
-function findNearestWordIndex(words, annotation) {
-  const midpoint = annotation.startMs + annotation.durationMs / 2;
+function findAnnotationAnchorWordIndex(words, annotation) {
+  const textIndex = annotation.text ? words.findIndex((word) => word.text.includes(annotation.text)) : -1;
+  if (textIndex >= 0) {
+    return textIndex;
+  }
+
   let bestIndex = 0;
   let bestDistance = Number.POSITIVE_INFINITY;
   for (let index = 0; index < words.length; index += 1) {
     const word = words[index];
+    const startDistance = Math.abs(annotation.startMs - word.startMs);
     const center = word.startMs + (word.endMs - word.startMs) / 2;
-    const distance = Math.abs(midpoint - center);
+    const centerDistance = Math.abs(annotation.startMs - center);
+    const distance = Math.min(startDistance, centerDistance);
     if (distance < bestDistance) {
       bestIndex = index;
       bestDistance = distance;

@@ -1214,9 +1214,10 @@ nav button.nav-active::before {
   border: 0;
   box-shadow: none;
   display: grid;
-  gap: 0.1em;
+  gap: 0.08em;
   justify-items: center;
   min-height: 0;
+  min-width: max-content;
   padding: 0;
 }
 
@@ -1228,10 +1229,6 @@ nav button.nav-active::before {
   min-height: 1em;
 }
 
-.lyric-annotation-mark.annotation-breath {
-  transform: translateX(-46%);
-}
-
 .lyric-annotation-mark.annotation-breath .annotation-glyph-text {
   font-size: 1.12em;
 }
@@ -1239,7 +1236,7 @@ nav button.nav-active::before {
 .lyric-annotation-mark.annotation-stress .annotation-glyph-text {
   font-size: 1.35em;
   grid-row: 2;
-  transform: translateY(1.52em);
+  transform: translateY(1.34em);
 }
 
 .lyric-annotation-mark.annotation-stress .lyric-annotation-label {
@@ -1247,15 +1244,11 @@ nav button.nav-active::before {
 }
 
 .lyric-annotation-layer:has(.annotation-stress) {
-  top: -0.9em;
+  top: -0.86em;
 }
 
 .lyric-line-active .lyric-annotation-layer:has(.annotation-stress) {
-  top: -0.72em;
-}
-
-.lyric-word-annotated:has(.annotation-breath) {
-  margin-left: 0.18em;
+  top: -0.68em;
 }
 
 .lyric-line-active .lyric-word-annotated {
@@ -1376,17 +1369,6 @@ nav button.nav-active::before {
   position: relative;
 }
 
-.lyric-stage-credit-list span::before {
-  background: linear-gradient(180deg, #14c9a2, #f1c84b);
-  border-radius: 999px;
-  content: "";
-  height: 0.9em;
-  left: -2px;
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 4px;
-}
 
 .lyric-line {
   background: transparent;
@@ -1400,7 +1382,7 @@ nav button.nav-active::before {
   line-height: 1.28;
   min-height: auto;
   overflow: visible;
-  padding: 7px 16px 7px 12px;
+  padding: 7px 24px 7px 12px;
   position: relative;
   text-align: left;
   text-shadow: none;
@@ -1617,14 +1599,16 @@ nav button.nav-active::before {
   color: inherit;
   display: inline-grid;
   overflow: visible;
-  padding-right: 0.04em;
+  margin-right: -0.12em;
+  padding-right: 0.16em;
   position: relative;
 }
 
 .lyric-line-text.lyric-progress-text,
 .lyric-word.lyric-progress-text {
   overflow: visible;
-  padding-right: 0.04em;
+  margin-right: -0.12em;
+  padding-right: 0.16em;
   position: relative;
 }
 
@@ -1658,7 +1642,7 @@ nav button.nav-active::before {
 .lyric-words {
   display: inline-flex;
   flex-wrap: wrap;
-  gap: 0.34em 0.13em;
+  gap: 0.34em 0.17em;
   justify-content: flex-start;
   padding-top: 0.46em;
 }
@@ -1666,6 +1650,8 @@ nav button.nav-active::before {
 .lyric-word {
   color: inherit;
   display: inline-block;
+  overflow: visible;
+  padding-right: 0.06em;
   position: relative;
 }
 

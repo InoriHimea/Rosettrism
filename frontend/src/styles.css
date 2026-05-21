@@ -1112,16 +1112,12 @@ nav button.nav-active::before {
 
 .lyric-annotation-layer {
   color: rgba(72, 68, 58, 0.72);
-  display: flex;
-  gap: 0.16em;
-  justify-content: center;
-  left: 50%;
+  display: block;
+  inset: 0;
   line-height: 1;
   overflow: visible;
   pointer-events: none;
   position: absolute;
-  top: -0.9em;
-  transform: translateX(-50%);
   transition: color 180ms ease, filter 180ms ease, opacity 180ms ease;
   white-space: nowrap;
   z-index: 2;
@@ -1139,10 +1135,14 @@ nav button.nav-active::before {
   font-weight: 950;
   gap: 0.28em;
   justify-content: center;
+  left: 50%;
   letter-spacing: 0.02em;
   min-height: 1.35em;
   overflow: visible;
   padding: 0.18em 0.42em;
+  position: absolute;
+  top: calc(-2.1em - var(--annotation-index, 0) * 1.45em);
+  transform: translateX(-50%);
 }
 
 .lyric-annotation-mark .annotation-glyph {
@@ -1187,7 +1187,6 @@ nav button.nav-active::before {
 
 .lyric-line-active .lyric-annotation-layer {
   color: var(--annotation-tint, #10b957);
-  top: -0.62em;
 }
 
 .lyric-line-past .lyric-annotation-layer,
@@ -1221,6 +1220,15 @@ nav button.nav-active::before {
   padding: 0;
 }
 
+.lyric-annotation-mark.annotation-breath {
+  left: 0;
+  top: calc(-2.34em - var(--annotation-index, 0) * 1.5em);
+}
+
+.lyric-annotation-mark.annotation-stress {
+  top: -2.34em;
+}
+
 .lyric-annotation-label {
   color: color-mix(in srgb, var(--annotation-tint, #10b957) 42%, #2b2513);
   font-size: 0.86em;
@@ -1236,23 +1244,11 @@ nav button.nav-active::before {
 .lyric-annotation-mark.annotation-stress .annotation-glyph-text {
   font-size: 1.35em;
   grid-row: 2;
-  transform: translateY(1.34em);
+  transform: translateY(4.55em);
 }
 
 .lyric-annotation-mark.annotation-stress .lyric-annotation-label {
   grid-row: 1;
-}
-
-.lyric-annotation-layer:has(.annotation-stress) {
-  top: -0.86em;
-}
-
-.lyric-line-active .lyric-annotation-layer:has(.annotation-stress) {
-  top: -0.68em;
-}
-
-.lyric-line-active .lyric-word-annotated {
-  position: relative;
 }
 
 .lyric-line-active .lyric-word-annotated .lyric-annotation-layer {
@@ -1361,10 +1357,10 @@ nav button.nav-active::before {
 
 .lyric-stage-credit-list span {
   color: rgba(47, 39, 19, 0.64);
-  font-size: clamp(24px, 4vw, 38px);
-  font-weight: 880;
-  letter-spacing: -0.045em;
-  line-height: 1.28;
+  font-size: clamp(22px, 3.2vw, 32px);
+  font-weight: 860;
+  letter-spacing: -0.04em;
+  line-height: 1.24;
   padding: 0 16px 0 12px;
   position: relative;
 }
@@ -1399,12 +1395,12 @@ nav button.nav-active::before {
 }
 
 .lyric-line-active {
-  --line-scale: 1.05;
+  --line-scale: 1.04;
   color: #0d0b07;
   filter: none;
-  font-size: 40px;
-  font-weight: 950;
-  letter-spacing: -0.052em;
+  font-size: clamp(30px, 4.4vw, 36px);
+  font-weight: 930;
+  letter-spacing: -0.048em;
   opacity: 1;
   transform: translateX(6px) translateY(-2px) scale(var(--line-scale));
 }
@@ -1422,10 +1418,10 @@ nav button.nav-active::before {
 }
 
 .lyric-line-countdown {
-  --line-scale: 1.05;
+  --line-scale: 1.04;
   color: #10b957;
-  font-size: 40px;
-  font-weight: 950;
+  font-size: clamp(30px, 4.4vw, 36px);
+  font-weight: 930;
   letter-spacing: 0;
   opacity: 1;
   padding-left: 12px;
@@ -1463,16 +1459,8 @@ nav button.nav-active::before {
   animation: lyric-dot-cycle-3 1.2s steps(1, end) infinite;
 }
 
-.lyric-dots-exiting .lyric-gap-dot {
+.lyric-dots-exiting .lyric-gap-dot:not(.lyric-gap-dot-hidden) {
   animation: lyric-dot-bubble-out 260ms ease-out both;
-}
-
-.lyric-dots-exiting .lyric-gap-dot:nth-child(2) {
-  animation-delay: 40ms;
-}
-
-.lyric-dots-exiting .lyric-gap-dot:nth-child(3) {
-  animation-delay: 80ms;
 }
 
 @keyframes lyric-dot-cycle-1 {
@@ -1519,13 +1507,15 @@ nav button.nav-active::before {
 
 .lyric-line-meta {
   color: rgba(47, 39, 19, 0.7);
-  font-size: clamp(24px, 4vw, 38px);
-  font-weight: 880;
-  letter-spacing: -0.045em;
+  font-size: clamp(22px, 3.5vw, 32px);
+  font-weight: 860;
+  letter-spacing: -0.04em;
+  max-width: calc(100% - 20px);
+  white-space: nowrap;
 }
 
 .lyric-line-meta.lyric-line-active {
-  font-size: clamp(28px, 4.7vw, 42px);
+  font-size: clamp(26px, 4vw, 36px);
 }
 
 .lyric-line-distance-1 {
@@ -1610,6 +1600,14 @@ nav button.nav-active::before {
   margin-right: -0.12em;
   padding-right: 0.16em;
   position: relative;
+}
+
+.lyric-meta-text {
+  display: block;
+  max-width: min(100%, 720px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .lyric-progress-base,
@@ -2079,7 +2077,7 @@ nav button.nav-active::before {
   }
 
   .lyric-stage-credit-list span {
-    font-size: clamp(24px, 8vw, 30px);
+    font-size: clamp(21px, 7vw, 28px);
   }
 
   .lyric-karaoke-lines {
@@ -2103,7 +2101,7 @@ nav button.nav-active::before {
 
   .lyric-line-active,
   .lyric-line-countdown {
-    font-size: 30px;
+    font-size: 28px;
     letter-spacing: -0.04em;
   }
 
@@ -2113,7 +2111,7 @@ nav button.nav-active::before {
   .lyric-karaoke-lane .lyric-line-past,
   .lyric-karaoke-lane .lyric-line-countdown,
   .lyric-karaoke-empty {
-    font-size: 30px;
+    font-size: 28px;
   }
 
   .lyric-line-countdown {

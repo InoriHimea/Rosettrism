@@ -239,12 +239,8 @@ function ensureLeadingTitleLine(lines, displayTitle) {
     return lines;
   }
   const firstLine = lines[0];
-  if (firstLine.isMeta) {
-    return firstLine.text === displayTitle ? lines : [{ ...firstLine, text: displayTitle }, ...lines.slice(1)];
-  }
-  const titleLikeFirstLine = firstLine.startMs === 0 && firstLine.words?.length > 1 && looksLikeTitleLine(firstLine.text);
-  if (titleLikeFirstLine) {
-    return [{ ...firstLine, text: displayTitle, isMeta: true }, ...lines.slice(1)];
+  if (firstLine.isMeta && firstLine.text === displayTitle) {
+    return lines;
   }
   return [
     {

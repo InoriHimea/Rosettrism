@@ -1,6 +1,6 @@
 [package]
 name = "rosettrism"
-version = "4.8.1"
+version = "4.8.3"
 edition = "2021"
 description = "Rosettrism CLI, server, and library for fetching, caching, aggregating, and decoding lyrics"
 license = "MIT"

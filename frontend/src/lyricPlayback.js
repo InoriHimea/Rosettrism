@@ -452,7 +452,7 @@ function normalizeLine(line, index, trackId) {
     englishTranslation: textValue(line.english_translation ?? line.englishTranslation ?? line.english ?? line.en_translation ?? line.enTranslation ?? line.extra?.englishTranslation ?? line.extra?.english),
     reading: pickLineReading(line),
     romanized: pickLineRomanized(line) || pickLineReading(line),
-    ruby: line.ruby || [],
+    ruby: normalizeRubySpans(line.ruby || line.furigana_spans || line.furiganaSpans || line.extra?.ruby || []),
     words: normalizeWords(line.words || [], startMs, index),
     annotations: [],
   };
@@ -662,6 +662,25 @@ export function formatPlaybackTime(ms) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = String(totalSeconds % 60).padStart(2, '0');
   return `${minutes}:${seconds}`;
+}
+
+function normalizeRubySpans(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((span) => {
+      const startChar = Number(span.start_char ?? span.startChar ?? span.start ?? span.from);
+      const endChar = Number(span.end_char ?? span.endChar ?? span.end ?? span.to);
+      const text = textValue(span.text ?? span.base ?? span.value);
+      const reading = textValue(span.reading ?? span.rt ?? span.ruby ?? span.furigana ?? span.kana);
+      if (!Number.isFinite(startChar) || !Number.isFinite(endChar) || endChar <= startChar || !reading) {
+        return null;
+      }
+      return { startChar, endChar, text, reading };
+    })
+    .filter(Boolean)
+    .sort((left, right) => left.startChar - right.startChar || left.endChar - right.endChar);
 }
 
 function pickLineReading(line) {

@@ -49,6 +49,7 @@ pub fn parse(text: &str) -> Result<LyricDocument> {
                 text: lyric_text.clone(),
                 words: Vec::new(),
                 ruby: Vec::new(),
+                translation: None,
                 reading: None,
                 romanized: None,
             });

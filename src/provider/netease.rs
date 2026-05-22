@@ -6,7 +6,7 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::decoder::InputFormat;
+use crate::decoder::{decode_bytes, InputFormat};
 use crate::provider::{FetchedLyric, LyricProvider, SearchResult, Source};
 use crate::{Error, Result};
 
@@ -170,31 +170,34 @@ impl NeteaseProvider {
             return Ok(None);
         }
 
+        let translation = response.tlyric.and_then(NeteaseLyricPart::into_lyric);
+        let romanized = response.romalrc.and_then(NeteaseLyricPart::into_lyric);
+
         if let Some(raw) = response.yrc.and_then(NeteaseLyricPart::into_lyric) {
-            return Ok(Some(FetchedLyric {
-                input_format: InputFormat::Yrc,
-                raw: raw.into_bytes(),
-                document: None,
-                annotations: Vec::new(),
-            }));
+            return Ok(Some(with_extra_tracks(
+                InputFormat::Yrc,
+                raw,
+                translation.as_deref(),
+                romanized.as_deref(),
+            )?));
         }
 
         if let Some(raw) = response.klyric.and_then(NeteaseLyricPart::into_lyric) {
-            return Ok(Some(FetchedLyric {
-                input_format: InputFormat::Yrc,
-                raw: raw.into_bytes(),
-                document: None,
-                annotations: Vec::new(),
-            }));
+            return Ok(Some(with_extra_tracks(
+                InputFormat::Yrc,
+                raw,
+                translation.as_deref(),
+                romanized.as_deref(),
+            )?));
         }
 
         if let Some(raw) = response.lrc.and_then(NeteaseLyricPart::into_lyric) {
-            return Ok(Some(FetchedLyric {
-                input_format: InputFormat::Lrc,
-                raw: raw.into_bytes(),
-                document: None,
-                annotations: Vec::new(),
-            }));
+            return Ok(Some(with_extra_tracks(
+                InputFormat::Lrc,
+                raw,
+                translation.as_deref(),
+                romanized.as_deref(),
+            )?));
         }
 
         Ok(None)
@@ -245,6 +248,53 @@ impl LyricProvider for NeteaseProvider {
 
         self.download_lyric(song_id).await
     }
+}
+
+fn with_extra_tracks(
+    input_format: InputFormat,
+    raw: String,
+    translation: Option<&str>,
+    romanized: Option<&str>,
+) -> Result<FetchedLyric> {
+    let raw_bytes = raw.into_bytes();
+    let mut document = decode_bytes(&raw_bytes, input_format)?;
+    apply_timed_lrc_track(&mut document.lines, translation, |line, text| {
+        line.translation = Some(text);
+    })?;
+    apply_timed_lrc_track(&mut document.lines, romanized, |line, text| {
+        line.romanized = Some(text);
+    })?;
+    Ok(FetchedLyric {
+        input_format,
+        raw: raw_bytes,
+        document: Some(document),
+        annotations: Vec::new(),
+    })
+}
+
+fn apply_timed_lrc_track(
+    lines: &mut [crate::model::LyricLine],
+    raw: Option<&str>,
+    mut apply: impl FnMut(&mut crate::model::LyricLine, String),
+) -> Result<()> {
+    let Some(raw) = raw.filter(|value| !value.trim().is_empty()) else {
+        return Ok(());
+    };
+    let track = crate::decoder::lrc::parse(raw)?;
+    for track_line in track.lines {
+        if track_line.text.trim().is_empty() {
+            continue;
+        }
+        if let Some(line) = lines
+            .iter_mut()
+            .min_by_key(|line| line.start_ms.abs_diff(track_line.start_ms))
+        {
+            if line.start_ms.abs_diff(track_line.start_ms) <= 800 {
+                apply(line, track_line.text);
+            }
+        }
+    }
+    Ok(())
 }
 
 async fn send_json<T>(request: reqwest::RequestBuilder, context: &str) -> Result<T>
@@ -338,6 +388,10 @@ struct NeteaseLyricResponse {
     klyric: Option<NeteaseLyricPart>,
     #[serde(default)]
     lrc: Option<NeteaseLyricPart>,
+    #[serde(default)]
+    tlyric: Option<NeteaseLyricPart>,
+    #[serde(default)]
+    romalrc: Option<NeteaseLyricPart>,
 }
 
 #[derive(Debug, Deserialize)]

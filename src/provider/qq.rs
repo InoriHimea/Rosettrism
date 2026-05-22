@@ -191,7 +191,10 @@ impl QqProvider {
     }
 
     async fn has_singing_annotations(&self, song_id: u64) -> Result<bool> {
-        Ok(!self.fetch_singing_annotations_lyric(song_id).await?.is_empty())
+        Ok(!self
+            .fetch_singing_annotations_lyric(song_id)
+            .await?
+            .is_empty())
     }
 
     async fn fetch_singing_annotations_lyric(&self, song_id: u64) -> Result<String> {
@@ -274,10 +277,7 @@ impl LyricProvider for QqProvider {
                 continue;
             };
             let has_singing_annotations = has_singing_annotations
-                || self
-                    .has_singing_annotations(song_id)
-                    .await
-                    .unwrap_or(false);
+                || self.has_singing_annotations(song_id).await.unwrap_or(false);
             let title = name.or(title).unwrap_or_default();
             let album = albumname.or_else(|| album.as_ref().and_then(QqAlbum::display_name));
             let artist = singer
@@ -426,7 +426,9 @@ where
     Ok(match value {
         Value::Bool(value) => value,
         Value::Number(value) => value.as_i64().is_some_and(|value| value != 0),
-        Value::String(value) => !value.trim().is_empty() && value != "0" && !value.eq_ignore_ascii_case("false"),
+        Value::String(value) => {
+            !value.trim().is_empty() && value != "0" && !value.eq_ignore_ascii_case("false")
+        }
         Value::Array(value) => !value.is_empty(),
         Value::Object(value) => !value.is_empty(),
         Value::Null => false,
@@ -624,7 +626,13 @@ struct QqSong {
     interval: u32,
     #[serde(default)]
     singer: Vec<QqSinger>,
-    #[serde(default, alias = "hasSingingAnnotations", alias = "has_singing_annotations", alias = "hasSingingAnnotationsLyric", deserialize_with = "deserialize_annotation_flag")]
+    #[serde(
+        default,
+        alias = "hasSingingAnnotations",
+        alias = "has_singing_annotations",
+        alias = "hasSingingAnnotationsLyric",
+        deserialize_with = "deserialize_annotation_flag"
+    )]
     has_singing_annotations: bool,
 }
 

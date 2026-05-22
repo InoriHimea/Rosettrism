@@ -54,6 +54,8 @@ pub struct LyricLine {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ruby: Vec<LyricRubySpan>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub translation: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reading: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub romanized: Option<String>,

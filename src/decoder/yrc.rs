@@ -63,6 +63,7 @@ pub fn parse(text: &str) -> Result<LyricDocument> {
             text,
             words,
             ruby: Vec::new(),
+            translation: None,
             reading: None,
             romanized: None,
         });
@@ -91,6 +92,7 @@ fn parse_json_line(line: &str) -> Result<Option<LyricLine>> {
         text,
         words: Vec::new(),
         ruby: Vec::new(),
+        translation: None,
         reading: None,
         romanized: None,
     }))

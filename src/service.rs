@@ -372,14 +372,8 @@ impl ServiceContext {
                     })
                 }
                 SpecificFetchFormat::Json => {
-                    let annotations = fetched.annotations.clone();
-                    let document = decode_fetched(fetched)?;
-                    Ok(SpecificFetchResult::Json {
-                        source,
-                        result,
-                        document,
-                        annotations,
-                    })
+                    self.fetch_enriched_source_result(source, result, fetched, ttl, force)
+                        .await
                 }
             };
         }
@@ -417,7 +411,11 @@ impl ServiceContext {
                         Ok(fetched) => {
                             let annotations = fetched.annotations.clone();
                             let document = decode_fetched(fetched)?;
-                            items.push(SpecificJsonItem { result, document, annotations });
+                            items.push(SpecificJsonItem {
+                                result,
+                                document,
+                                annotations,
+                            });
                         }
                         Err(err) => warnings.push(format!("{}: {err}", result.id)),
                     }
@@ -478,14 +476,8 @@ impl ServiceContext {
                 })
             }
             SpecificFetchFormat::Json => {
-                let annotations = fetched.annotations.clone();
-                let document = decode_fetched(fetched)?;
-                Ok(SpecificFetchResult::Json {
-                    source,
-                    result,
-                    document,
-                    annotations,
-                })
+                self.fetch_enriched_source_result(source, result, fetched, ttl, force)
+                    .await
             }
         }
     }
@@ -522,7 +514,10 @@ impl ServiceContext {
         }
 
         candidates.sort_by(compare_candidate_quality);
-        match self.select_best_candidate_with_ai(&candidates, ai_scoring).await {
+        match self
+            .select_best_candidate_with_ai(&candidates, ai_scoring)
+            .await
+        {
             Ok(Some(selection)) => {
                 warnings.push(format!(
                     "AI lyric selection chose {} with score {:.1}: {}",
@@ -582,7 +577,9 @@ impl ServiceContext {
         let status = response.status();
         let body = response.text().await?;
         if !status.is_success() {
-            return Err(Error::Provider(format!("OpenAI compatible endpoint returned {status}: {body}")));
+            return Err(Error::Provider(format!(
+                "OpenAI compatible endpoint returned {status}: {body}"
+            )));
         }
         let value: serde_json::Value = serde_json::from_str(&body)?;
         let content = value
@@ -591,7 +588,9 @@ impl ServiceContext {
             .and_then(|choice| choice.get("message"))
             .and_then(|message| message.get("content"))
             .and_then(|content| content.as_str())
-            .ok_or_else(|| Error::Provider("OpenAI compatible response missing message content".into()))?;
+            .ok_or_else(|| {
+                Error::Provider("OpenAI compatible response missing message content".into())
+            })?;
         parse_ai_candidate_selection(content, candidates.len())
     }
 
@@ -652,6 +651,77 @@ impl ServiceContext {
         })
     }
 
+    async fn fetch_enriched_source_result(
+        &self,
+        source: Source,
+        result: SearchResult,
+        fetched: FetchedLyric,
+        ttl: Duration,
+        force: bool,
+    ) -> Result<SpecificFetchResult> {
+        let input_format = fetched.input_format;
+        let annotations = fetched.annotations.clone();
+        let document = decode_fetched(fetched)?;
+        let mut candidates = Vec::new();
+        let base_candidate = SourceCandidate {
+            source,
+            result: result.clone(),
+            input_format,
+            quality: quality_for_document(&document, source),
+            document: document.clone(),
+            annotations: annotations.clone(),
+        };
+        candidates.push(base_candidate);
+        let query = [
+            document.meta.title.as_deref(),
+            document.meta.artist.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+        let query = if query.is_empty() {
+            format!("{} {}", result.title, result.artist)
+        } else {
+            query
+        };
+        let needs = LyricNeed::parse_list(None);
+        let enrichment_sources =
+            default_sources_for_needs(&needs, self.provider_options.allow_experimental)
+                .into_iter()
+                .filter(|candidate_source| *candidate_source != source)
+                .collect::<Vec<_>>();
+        let mut warnings = Vec::new();
+        for enrichment_source in enrichment_sources {
+            match self
+                .fetch_first_candidate(enrichment_source, &query, ttl, force || self.force_refresh)
+                .await
+            {
+                Ok(candidate) => candidates.push(candidate),
+                Err(err) => warnings.push(format!(
+                    "{} enrichment skipped: {err}",
+                    enrichment_source.cli_name()
+                )),
+            }
+        }
+        let mut unified = build_unified(&candidates[0], &candidates, MergeMode::Inline);
+        unified.meta.source = Some(format!(
+            "enriched({})",
+            unique_source_names(&candidates).join("+")
+        ));
+        unified.warnings = warnings;
+
+        Ok(SpecificFetchResult::Json {
+            source,
+            result,
+            document,
+            annotations,
+            unified: Some(unified),
+        })
+    }
+
     async fn fetch_selected_candidate(
         &self,
         result: SearchResult,
@@ -697,6 +767,7 @@ pub enum SpecificFetchResult {
         result: SearchResult,
         document: LyricDocument,
         annotations: Vec<Annotation>,
+        unified: Option<UnifiedLyric>,
     },
     RawMany {
         source: Source,
@@ -776,7 +847,10 @@ struct AiCandidateSummary {
     sample_lines: Vec<String>,
 }
 
-fn compare_candidate_quality(left: &SourceCandidate, right: &SourceCandidate) -> std::cmp::Ordering {
+fn compare_candidate_quality(
+    left: &SourceCandidate,
+    right: &SourceCandidate,
+) -> std::cmp::Ordering {
     right
         .quality
         .score
@@ -856,12 +930,16 @@ fn candidate_summaries(candidates: &[SourceCandidate]) -> Vec<AiCandidateSummary
         .collect()
 }
 
-fn parse_ai_candidate_selection(content: &str, candidate_len: usize) -> Result<Option<AiCandidateSelection>> {
+fn parse_ai_candidate_selection(
+    content: &str,
+    candidate_len: usize,
+) -> Result<Option<AiCandidateSelection>> {
     let value: serde_json::Value = serde_json::from_str(content.trim())?;
     let best_index = value
         .get("best_index")
         .and_then(|value| value.as_u64())
-        .ok_or_else(|| Error::Provider("AI response missing best_index".into()))? as usize;
+        .ok_or_else(|| Error::Provider("AI response missing best_index".into()))?
+        as usize;
     if best_index >= candidate_len {
         return Err(Error::Provider(format!(
             "AI response best_index {best_index} is out of range"
@@ -909,6 +987,14 @@ fn build_unified(
         &base.document,
     ));
 
+    if let Some(track) = best_translation_track(candidates) {
+        tracks.push(track_from_candidate(
+            track,
+            LyricTrackKind::Translation,
+            Some(DEFAULT_TRANSLATION_LANG.into()),
+            &translation_document(&track.document),
+        ));
+    }
     if let Some(track) = best_ruby_track(candidates) {
         if !same_source_result(base, track) {
             tracks.push(track_from_candidate(
@@ -1037,6 +1123,24 @@ fn same_source_result(left: &SourceCandidate, right: &SourceCandidate) -> bool {
     left.source == right.source && left.result.id == right.result.id
 }
 
+fn best_translation_track(candidates: &[SourceCandidate]) -> Option<&SourceCandidate> {
+    candidates
+        .iter()
+        .filter(|candidate| {
+            candidate
+                .document
+                .lines
+                .iter()
+                .any(|line| line.translation.is_some())
+        })
+        .max_by(|left, right| {
+            left.quality
+                .score
+                .partial_cmp(&right.quality.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+}
+
 fn best_ruby_track(candidates: &[SourceCandidate]) -> Option<&SourceCandidate> {
     candidates
         .iter()
@@ -1091,6 +1195,10 @@ fn best_romanized_track(candidates: &[SourceCandidate]) -> Option<&SourceCandida
         })
 }
 
+fn translation_document(document: &LyricDocument) -> LyricDocument {
+    field_document(document, |line| line.translation.clone())
+}
+
 fn reading_document(document: &LyricDocument) -> LyricDocument {
     field_document(document, |line| line.reading.clone())
 }
@@ -1118,6 +1226,7 @@ fn field_document(
                 text,
                 words: Vec::new(),
                 ruby: Vec::new(),
+                translation: None,
                 reading: None,
                 romanized: None,
             })
@@ -1135,7 +1244,7 @@ fn build_inline_lines(base: &SourceCandidate, tracks: &[LyricTrack]) -> Vec<Inli
                 start_ms: line.start_ms,
                 duration_ms: line.duration_ms,
                 text: line.text.clone(),
-                translation: None,
+                translation: line.translation.clone(),
                 reading: line.reading.clone(),
                 romanized: line.romanized.clone(),
                 ruby: line.ruby.clone(),
@@ -1513,6 +1622,7 @@ mod tests {
                     text: "歌".into(),
                     words: Vec::new(),
                     ruby: Vec::new(),
+                    translation: None,
                     reading: None,
                     romanized: None,
                 }],

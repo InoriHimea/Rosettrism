@@ -279,6 +279,7 @@ fn parse_qrc_lines(text: &str) -> Result<LyricDocument> {
             text,
             words,
             ruby: Vec::new(),
+            translation: None,
             reading: None,
             romanized: None,
         });

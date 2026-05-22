@@ -154,8 +154,14 @@ async fn fetch(
                 "text/plain; charset=utf-8",
                 raw,
             )),
-            SpecificFetchResult::Json { document, .. } => {
-                let body = serde_json::to_vec_pretty(&document)?;
+            SpecificFetchResult::Json {
+                document, unified, ..
+            } => {
+                let body = if let Some(unified) = unified {
+                    serde_json::to_vec_pretty(&unified)?
+                } else {
+                    serde_json::to_vec_pretty(&document)?
+                };
                 Ok(response_with_body(
                     StatusCode::OK,
                     "application/json; charset=utf-8",
@@ -361,14 +367,19 @@ async fn fetch_result(
             result,
             document,
             annotations,
+            unified,
         } => {
-            let body = serde_json::to_vec_pretty(&json!({
+            let mut body = json!({
                 "source": source,
                 "format": "json",
                 "result": result,
                 "document": document,
                 "annotations": annotations,
-            }))?;
+            });
+            if let Some(unified) = unified {
+                body["unified"] = json!(unified);
+            }
+            let body = serde_json::to_vec_pretty(&body)?;
             Ok(response_with_body(
                 StatusCode::OK,
                 "application/json; charset=utf-8",

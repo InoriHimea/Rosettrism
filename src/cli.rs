@@ -266,8 +266,14 @@ pub async fn run() -> anyhow::Result<()> {
                     SpecificFetchResult::Raw { raw, .. } => {
                         write_output(output.as_ref(), &raw).await?;
                     }
-                    SpecificFetchResult::Json { document, .. } => {
-                        let rendered = export_document(&document, OutputFormat::Json)?;
+                    SpecificFetchResult::Json {
+                        document, unified, ..
+                    } => {
+                        let rendered = if let Some(unified) = unified {
+                            serde_json::to_vec_pretty(&unified)?
+                        } else {
+                            export_document(&document, OutputFormat::Json)?
+                        };
                         write_output(output.as_ref(), &rendered).await?;
                     }
                     SpecificFetchResult::RawMany {

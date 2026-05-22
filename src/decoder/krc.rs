@@ -82,6 +82,7 @@ pub fn parse(text: &str) -> Result<LyricDocument> {
             text,
             words,
             ruby: Vec::new(),
+            translation: None,
             reading: None,
             romanized: None,
         });

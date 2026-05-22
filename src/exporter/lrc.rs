@@ -61,6 +61,7 @@ mod tests {
                 text: "line".into(),
                 words: Vec::new(),
                 ruby: Vec::new(),
+                translation: None,
                 reading: None,
                 romanized: None,
             }],

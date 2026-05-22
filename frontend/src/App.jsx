@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createPortal } from 'react-dom';
 import { LyricPlaybackView } from './LyricPlaybackView.jsx';
@@ -354,6 +354,7 @@ function App() {
   const [resultDetail, setResultDetail] = useState('');
   const [resultDetailData, setResultDetailData] = useState(null);
   const [resultDetailBusy, setResultDetailBusy] = useState(false);
+  const [resultDetailScrollTick, setResultDetailScrollTick] = useState(0);
   const [lyricSettings, setLyricSettings] = useState(readLyricSettings);
   const [aiSettings, setAiSettings] = useState(readAiSettings);
   const [busy, setBusy] = useState(false);
@@ -543,6 +544,9 @@ function App() {
       const data = preserveEntrySingingAnnotations(JSON.parse(text), selectedResult, resultDetailData);
       setResultDetailData(data);
       setResultDetail(JSON.stringify(data, null, 2));
+      if (requestedFormat === 'json') {
+        setResultDetailScrollTick((tick) => tick + 1);
+      }
       await refreshMeta();
     } catch (err) {
       setResultDetailData(null);
@@ -651,6 +655,7 @@ function App() {
             resultDetailData={resultDetailData}
             resultDetailBusy={resultDetailBusy}
             lyricSettings={lyricSettings}
+            resultDetailScrollTick={resultDetailScrollTick}
             searchLyric={searchLyric}
             fetchAggregate={fetchAggregate}
             openResultDetail={openResultDetail}
@@ -871,6 +876,7 @@ function FetchView({
   resultDetailData,
   resultDetailBusy,
   lyricSettings,
+  resultDetailScrollTick,
   searchLyric,
   fetchAggregate,
   openResultDetail,
@@ -1020,6 +1026,7 @@ function FetchView({
         detailData={resultDetailData}
         busy={resultDetailBusy}
         lyricSettings={lyricSettings}
+        scrollTick={resultDetailScrollTick}
         close={closeResultDetail}
         fetchSelectedResult={fetchSelectedResult}
       />
@@ -1133,7 +1140,9 @@ function ErrorMessage({ t, error }) {
   );
 }
 
-function ResultDialog({ t, entry, detail, detailData, busy, lyricSettings, close, fetchSelectedResult }) {
+function ResultDialog({ t, entry, detail, detailData, busy, lyricSettings, scrollTick, close, fetchSelectedResult }) {
+  const dialogRef = useRef(null);
+  const playbackRef = useRef(null);
   const lyricPlayback = useMemo(
     () => normalizeLyricPayload({
       ...(detailData || {}),
@@ -1155,6 +1164,13 @@ function ResultDialog({ t, entry, detail, detailData, busy, lyricSettings, close
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [entry, close]);
 
+  useEffect(() => {
+    if (!scrollTick || !lyricPlayback.playable || !playbackRef.current) {
+      return;
+    }
+    playbackRef.current.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }, [scrollTick, lyricPlayback.playable]);
+
   if (!entry) {
     return null;
   }
@@ -1170,6 +1186,7 @@ function ResultDialog({ t, entry, detail, detailData, busy, lyricSettings, close
         role="dialog"
         aria-modal="true"
         aria-labelledby="result-dialog-title"
+        ref={dialogRef}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="dialog-title">
@@ -1223,7 +1240,9 @@ function ResultDialog({ t, entry, detail, detailData, busy, lyricSettings, close
           <pre className="cache-preview">{JSON.stringify(entry.extra || {}, null, 2)}</pre>
         </div>
         {lyricPlayback.playable ? (
-          <LyricPlaybackView lyric={lyricPlayback} settings={lyricSettings} t={t} />
+          <div className="dialog-playback-section" ref={playbackRef}>
+            <LyricPlaybackView lyric={lyricPlayback} settings={lyricSettings} t={t} />
+          </div>
         ) : detailData ? (
           <p className="hint">{t.lyricPreviewUnavailable}</p>
         ) : null}

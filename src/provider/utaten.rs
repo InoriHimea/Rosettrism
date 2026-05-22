@@ -287,6 +287,7 @@ impl RubyParseState {
                     text: line.text,
                     words: Vec::new(),
                     ruby: line.ruby,
+                    translation: None,
                     romanized: None,
                 })
                 .collect(),
@@ -388,6 +389,7 @@ fn text_to_document(text: &str) -> Option<LyricDocument> {
             text: line.to_string(),
             words: Vec::new(),
             ruby: Vec::new(),
+            translation: None,
             reading: None,
             romanized: None,
         })

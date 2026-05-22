@@ -47,9 +47,10 @@ export function LyricPlaybackView({ lyric, settings, t }) {
   const visibleBodyLine = activeBodyLine || nextBodyLine || bodyLines[bodyLines.length - 1];
   const currentStripText = activeFlowLine?.text || visibleBodyLine?.text;
   const focusFlowIndex = activeFlowIndex >= 0 ? activeFlowIndex : nextFlowIndex >= 0 ? nextFlowIndex : flowLines.length - 1;
+  const initialFlowLine = flowLines[0];
   const scrollTargetId = renderMode === 'vertical'
-    ? showCountdown && countdown.targetLineId
-      ? `countdown-${countdown.targetLineId}`
+    ? currentMs <= 0
+      ? initialFlowLine?.id
       : (activeFlowLine ? activeFlowLine.id : visibleFlowLine?.id)
     : null;
 
@@ -312,7 +313,7 @@ function KaraokeStage({
         <KaraokeSlot
           slot={leftSlot}
           currentMs={currentMs}
-          focusBodyIndex={focusFlowIndex}
+          focusBodyIndex={focusIndex}
           translationMode={translationMode}
           seek={seek}
           t={t}
@@ -322,7 +323,7 @@ function KaraokeStage({
         <KaraokeSlot
           slot={rightSlot}
           currentMs={currentMs}
-          focusBodyIndex={focusFlowIndex}
+          focusBodyIndex={focusIndex}
           translationMode={translationMode}
           seek={seek}
           t={t}
@@ -387,15 +388,16 @@ function LineText({ line, currentMs, active, translationMode, t }) {
     return <span className="lyric-line-text lyric-meta-text">{line.text || '· · ·'}</span>;
   }
 
-  if (!line.words.length) {
+  if (!line.words.length || line.ruby?.length) {
     const progress = active ? lyricLineProgress(line, currentMs) : 0;
     const text = line.text || '· · ·';
     const lineAnnotations = line.annotations || [];
+    const content = line.ruby?.length ? <RubyText text={text} ruby={line.ruby} /> : text;
     return (
-      <span className="lyric-line-text lyric-progress-text" style={lyricProgressStyle(progress)}>
+      <span className={`lyric-line-text lyric-progress-text${line.ruby?.length ? ' lyric-ruby-text' : ''}`} style={lyricProgressStyle(progress)}>
         {lineAnnotations.length > 0 ? <AnnotationLayer annotations={lineAnnotations} active={active} t={t} /> : null}
-        <span className="lyric-progress-base">{text}</span>
-        <span className="lyric-progress-fill" aria-hidden="true">{text}</span>
+        <span className="lyric-progress-base">{content}</span>
+        <span className="lyric-progress-fill" aria-hidden="true">{content}</span>
       </span>
     );
   }
@@ -426,6 +428,34 @@ function LineText({ line, currentMs, active, translationMode, t }) {
       ) : null}
     </span>
   );
+}
+
+function RubyText({ text, ruby }) {
+  const chars = Array.from(text || '');
+  const nodes = [];
+  let cursor = 0;
+  for (const span of ruby || []) {
+    const start = Math.max(0, Math.min(chars.length, Number(span.startChar ?? span.start_char)));
+    const end = Math.max(start, Math.min(chars.length, Number(span.endChar ?? span.end_char)));
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= cursor) {
+      continue;
+    }
+    if (start > cursor) {
+      nodes.push(chars.slice(cursor, start).join(''));
+    }
+    const base = chars.slice(start, end).join('') || span.text || '';
+    nodes.push(
+      <ruby key={`${start}-${end}-${span.reading}`}>
+        <span>{base}</span>
+        <rt>{span.reading}</rt>
+      </ruby>,
+    );
+    cursor = end;
+  }
+  if (cursor < chars.length) {
+    nodes.push(chars.slice(cursor).join(''));
+  }
+  return nodes.length ? nodes : text;
 }
 
 function visibleWordAnnotations(words, word, wordIndex) {

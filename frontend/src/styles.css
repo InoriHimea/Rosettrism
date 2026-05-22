@@ -685,6 +685,14 @@ nav button.nav-active::before {
   gap: 10px;
 }
 
+.dialog-playback-section {
+  min-height: calc(100dvh - 96px);
+}
+
+.dialog-playback-section .lyric-playback-card {
+  min-height: inherit;
+}
+
 .result-preview {
   max-height: 42vh;
 }
@@ -1015,7 +1023,8 @@ nav button.nav-active::before {
   border-radius: 28px;
   box-shadow: 0 28px 78px rgba(137, 96, 17, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.58);
   color: #17150d;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 14px;
   overflow: hidden;
   padding: 18px;
@@ -1314,6 +1323,18 @@ nav button.nav-active::before {
   min-height: 430px;
   overflow: hidden;
   position: relative;
+}
+
+.dialog-playback-section .lyric-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.dialog-playback-section .lyric-lines,
+.dialog-playback-section .lyric-karaoke-lines {
+  height: 100%;
+  max-height: none;
+  min-height: 0;
 }
 
 .lyric-stage-qq {
@@ -1639,6 +1660,21 @@ nav button.nav-active::before {
 .lyric-progress-fill {
   grid-area: 1 / 1;
   overflow: visible;
+}
+
+.lyric-ruby-text {
+  line-height: 1.55;
+}
+
+.lyric-ruby-text ruby {
+  ruby-align: center;
+}
+
+.lyric-ruby-text rt {
+  color: rgba(41, 32, 10, 0.58);
+  font-size: 0.42em;
+  font-weight: 800;
+  line-height: 1;
 }
 
 .lyric-line-active .lyric-progress-base {

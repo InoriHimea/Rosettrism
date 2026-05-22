@@ -38,7 +38,7 @@ export function LyricPlaybackView({ lyric, settings, t }) {
   const nextBodyLine = nextBodyIndex >= 0 ? bodyLines[nextBodyIndex] : null;
   const nextFlowIndex = flowLines.findIndex((line) => line.startMs > currentMs);
   const nextFlowLine = nextFlowIndex >= 0 ? flowLines[nextFlowIndex] : null;
-  const countdown = lyricCountdown(bodyLines, currentMs, Boolean(activeMetaLine));
+  const countdown = lyricCountdown(bodyLines, currentMs);
   const showCountdown = countdown.visible;
   const countdownBodyIndex = countdown.targetLineId
     ? bodyLines.findIndex((line) => line.id === countdown.targetLineId)
@@ -449,7 +449,12 @@ function LineSubtext({ line, translationMode }) {
   const translation = line.translation || line.englishTranslation || '';
   const reading = line.reading || line.romanized || '';
   if (translationMode === 'bilingual' && translation) {
-    return <small className="lyric-line-translation">{translation}</small>;
+    return (
+      <>
+        <small className="lyric-line-translation">{translation}</small>
+        {reading ? <small className="lyric-line-reading">{reading}</small> : null}
+      </>
+    );
   }
   if (translationMode === 'translation' && reading) {
     return <small className="lyric-line-reading">{reading}</small>;
@@ -486,7 +491,7 @@ function AnnotationLayer({ annotations, active, t }) {
             style={style}
             title={annotation.text ? `${label}: ${annotation.text}` : label}
           >
-            {annotation.type === 'breath' || annotation.type === 'stress' ? (
+            {annotation.type === 'breath' || annotation.type === 'stress' || annotation.type === 'long_tone' ? (
               <>
                 {active ? <span className="lyric-annotation-text lyric-annotation-label">{text}</span> : null}
                 <AnnotationGlyph type={annotation.type} />
@@ -511,11 +516,7 @@ function AnnotationGlyph({ type }) {
     case 'breath':
       return <span className="annotation-glyph annotation-glyph-text">V</span>;
     case 'long_tone':
-      return (
-        <svg className="annotation-glyph" viewBox="0 0 14 12" aria-hidden="true" focusable="false">
-          <rect x="1" y="5" width="12" height="2" rx="1" />
-        </svg>
-      );
+      return <span className="annotation-glyph annotation-glyph-text">_</span>;
     case 'portamento_up':
       return (
         <svg className="annotation-glyph" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
@@ -581,12 +582,17 @@ function findActiveTimedLineIndex(lines, currentMs) {
 function buildIntroMetaLines(lines) {
   const unique = [];
   const seen = new Set();
+  const titleText = firstMetaTitleText(lines);
   for (const line of lines) {
     const text = String(line.text || '').trim();
-    if (!text || seen.has(text)) {
+    const comparable = normalizeMetaText(text);
+    if (!text || seen.has(comparable)) {
       continue;
     }
-    seen.add(text);
+    if (titleText && comparable !== normalizeMetaText(titleText) && looksLikeTitleDuplicate(text, titleText)) {
+      continue;
+    }
+    seen.add(comparable);
     const index = unique.length;
     unique.push({
       ...line,
@@ -602,17 +608,28 @@ function buildIntroMetaLines(lines) {
   return unique;
 }
 
-function lyricCountdown(lines, currentMs, suppressIntro = false) {
-  if (suppressIntro) {
-    return { count: 0, flashing: false, exiting: false, remainingMs: 0, targetLineId: null, visible: false };
-  }
-  const exitingLine = lines.find((line) => currentMs >= line.startMs && currentMs < line.startMs + 260);
+function firstMetaTitleText(lines) {
+  return String(lines.find((line) => String(line.id || '').startsWith('meta-title-'))?.text || '').trim();
+}
+
+function normalizeMetaText(text) {
+  return String(text || '').replace(/[\s—–-]+/g, '').trim().toLowerCase();
+}
+
+function looksLikeTitleDuplicate(text, titleText) {
+  const normalized = normalizeMetaText(text);
+  const title = normalizeMetaText(titleText);
+  return Boolean(title && (normalized === title || title.includes(normalized) || normalized.includes(title)));
+}
+
+function lyricCountdown(lines, currentMs) {
+  const exitingLine = lines.find((line, index) => countdownEligible(lines, index) && currentMs >= line.startMs && currentMs < line.startMs + 420);
   if (exitingLine) {
     return {
       count: 1,
       flashing: false,
       exiting: true,
-      remainingMs: Math.max(0, exitingLine.startMs + 260 - currentMs),
+      remainingMs: Math.max(0, exitingLine.startMs + 420 - currentMs),
       targetLineId: exitingLine.id,
       visible: true,
     };
@@ -625,8 +642,7 @@ function lyricCountdown(lines, currentMs, suppressIntro = false) {
   }
 
   const remainingMs = nextLine.startMs - currentMs;
-  const hasLongGap = nextIndex === 0 || (lines[nextIndex - 1] && nextLine.startMs - lines[nextIndex - 1].endMs >= 9000);
-  if (!hasLongGap) {
+  if (!countdownEligible(lines, nextIndex)) {
     return { count: 0, flashing: false, exiting: false, remainingMs, targetLineId: nextLine.id, visible: false };
   }
   if (remainingMs <= 1200) {
@@ -636,4 +652,15 @@ function lyricCountdown(lines, currentMs, suppressIntro = false) {
     return { count: 2, flashing: false, exiting: false, remainingMs, targetLineId: nextLine.id, visible: true };
   }
   return { count: 3, flashing: remainingMs > 3200, exiting: false, remainingMs, targetLineId: nextLine.id, visible: true };
+}
+
+function countdownEligible(lines, index) {
+  if (index < 0 || !lines[index]) {
+    return false;
+  }
+  if (index === 0) {
+    return lines[index].startMs >= 3200;
+  }
+  const previous = lines[index - 1];
+  return lines[index].startMs - previous.startMs >= 9000;
 }

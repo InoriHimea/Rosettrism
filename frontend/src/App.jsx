@@ -540,7 +540,7 @@ function App() {
       if (!response.ok) {
         throw new Error(text);
       }
-      const data = preserveEntrySingingAnnotations(JSON.parse(text), selectedResult);
+      const data = preserveEntrySingingAnnotations(JSON.parse(text), selectedResult, resultDetailData);
       setResultDetailData(data);
       setResultDetail(JSON.stringify(data, null, 2));
       await refreshMeta();
@@ -1475,23 +1475,34 @@ function hasPositiveAnnotationSignal(value) {
   return value === true || value === 1 || value === '1' || String(value).toLowerCase() === 'true';
 }
 
-function preserveEntrySingingAnnotations(data, entry) {
-  const annotations = pickSingingAnnotations(entry?.extra || {});
+function preserveEntrySingingAnnotations(data, entry, previousData) {
+  const annotations = pickSingingAnnotationsFromSources(
+    data?.selectedEntry,
+    data?.result,
+    data,
+    previousData?.selectedEntry,
+    previousData?.result,
+    previousData,
+    entry,
+  );
   if (!annotations.length) {
     return data;
   }
   const selectedEntry = mergeEntryExtra(entry, data?.selectedEntry || data?.result || entry);
-  return {
+  const nextData = {
     ...data,
     selectedEntry: {
       ...selectedEntry,
-      extra: {
-        ...(selectedEntry?.extra || {}),
-        singing_annotations: selectedEntry?.extra?.singing_annotations || annotations,
-        singingAnnotationsLyric: selectedEntry?.extra?.singingAnnotationsLyric || annotations,
-      },
+      extra: withSingingAnnotations(selectedEntry?.extra, annotations),
     },
   };
+  if (data?.result && data.result !== data.selectedEntry) {
+    nextData.result = {
+      ...data.result,
+      extra: withSingingAnnotations(data.result.extra, annotations),
+    };
+  }
+  return nextData;
 }
 
 function mergeEntryExtra(fallbackEntry, entry) {
@@ -1508,13 +1519,37 @@ function mergeEntryExtra(fallbackEntry, entry) {
   };
 }
 
+function pickSingingAnnotationsFromSources(...sources) {
+  for (const source of sources) {
+    const annotations = pickSingingAnnotations(source?.extra || source || {});
+    if (annotations.length) {
+      return annotations;
+    }
+  }
+  return [];
+}
+
 function pickSingingAnnotations(extra) {
   return [
     extra.singing_annotations,
     extra.singingAnnotationsLyric,
     extra.singingAnnotations,
     extra.hasSingingAnnotationsLyric,
+    extra.qq_singing_annotations,
+    extra.qqSingingAnnotations,
   ].find((value) => Array.isArray(value) && value.length) || [];
+}
+
+function withSingingAnnotations(extra = {}, annotations) {
+  const existing = pickSingingAnnotations(extra);
+  const mergedAnnotations = existing.length ? existing : annotations;
+  return {
+    ...extra,
+    has_singing_annotations: extra.has_singing_annotations || true,
+    hasSingingAnnotations: extra.hasSingingAnnotations || true,
+    singing_annotations: mergedAnnotations,
+    singingAnnotationsLyric: Array.isArray(extra.singingAnnotationsLyric) && extra.singingAnnotationsLyric.length ? extra.singingAnnotationsLyric : mergedAnnotations,
+  };
 }
 
 function aggregateMembers(entry) {

@@ -85,6 +85,7 @@ export function normalizeUnifiedLyric(unified, context = {}) {
     const track = pickPrimaryTrack(unified.tracks || []);
     if (track?.document?.lines) {
       lines = track.document.lines.map((line, index) => normalizeLine(line, index, track.kind || 'track'));
+      lines = mergeInlineLines(lines, unified.inline_lines || []);
       base.source = track.source || base.source;
       base.title = track.document.meta?.title || base.title;
       base.artist = track.document.meta?.artist || base.artist;
@@ -239,8 +240,8 @@ function ensureLeadingTitleLine(lines, displayTitle) {
     return lines;
   }
   const firstLine = lines[0];
-  if (firstLine.isMeta && firstLine.text === displayTitle) {
-    return lines;
+  if (firstLine.isMeta && looksLikeSameTitle(firstLine.text, displayTitle)) {
+    return [{ ...firstLine, text: displayTitle }, ...lines.slice(1)];
   }
   return [
     {
@@ -264,6 +265,16 @@ function ensureLeadingTitleLine(lines, displayTitle) {
 
 function looksLikeTitleLine(value) {
   return /^.+?-.+$/.test(textValue(value));
+}
+
+function looksLikeSameTitle(value, displayTitle) {
+  const normalized = normalizeTitleText(value);
+  const title = normalizeTitleText(displayTitle);
+  return Boolean(title && (normalized === title || title.includes(normalized) || normalized.includes(title)));
+}
+
+function normalizeTitleText(value) {
+  return textValue(value).replace(/[\s—–－-]+/g, '').trim().toLowerCase();
 }
 
 function pickArtistAlias(...sources) {
@@ -331,25 +342,85 @@ function pickPrimaryTrack(tracks) {
     || null;
 }
 
-function enrichLinesFromTracks(lines, tracks) {
-  const translationTracks = tracks.filter((track) => track.kind === 'translation' && track.document?.lines?.length);
-  if (!translationTracks.length) {
+function mergeInlineLines(lines, inlineLines) {
+  if (!Array.isArray(inlineLines) || !inlineLines.length) {
     return lines;
   }
   return lines.map((line) => {
-    if (line.translation || line.englishTranslation) {
+    const match = nearestTimedLine(inlineLines, line.startMs);
+    if (!match) {
       return line;
     }
-    const match = translationTracks
-      .map((track) => nearestTimedLine(track.document.lines || [], line.startMs))
-      .find(Boolean);
-    if (!match?.text) {
-      return line;
-    }
-    return looksEnglish(match.text)
-      ? { ...line, englishTranslation: match.text }
-      : { ...line, translation: match.text };
+    return {
+      ...line,
+      translation: line.translation || textValue(match.translation ?? match.translation_text ?? match.translationText ?? match.translated ?? match.trans ?? match.extra?.translation),
+      englishTranslation: line.englishTranslation || textValue(match.english_translation ?? match.englishTranslation ?? match.english ?? match.en_translation ?? match.enTranslation ?? match.extra?.englishTranslation ?? match.extra?.english),
+      reading: line.reading || pickLineReading(match),
+      romanized: line.romanized || pickLineRomanized(match),
+    };
   });
+}
+
+function enrichLinesFromTracks(lines, tracks) {
+  const timedTracks = (tracks || []).filter((track) => track.document?.lines?.length);
+  if (!timedTracks.length) {
+    return lines;
+  }
+  const translationTracks = timedTracks.filter((track) => isTranslationTrack(track));
+  const readingTracks = timedTracks.filter((track) => isReadingTrack(track));
+  const romanizedTracks = timedTracks.filter((track) => isRomanizedTrack(track));
+  return lines.map((line) => {
+    let nextLine = line;
+    if (!nextLine.translation && !nextLine.englishTranslation) {
+      const match = nearestTrackLine(translationTracks, nextLine.startMs);
+      const text = textValue(match?.text);
+      if (text) {
+        nextLine = looksEnglish(text)
+          ? { ...nextLine, englishTranslation: text }
+          : { ...nextLine, translation: text };
+      }
+    }
+    if (!nextLine.reading) {
+      const match = nearestTrackLine(readingTracks, nextLine.startMs);
+      const reading = pickLineReading(match) || textValue(match?.text);
+      if (reading) {
+        nextLine = { ...nextLine, reading };
+      }
+    }
+    if (!nextLine.romanized) {
+      const match = nearestTrackLine(romanizedTracks, nextLine.startMs);
+      const romanized = pickLineRomanized(match) || textValue(match?.text);
+      if (romanized) {
+        nextLine = { ...nextLine, romanized };
+      }
+    }
+    return nextLine;
+  });
+}
+
+function nearestTrackLine(tracks, startMs) {
+  return tracks
+    .map((track) => nearestTimedLine(track.document.lines || [], startMs))
+    .find(Boolean);
+}
+
+function isTranslationTrack(track) {
+  const kind = normalizeTrackKind(track?.kind || track?.type || track?.name || track?.label);
+  return /trans|translation|translated|english|en/.test(kind);
+}
+
+function isReadingTrack(track) {
+  const kind = normalizeTrackKind(track?.kind || track?.type || track?.name || track?.label || track?.source);
+  return /reading|ruby|kana|furigana|phonetic|phoneme|pronunciation|pronounce|jyutping|cantonese|yue|pinyin|roma|roman|transliteration|sound|syllable/.test(kind);
+}
+
+function isRomanizedTrack(track) {
+  const kind = normalizeTrackKind(track?.kind || track?.type || track?.name || track?.label || track?.source);
+  return /roman|roma|romaji|latin|transliteration|jyutping|cantonese|yue|phonetic|phoneme|pronunciation|pronounce|pinyin|sound|syllable/.test(kind);
+}
+
+function normalizeTrackKind(value) {
+  return String(value || '').replace(/([a-z0-9])([A-Z])/g, '$1_$2').replace(/[-\s]+/g, '_').toLowerCase();
 }
 
 function nearestTimedLine(lines, startMs) {
@@ -379,8 +450,8 @@ function normalizeLine(line, index, trackId) {
     isMeta: isMetaLyricLine(text),
     translation: textValue(line.translation ?? line.translation_text ?? line.translationText ?? line.translated ?? line.trans ?? line.extra?.translation),
     englishTranslation: textValue(line.english_translation ?? line.englishTranslation ?? line.english ?? line.en_translation ?? line.enTranslation ?? line.extra?.englishTranslation ?? line.extra?.english),
-    reading: textValue(line.reading),
-    romanized: textValue(line.romanized),
+    reading: pickLineReading(line),
+    romanized: pickLineRomanized(line) || pickLineReading(line),
     ruby: line.ruby || [],
     words: normalizeWords(line.words || [], startMs, index),
     annotations: [],
@@ -593,12 +664,97 @@ export function formatPlaybackTime(ms) {
   return `${minutes}:${seconds}`;
 }
 
+function pickLineReading(line) {
+  return firstText(
+    line?.reading,
+    line?.readings,
+    line?.ruby,
+    line?.furigana,
+    line?.kana,
+    line?.pronunciation,
+    line?.phonetic,
+    line?.phonetics,
+    line?.pinyin,
+    line?.jyutping,
+    line?.cantonese,
+    line?.cantonese_romanization,
+    line?.cantoneseRomanization,
+    line?.yue,
+    line?.yue_romanization,
+    line?.yueRomanization,
+    line?.phoneme,
+    line?.phonemes,
+    line?.pronounce,
+    line?.pronounces,
+    line?.extra?.reading,
+    line?.extra?.readings,
+    line?.extra?.ruby,
+    line?.extra?.furigana,
+    line?.extra?.kana,
+    line?.extra?.pronunciation,
+    line?.extra?.phonetic,
+    line?.extra?.phonetics,
+    line?.extra?.pinyin,
+    line?.extra?.jyutping,
+    line?.extra?.cantonese,
+    line?.extra?.cantonese_romanization,
+    line?.extra?.cantoneseRomanization,
+    line?.extra?.yue,
+    line?.extra?.yue_romanization,
+    line?.extra?.yueRomanization,
+    line?.extra?.phoneme,
+    line?.extra?.phonemes,
+    line?.extra?.pronounce,
+    line?.extra?.pronounces,
+  );
+}
+
+function pickLineRomanized(line) {
+  return firstText(
+    line?.romanized,
+    line?.romanised,
+    line?.romaji,
+    line?.romanization,
+    line?.romanisation,
+    line?.romaji_text,
+    line?.romajiText,
+    line?.transliteration,
+    line?.transliteration_text,
+    line?.transliterationText,
+    line?.latin,
+    line?.latin_text,
+    line?.latinText,
+    line?.jyutping,
+    line?.cantonese_romanization,
+    line?.cantoneseRomanization,
+    line?.extra?.romanized,
+    line?.extra?.romanised,
+    line?.extra?.romaji,
+    line?.extra?.romanization,
+    line?.extra?.romanisation,
+    line?.extra?.romaji_text,
+    line?.extra?.romajiText,
+    line?.extra?.transliteration,
+    line?.extra?.transliteration_text,
+    line?.extra?.transliterationText,
+    line?.extra?.latin,
+    line?.extra?.latin_text,
+    line?.extra?.latinText,
+    line?.extra?.jyutping,
+    line?.extra?.cantonese_romanization,
+    line?.extra?.cantoneseRomanization,
+  );
+}
+
 function textValue(value) {
   if (typeof value === 'string') {
     return value.trim();
   }
+  if (Array.isArray(value)) {
+    return value.map((item) => textValue(item)).filter(Boolean).join(' ');
+  }
   if (value && typeof value === 'object') {
-    return textValue(value.text ?? value.value ?? value.content);
+    return textValue(value.text ?? value.value ?? value.content ?? value.lyric ?? value.line);
   }
   return '';
 }

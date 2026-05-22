@@ -1125,13 +1125,13 @@ nav button.nav-active::before {
 
 .lyric-annotation-mark {
   align-items: center;
-  background: color-mix(in srgb, var(--annotation-tint, #10b957) 8%, rgba(255, 255, 255, 0.62));
-  border: 1px solid color-mix(in srgb, var(--annotation-tint, #10b957) 28%, rgba(255, 255, 255, 0.52));
+  background: color-mix(in srgb, var(--annotation-tint, #10b957) 18%, rgba(255, 255, 255, 0.72));
+  border: 1px solid color-mix(in srgb, var(--annotation-tint, #10b957) 48%, rgba(255, 255, 255, 0.62));
   border-radius: 999px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.52), 0 4px 10px rgba(70, 49, 9, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.62), 0 4px 10px rgba(70, 49, 9, 0.12);
   color: var(--annotation-tint, currentColor);
   display: inline-flex;
-  font-size: 0.28em;
+  font-size: 0.32em;
   font-weight: 950;
   gap: 0.28em;
   justify-content: center;
@@ -1141,7 +1141,7 @@ nav button.nav-active::before {
   overflow: visible;
   padding: 0.18em 0.42em;
   position: absolute;
-  top: calc(-2.1em - var(--annotation-index, 0) * 1.45em);
+  top: calc(-1.6em - var(--annotation-index, 0) * 1.45em);
   transform: translateX(-50%);
 }
 
@@ -1208,47 +1208,72 @@ nav button.nav-active::before {
 }
 
 .lyric-annotation-mark.annotation-stress,
-.lyric-annotation-mark.annotation-breath {
+.lyric-annotation-mark.annotation-breath,
+.lyric-annotation-mark.annotation-long-tone {
   background: transparent;
   border: 0;
   box-shadow: none;
-  display: grid;
-  gap: 0.08em;
-  justify-items: center;
   min-height: 0;
   min-width: max-content;
+  overflow: visible;
   padding: 0;
 }
 
 .lyric-annotation-mark.annotation-breath {
+  display: grid;
+  gap: 0.04em;
+  justify-items: center;
   left: 0;
-  top: calc(-2.34em - var(--annotation-index, 0) * 1.5em);
+  top: calc(-1.24em - var(--annotation-index, 0) * 1.18em);
 }
 
-.lyric-annotation-mark.annotation-stress {
-  top: -2.34em;
+.lyric-annotation-mark.annotation-stress,
+.lyric-annotation-mark.annotation-long-tone {
+  display: block;
+  height: 100%;
+  min-width: 100%;
+  top: 0;
 }
 
 .lyric-annotation-label {
-  color: color-mix(in srgb, var(--annotation-tint, #10b957) 42%, #2b2513);
-  font-size: 0.86em;
-  font-weight: 900;
+  color: color-mix(in srgb, var(--annotation-tint, #10b957) 64%, #1f1a0b);
+  font-size: 0.92em;
+  font-weight: 950;
   line-height: 1;
   min-height: 1em;
+  text-shadow: 0 1px 4px rgba(255, 255, 255, 0.52), 0 3px 10px color-mix(in srgb, var(--annotation-tint, #10b957) 24%, transparent);
 }
 
 .lyric-annotation-mark.annotation-breath .annotation-glyph-text {
-  font-size: 1.12em;
+  font-size: 1.2em;
+  text-shadow: 0 2px 7px rgba(22, 163, 74, 0.22);
 }
 
-.lyric-annotation-mark.annotation-stress .annotation-glyph-text {
-  font-size: 1.35em;
-  grid-row: 2;
-  transform: translateY(4.55em);
+.lyric-annotation-mark.annotation-stress .annotation-glyph-text,
+.lyric-annotation-mark.annotation-long-tone .annotation-glyph-text,
+.lyric-annotation-mark.annotation-stress .lyric-annotation-label,
+.lyric-annotation-mark.annotation-long-tone .lyric-annotation-label {
+  left: 50%;
+  position: absolute;
+  transform: translateX(-50%);
 }
 
-.lyric-annotation-mark.annotation-stress .lyric-annotation-label {
-  grid-row: 1;
+.lyric-annotation-mark.annotation-stress .lyric-annotation-label,
+.lyric-annotation-mark.annotation-long-tone .lyric-annotation-label {
+  bottom: calc(100% + 0.06em);
+}
+
+.lyric-annotation-mark.annotation-stress .annotation-glyph-text,
+.lyric-annotation-mark.annotation-long-tone .annotation-glyph-text {
+  font-size: 1.28em;
+  top: calc(100% - 0.68em);
+}
+
+.lyric-annotation-mark.annotation-long-tone .annotation-glyph-text {
+  font-size: 1.58em;
+  font-weight: 950;
+  line-height: 0.75;
+  top: calc(100% - 0.78em);
 }
 
 .lyric-line-active .lyric-word-annotated .lyric-annotation-layer {
@@ -1460,7 +1485,7 @@ nav button.nav-active::before {
 }
 
 .lyric-dots-exiting .lyric-gap-dot:not(.lyric-gap-dot-hidden) {
-  animation: lyric-dot-bubble-out 260ms ease-out both;
+  animation: lyric-dot-bubble-out 420ms cubic-bezier(0.2, 0.75, 0.18, 1) both;
 }
 
 @keyframes lyric-dot-cycle-1 {
@@ -1482,9 +1507,9 @@ nav button.nav-active::before {
 }
 
 @keyframes lyric-dot-bubble-out {
-  0% { opacity: 1; filter: blur(0) drop-shadow(0 4px 9px rgba(16, 185, 87, 0.18)); transform: scale(1); }
-  60% { opacity: 0.72; filter: blur(0.2px) drop-shadow(0 8px 14px rgba(16, 185, 87, 0.14)); transform: scale(1.18); }
-  100% { opacity: 0; filter: blur(1.5px); transform: scale(0.72); }
+  0% { opacity: 1; filter: blur(0) drop-shadow(0 4px 9px rgba(16, 185, 87, 0.2)); transform: translateY(0) scale(1); }
+  48% { opacity: 0.86; filter: blur(0.2px) drop-shadow(0 9px 16px rgba(16, 185, 87, 0.22)); transform: translateY(-5px) scale(1.42); }
+  100% { opacity: 0; filter: blur(1.8px); transform: translateY(-12px) scale(0.62); }
 }
 
 .lyric-line-past,

@@ -686,11 +686,16 @@ nav button.nav-active::before {
 }
 
 .dialog-playback-section {
+  display: flex;
+  flex-direction: column;
   min-height: calc(100dvh - 96px);
 }
 
 .dialog-playback-section .lyric-playback-card {
-  min-height: inherit;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
 }
 
 .result-preview {
@@ -1529,8 +1534,8 @@ nav button.nav-active::before {
 
 @keyframes lyric-dot-bubble-out {
   0% { opacity: 1; filter: blur(0) drop-shadow(0 4px 9px rgba(16, 185, 87, 0.2)); transform: translateY(0) scale(1); }
-  48% { opacity: 0.86; filter: blur(0.2px) drop-shadow(0 9px 16px rgba(16, 185, 87, 0.22)); transform: translateY(-5px) scale(1.42); }
-  100% { opacity: 0; filter: blur(1.8px); transform: translateY(-12px) scale(0.62); }
+  48% { opacity: 0.86; filter: blur(0.4px) drop-shadow(0 12px 20px rgba(16, 185, 87, 0.28)); transform: translateY(-18px) scale(1.32); }
+  100% { opacity: 0; filter: blur(1.2px) drop-shadow(0 20px 32px rgba(16, 185, 87, 0.12)); transform: translateY(-42px) scale(1.68); }
 }
 
 .lyric-line-past,

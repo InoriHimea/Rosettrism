@@ -1280,8 +1280,9 @@ nav button.nav-active::before {
 }
 
 .lyric-annotation-mark.annotation-stress .annotation-glyph-text {
+  bottom: -0.36em;
   font-size: 1.22em;
-  top: -0.36em;
+  top: auto;
 }
 
 .lyric-annotation-mark.annotation-long-tone .annotation-glyph-text {
@@ -1289,6 +1290,7 @@ nav button.nav-active::before {
   font-size: 1.36em;
   font-weight: 950;
   line-height: 0.75;
+  top: auto;
 }
 
 .lyric-line-active .lyric-word-annotated .lyric-annotation-layer {

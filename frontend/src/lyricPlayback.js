@@ -199,7 +199,7 @@ function isAnnotationLike(value, forced = false) {
 function buildNormalizedLyric(base, lines, annotations) {
   const playableLines = lines.filter((line) => Number.isFinite(line.startMs));
   const titleParts = inferTitleParts(base, playableLines[0]);
-  const displayTitle = formatDisplayTitle(titleParts.title, titleParts.artist, titleParts.artistAlias);
+  const displayTitle = titleParts.displayTitle || formatDisplayTitle(titleParts.title, titleParts.artist, titleParts.artistAlias);
   const lastLine = playableLines[playableLines.length - 1];
   const durationMs = Math.max(
     lastLine?.endMs || 0,
@@ -217,15 +217,17 @@ function buildNormalizedLyric(base, lines, annotations) {
     artistAlias: titleParts.artistAlias,
     displayTitle,
     durationMs,
-    lines: ensureLeadingTitleLine(playableLines, displayTitle),
+    lines: ensureLeadingTitleLine(playableLines),
     annotations,
   };
 }
 
 function inferTitleParts(base, firstLine) {
+  const lineDisplayTitle = lyricDisplayTitleText(firstLine);
+  const baseDisplayTitle = lyricDisplayTitleText(base.title);
+  const lineInferred = splitInlineArtistAlias(lineDisplayTitle);
   const baseInferred = splitInlineArtistAlias(base.title);
-  const lineInferred = splitInlineArtistAlias(firstLine?.text);
-  const inferred = baseInferred.title ? baseInferred : lineInferred;
+  const inferred = lineInferred.title ? lineInferred : baseInferred;
   const split = splitArtistAlias(base.artist || inferred.artist);
   const artist = inferred.artist || split.artist || base.artist;
   const artistAlias = normalizeArtistAlias(inferred.artistAlias || base.artistAlias || split.artistAlias);
@@ -233,14 +235,23 @@ function inferTitleParts(base, firstLine) {
     title: inferred.title || base.title,
     artist,
     artistAlias,
+    displayTitle: lineDisplayTitle || baseDisplayTitle,
   };
+}
+
+function lyricDisplayTitleText(value) {
+  const text = textValue(value?.text ?? value);
+  if (!text || (value && typeof value === 'object' && value.isMeta === false)) {
+    return '';
+  }
+  return looksLikeLyricTitle(text) ? text : '';
 }
 
 function splitInlineArtistAlias(value) {
   const text = textValue(value);
-  let match = text.match(/^(.+?)\s*[-—–－]\s*([^\x00-\x7F\s()（）-]+)(?:[（(]([^）)]*)[）)]|([A-Za-z][\w .'-]*))?$/);
+  let match = text.match(/^(.+?)\s*[-—–－]\s*([^\x00-\x7F\s()（）-]+)(?:\s*[（(]([^）)]*)[）)]|\s+([A-Za-z][\w .'-]*))?$/);
   if (!match) {
-    match = text.match(/^(.+?)\s+([^\x00-\x7F\s()（）-]+)[（(]([^）)]*)[）)]$/);
+    match = text.match(/^(.+?)\s+([^\x00-\x7F\s()（）-]+)\s*[（(]([^）)]*)[）)]$/);
   }
   if (!match) {
     return {};
@@ -282,34 +293,8 @@ function formatDisplayTitle(title, artist, artistAlias) {
   return `${cleanTitle} - ${cleanArtist}${displayAlias ? `（${displayAlias}）` : ''}`;
 }
 
-function ensureLeadingTitleLine(lines, displayTitle) {
-  if (!displayTitle || !lines.length) {
-    return lines;
-  }
-  const firstLine = lines[0];
-  if (firstLine.isMeta && looksLikeSameTitle(firstLine.text, displayTitle)) {
-    return [{ ...firstLine, text: displayTitle }, ...lines.slice(1)];
-  }
+function ensureLeadingTitleLine(lines) {
   return lines;
-}
-
-function looksLikeTitleLine(value) {
-  return /^.+?-.+$/.test(textValue(value));
-}
-
-function looksLikeSameTitle(value, displayTitle) {
-  const normalized = normalizeTitleText(value);
-  const title = normalizeTitleText(displayTitle);
-  return Boolean(title && (normalized === title || title.includes(normalized) || normalized.includes(title)));
-}
-
-function normalizeTitleText(value) {
-  return textValue(value)
-    .replace(/（[^）]*）|\([^)]*\)/g, '')
-    .replace(/([㐀-鿿])([A-Za-z][\w .'-]*)$/u, '$1')
-    .replace(/[\s—–－-]+/g, '')
-    .trim()
-    .toLowerCase();
 }
 
 function pickArtistAlias(...sources) {

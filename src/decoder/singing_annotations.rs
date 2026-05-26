@@ -191,21 +191,8 @@ pub fn parse_qrc(raw: &str) -> Vec<Annotation> {
             if let Some(ann_type) = pending_annotation.take() {
                 // Find the timing for this character
                 // Look for the word timing that follows this character
-                let timing = word_timings
-                    .iter()
-                    .find(|(_, _, match_start, _)| *match_start > ch_byte_start)
-                    .or_else(|| {
-                        // If no timing found after, use the one before
-                        word_timings
-                            .iter()
-                            .rev()
-                            .find(|(_, _, _, match_end)| *match_end <= ch_byte_start)
-                    });
-
-                let (start_ms, duration_ms) = match timing {
-                    Some((start, dur, _, _)) => (*start, *dur),
-                    None => (line_start_ms, 0),
-                };
+                let (start_ms, duration_ms) = qrc_character_timing(&word_timings, ch_byte_start)
+                    .unwrap_or((line_start_ms, 0));
 
                 annotations.push(Annotation {
                     annotation_type: ann_type,
@@ -220,6 +207,27 @@ pub fn parse_qrc(raw: &str) -> Vec<Annotation> {
     }
 
     annotations
+}
+
+fn qrc_character_timing(
+    word_timings: &[(u32, u32, usize, usize)],
+    character_byte_start: usize,
+) -> Option<(u32, u32)> {
+    if let Some((start, duration, _, _)) = word_timings
+        .iter()
+        .find(|(_, _, match_start, _)| *match_start >= character_byte_start)
+    {
+        return Some((*start, *duration));
+    }
+
+    word_timings
+        .iter()
+        .min_by_key(|(_, _, match_start, match_end)| {
+            let start_distance = match_start.abs_diff(character_byte_start);
+            let end_distance = match_end.abs_diff(character_byte_start);
+            start_distance.min(end_distance)
+        })
+        .map(|(start, duration, _, _)| (*start, *duration))
 }
 
 /// 将结构化标注列表格式化回原始字符串表示
@@ -384,6 +392,26 @@ mod tests {
     #[test]
     fn format_empty_annotations() {
         assert_eq!(format(&[]), "");
+    }
+
+    #[test]
+    fn parse_qrc_prefix_annotations_use_word_timing() {
+        let input = "[16346,3408]^久(16346,349)`晴(17589,548)_天(18137,346)";
+        let result = parse_qrc(input);
+
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0].annotation_type, AnnotationType::Breath);
+        assert_eq!(result[0].start_ms, 16346);
+        assert_eq!(result[0].duration_ms, 349);
+        assert_eq!(result[0].text, "久");
+        assert_eq!(result[1].annotation_type, AnnotationType::Stress);
+        assert_eq!(result[1].start_ms, 17589);
+        assert_eq!(result[1].duration_ms, 548);
+        assert_eq!(result[1].text, "晴");
+        assert_eq!(result[2].annotation_type, AnnotationType::LongTone);
+        assert_eq!(result[2].start_ms, 18137);
+        assert_eq!(result[2].duration_ms, 346);
+        assert_eq!(result[2].text, "天");
     }
 
     #[test]

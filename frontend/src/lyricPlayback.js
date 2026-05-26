@@ -223,12 +223,14 @@ function buildNormalizedLyric(base, lines, annotations) {
 }
 
 function inferTitleParts(base, firstLine) {
-  const inferred = splitInlineArtistAlias(firstLine?.text);
+  const baseInferred = splitInlineArtistAlias(base.title);
+  const lineInferred = splitInlineArtistAlias(firstLine?.text);
+  const inferred = baseInferred.title ? baseInferred : lineInferred;
   const split = splitArtistAlias(base.artist || inferred.artist);
-  const artist = split.artist || base.artist || inferred.artist;
-  const artistAlias = normalizeArtistAlias(base.artistAlias || split.artistAlias || inferred.artistAlias);
+  const artist = inferred.artist || split.artist || base.artist;
+  const artistAlias = normalizeArtistAlias(inferred.artistAlias || base.artistAlias || split.artistAlias);
   return {
-    title: base.title || inferred.title,
+    title: inferred.title || base.title,
     artist,
     artistAlias,
   };
@@ -236,14 +238,17 @@ function inferTitleParts(base, firstLine) {
 
 function splitInlineArtistAlias(value) {
   const text = textValue(value);
-  const match = text.match(/^(.+?)-([^\x00-\x7F\s()（）-]+)([A-Za-z][\w .'-]*)$/);
+  let match = text.match(/^(.+?)\s*[-—–－]\s*([^\x00-\x7F\s()（）-]+)(?:[（(]([^）)]*)[）)]|([A-Za-z][\w .'-]*))?$/);
+  if (!match) {
+    match = text.match(/^(.+?)\s+([^\x00-\x7F\s()（）-]+)[（(]([^）)]*)[）)]$/);
+  }
   if (!match) {
     return {};
   }
   return {
     title: match[1].trim(),
     artist: match[2].trim(),
-    artistAlias: normalizeArtistAlias(match[3]),
+    artistAlias: normalizeArtistAlias(match[3] || match[4] || ''),
   };
 }
 
@@ -274,7 +279,7 @@ function formatDisplayTitle(title, artist, artistAlias) {
   if (!cleanArtist) {
     return cleanTitle;
   }
-  return `${cleanTitle}-${cleanArtist}${displayAlias ? `（${displayAlias}）` : ''}`;
+  return `${cleanTitle} - ${cleanArtist}${displayAlias ? `（${displayAlias}）` : ''}`;
 }
 
 function ensureLeadingTitleLine(lines, displayTitle) {
@@ -613,11 +618,6 @@ export function attachAnnotationsToLines(lines, annotations) {
 }
 
 function findAnnotationAnchorWordIndex(words, annotation) {
-  const textIndex = annotation.text ? words.findIndex((word) => word.text.includes(annotation.text)) : -1;
-  if (textIndex >= 0) {
-    return textIndex;
-  }
-
   let bestIndex = 0;
   let bestDistance = Number.POSITIVE_INFINITY;
   for (let index = 0; index < words.length; index += 1) {

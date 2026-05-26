@@ -242,6 +242,7 @@ fn parse_qrc_lines(text: &str) -> Result<LyricDocument> {
         .map_err(|err| Error::Parse(err.to_string()))?;
 
     let mut doc = LyricDocument::default();
+    let mut non_empty_index = 0usize;
 
     for raw_line in text.trim_start_matches('\u{feff}').lines() {
         let line = raw_line.trim();
@@ -256,10 +257,20 @@ fn parse_qrc_lines(text: &str) -> Result<LyricDocument> {
                 .map(|m| m.as_str().trim().to_string())
                 .unwrap_or_default();
             set_meta(&mut doc, key, value);
+            non_empty_index += 1;
             continue;
         }
 
+        if doc.meta.title.is_none() && non_empty_index < 5 {
+            if let Some(title) = qrc_inline_title(line) {
+                doc.meta.title = Some(title);
+                non_empty_index += 1;
+                continue;
+            }
+        }
+
         let Some(caps) = line_re.captures(line) else {
+            non_empty_index += 1;
             continue;
         };
 
@@ -283,10 +294,23 @@ fn parse_qrc_lines(text: &str) -> Result<LyricDocument> {
             reading: None,
             romanized: None,
         });
+        non_empty_index += 1;
     }
 
     doc.sort_and_fill_durations();
     Ok(doc)
+}
+
+fn qrc_inline_title(line: &str) -> Option<String> {
+    let inner = line.strip_prefix('[')?.strip_suffix(']')?.trim();
+    if inner.is_empty()
+        || inner.contains(':')
+        || inner.contains(',')
+        || inner.chars().all(|ch| ch.is_ascii_digit())
+    {
+        return None;
+    }
+    Some(inner.to_string())
 }
 
 fn parse_qrc_words(
@@ -851,6 +875,24 @@ mod tests {
 
         assert_eq!(doc.lines[0].text, "你好");
         assert_eq!(doc.lines[0].words[1].duration_ms, 600);
+    }
+
+    #[test]
+    fn parses_qrc_inline_title_line() {
+        let doc =
+            parse_lyric_content("[龙战骑士 - 周杰伦（Jay）]\n[1000,900]你(1000,300)好(1300,600)\n")
+                .unwrap();
+
+        assert_eq!(doc.meta.title.as_deref(), Some("龙战骑士 - 周杰伦（Jay）"));
+        assert_eq!(doc.lines[0].text, "你好");
+    }
+
+    #[test]
+    fn ignores_numeric_bracket_lines_as_qrc_titles() {
+        let doc = parse_lyric_content("[12345]\n[1000,900]你(1000,300)好(1300,600)\n").unwrap();
+
+        assert_eq!(doc.meta.title, None);
+        assert_eq!(doc.lines[0].text, "你好");
     }
 
     #[test]

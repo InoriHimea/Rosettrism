@@ -688,7 +688,8 @@ nav button.nav-active::before {
 .dialog-playback-section {
   display: flex;
   flex-direction: column;
-  min-height: calc(100dvh - 96px);
+  max-height: calc(100dvh - 96px);
+  min-height: min(720px, calc(100dvh - 96px));
 }
 
 .dialog-playback-section .lyric-playback-card {
@@ -1325,7 +1326,7 @@ nav button.nav-active::before {
 
 .lyric-stage {
   border-radius: 30px;
-  min-height: 430px;
+  min-height: 360px;
   overflow: hidden;
   position: relative;
 }
@@ -1376,10 +1377,10 @@ nav button.nav-active::before {
 .lyric-lines {
   display: grid;
   gap: 30px;
-  max-height: 430px;
-  min-height: 430px;
+  max-height: 360px;
+  min-height: 360px;
   overflow: auto;
-  padding: 82px 48px 196px 44px;
+  padding: 64px 48px 132px 44px;
   scroll-behavior: smooth;
   scrollbar-width: none;
 }
@@ -1732,8 +1733,8 @@ nav button.nav-active::before {
   display: grid;
   gap: 16px;
   inset: 0;
-  min-height: 430px;
-  padding: 52px 48px 96px;
+  min-height: 360px;
+  padding: 42px 48px 78px;
   place-items: center stretch;
   position: relative;
   z-index: 1;

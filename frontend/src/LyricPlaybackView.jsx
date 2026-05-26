@@ -18,6 +18,7 @@ export function LyricPlaybackView({ lyric, settings, t }) {
   const durationMs = Math.max(lyric.durationMs || 0, 1000);
   const renderMode = settings.renderMode === 'karaoke' ? 'karaoke' : 'vertical';
   const annotationTypes = [...new Map(lyric.annotations.map((annotation) => [annotation.type, annotation])).values()];
+  const artistLabel = formatArtistLabel(lyric.artist, lyric.artistAlias);
   const metaLines = lyric.lines.filter((line) => line.isMeta);
   const staticMetaLines = lyric.lines.filter((line) => line.isMeta && !hasUsableLineTime(line));
   const bodyLines = lyric.lines.filter((line) => !line.isMeta);
@@ -122,8 +123,8 @@ export function LyricPlaybackView({ lyric, settings, t }) {
       <div className="lyric-playback-head">
         <div>
           <span>{t.playback}</span>
-          <h4>{lyric.displayTitle || lyric.title || t.preview}</h4>
-          <p>{[lyric.artist, lyric.source].filter(Boolean).join(' / ')}</p>
+          <h4>{lyric.title || lyric.displayTitle || t.preview}</h4>
+          <p>{[artistLabel, lyric.source, lyric.inputFormat].filter(Boolean).join(' / ')}</p>
         </div>
         <span className={`lyric-playback-status ${lyric.annotations.length ? 'status-fresh' : ''}`}>
           {lyric.annotations.length ? t.annotationsAvailable : t.annotationsUnavailable}
@@ -458,6 +459,15 @@ function RubyText({ text, ruby }) {
   return nodes.length ? nodes : text;
 }
 
+function formatArtistLabel(artist, alias) {
+  const cleanArtist = String(artist || '').trim();
+  const cleanAlias = String(alias || '').trim();
+  if (!cleanArtist) {
+    return cleanAlias;
+  }
+  return cleanAlias && cleanAlias !== cleanArtist ? `${cleanArtist}（${cleanAlias}）` : cleanArtist;
+}
+
 function visibleWordAnnotations(words, word, wordIndex) {
   const annotations = word.annotations || [];
   if (!annotations.length) {
@@ -512,7 +522,7 @@ function AnnotationLayer({ annotations, active, t }) {
     <span className="lyric-annotation-layer" aria-hidden="true">
       {unique.map((annotation, index) => {
         const label = t ? t[annotation.labelKey] || annotation.type : annotation.type;
-        const text = annotation.text || label;
+        const text = annotation.type === 'breath' ? annotation.text || label : label;
         const style = { '--annotation-index': String(index) };
         return (
           <span
@@ -523,7 +533,7 @@ function AnnotationLayer({ annotations, active, t }) {
           >
             {annotation.type === 'breath' || annotation.type === 'stress' || annotation.type === 'long_tone' ? (
               <>
-                {active ? <span className="lyric-annotation-text lyric-annotation-label">{text}</span> : null}
+                {active && annotation.type === 'breath' ? <span className="lyric-annotation-text lyric-annotation-label">{text}</span> : null}
                 <AnnotationGlyph type={annotation.type} />
               </>
             ) : (
@@ -643,7 +653,12 @@ function firstMetaTitleText(lines) {
 }
 
 function normalizeMetaText(text) {
-  return String(text || '').replace(/[\s—–-]+/g, '').trim().toLowerCase();
+  return String(text || '')
+    .replace(/（[^）]*）|\([^)]*\)/g, '')
+    .replace(/([㐀-鿿])([A-Za-z][\w .'-]*)$/u, '$1')
+    .replace(/[\s—–－-]+/g, '')
+    .trim()
+    .toLowerCase();
 }
 
 function looksLikeTitleDuplicate(text, titleText) {

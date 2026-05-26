@@ -365,6 +365,7 @@ async fn fetch_result(
         SpecificFetchResult::Json {
             source,
             result,
+            input_format,
             document,
             annotations,
             unified,
@@ -372,6 +373,7 @@ async fn fetch_result(
             let mut body = json!({
                 "source": source,
                 "format": "json",
+                "input_format": input_format,
                 "result": result,
                 "document": document,
                 "annotations": annotations,

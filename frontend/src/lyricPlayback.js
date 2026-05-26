@@ -13,6 +13,21 @@ const gradients = {
   classic: 'linear-gradient(90deg, #ffffff, #cffafe 56%, #e0e7ff)',
 };
 
+export function formatSourceName(raw) {
+  const value = textValue(raw);
+  if (!value) {
+    return '';
+  }
+  return value
+    .replace(/QQ\s*音乐/gi, 'Tencent')
+    .replace(/(^|[^A-Za-z0-9])qq(?:[-_\s]?music)?(?=$|[^A-Za-z0-9])/gi, '$1Tencent');
+}
+
+export function formatInputFormat(raw) {
+  const value = textValue(raw);
+  return value ? value.replace(/_/g, '-').toUpperCase() : '';
+}
+
 export function readLyricSettings() {
   try {
     const stored = JSON.parse(localStorage.getItem('rosettrism-lyric-settings') || 'null');
@@ -70,7 +85,8 @@ function normalizeEntryPreview(entry) {
 export function normalizeUnifiedLyric(unified, context = {}) {
   const base = {
     kind: 'unified',
-    source: context.source || 'aggregate',
+    source: context.source || unified.meta?.source || context.result?.source || context.selectedEntry?.source || 'aggregate',
+    inputFormat: pickInputFormat(context, unified, context.result, context.selectedEntry),
     mode: unified.mode,
     title: unified.meta?.title || context.result?.title || context.selectedEntry?.title || '',
     artist: unified.meta?.artist || context.result?.artist || context.selectedEntry?.artist || '',
@@ -87,6 +103,7 @@ export function normalizeUnifiedLyric(unified, context = {}) {
       lines = track.document.lines.map((line, index) => normalizeLine(line, index, track.kind || 'track'));
       lines = mergeInlineLines(lines, unified.inline_lines || []);
       base.source = track.source || base.source;
+      base.inputFormat = pickInputFormat(context, track, track.document, track.document.meta, unified, context.result, context.selectedEntry) || base.inputFormat;
       base.title = track.document.meta?.title || base.title;
       base.artist = track.document.meta?.artist || base.artist;
       base.artistAlias = pickArtistAlias(track.document.meta, unified.meta, context.result, context.selectedEntry);
@@ -106,8 +123,9 @@ export function normalizeLyricDocument(document, context = {}) {
   lines = attachAnnotationsToLines(lines, annotations);
   return buildNormalizedLyric({
     kind: 'document',
-    source: context.source || document.meta?.source || context.result?.source || '',
-    title: document.meta?.title || context.result?.title || '',
+    source: context.source || document.meta?.source || context.result?.source || context.selectedEntry?.source || '',
+    inputFormat: pickInputFormat(context, document, document.meta, context.result, context.selectedEntry),
+    title: document.meta?.title || context.result?.title || context.selectedEntry?.title || '',
     artist: document.meta?.artist || context.result?.artist || context.selectedEntry?.artist || '',
     artistAlias: pickArtistAlias(document.meta, context.result, context.selectedEntry),
     warnings: [],
@@ -192,6 +210,11 @@ function buildNormalizedLyric(base, lines, annotations) {
   return {
     ...base,
     playable: playableLines.length > 0,
+    source: formatSourceName(base.source),
+    inputFormat: formatInputFormat(base.inputFormat || inferInputFormatFromLines(playableLines)),
+    title: titleParts.title,
+    artist: titleParts.artist,
+    artistAlias: titleParts.artistAlias,
     displayTitle,
     durationMs,
     lines: ensureLeadingTitleLine(playableLines, displayTitle),
@@ -201,10 +224,13 @@ function buildNormalizedLyric(base, lines, annotations) {
 
 function inferTitleParts(base, firstLine) {
   const inferred = splitInlineArtistAlias(firstLine?.text);
+  const split = splitArtistAlias(base.artist || inferred.artist);
+  const artist = split.artist || base.artist || inferred.artist;
+  const artistAlias = normalizeArtistAlias(base.artistAlias || split.artistAlias || inferred.artistAlias);
   return {
     title: base.title || inferred.title,
-    artist: base.artist || inferred.artist,
-    artistAlias: base.artistAlias || inferred.artistAlias,
+    artist,
+    artistAlias,
   };
 }
 
@@ -217,8 +243,24 @@ function splitInlineArtistAlias(value) {
   return {
     title: match[1].trim(),
     artist: match[2].trim(),
-    artistAlias: match[3].trim(),
+    artistAlias: normalizeArtistAlias(match[3]),
   };
+}
+
+function splitArtistAlias(value) {
+  const text = textValue(value);
+  const match = text.match(/^([^\x00-\x7F]+?)([A-Za-z][\w .'-]*)$/);
+  if (!match) {
+    return { artist: text, artistAlias: '' };
+  }
+  return {
+    artist: match[1].trim(),
+    artistAlias: normalizeArtistAlias(match[2]),
+  };
+}
+
+function normalizeArtistAlias(value) {
+  return textValue(value).replace(/\b[a-z]/g, (char) => char.toUpperCase());
 }
 
 function formatDisplayTitle(title, artist, artistAlias) {
@@ -243,24 +285,7 @@ function ensureLeadingTitleLine(lines, displayTitle) {
   if (firstLine.isMeta && looksLikeSameTitle(firstLine.text, displayTitle)) {
     return [{ ...firstLine, text: displayTitle }, ...lines.slice(1)];
   }
-  return [
-    {
-      id: `meta-title-${firstLine.startMs}`,
-      startMs: 0,
-      durationMs: 0,
-      endMs: Math.max(firstLine.startMs, 1),
-      text: displayTitle,
-      isMeta: true,
-      translation: '',
-      englishTranslation: '',
-      reading: '',
-      romanized: '',
-      ruby: [],
-      words: [],
-      annotations: [],
-    },
-    ...lines,
-  ];
+  return lines;
 }
 
 function looksLikeTitleLine(value) {
@@ -274,7 +299,12 @@ function looksLikeSameTitle(value, displayTitle) {
 }
 
 function normalizeTitleText(value) {
-  return textValue(value).replace(/[\s—–－-]+/g, '').trim().toLowerCase();
+  return textValue(value)
+    .replace(/（[^）]*）|\([^)]*\)/g, '')
+    .replace(/([㐀-鿿])([A-Za-z][\w .'-]*)$/u, '$1')
+    .replace(/[\s—–－-]+/g, '')
+    .trim()
+    .toLowerCase();
 }
 
 function pickArtistAlias(...sources) {
@@ -316,6 +346,23 @@ function pickArtistAlias(...sources) {
     }
   }
   return '';
+}
+
+function pickInputFormat(...sources) {
+  return firstText(...sources.flatMap((source) => [
+    source?.input_format,
+    source?.inputFormat,
+    source?.lyric_input_format,
+    source?.lyricInputFormat,
+    source?.extra?.input_format,
+    source?.extra?.inputFormat,
+    source?.extra?.lyric_input_format,
+    source?.extra?.lyricInputFormat,
+  ]));
+}
+
+function inferInputFormatFromLines(lines) {
+  return lines.some((line) => line.words?.length) ? 'qrc' : '';
 }
 
 function firstText(...values) {
@@ -453,7 +500,7 @@ function normalizeLine(line, index, trackId) {
     reading: pickLineReading(line),
     romanized: pickLineRomanized(line) || pickLineReading(line),
     ruby: normalizeRubySpans(line.ruby || line.furigana_spans || line.furiganaSpans || line.extra?.ruby || []),
-    words: normalizeWords(line.words || [], startMs, index),
+    words: normalizeWords(line.words || line.chars || line.characters || line.extra?.words || [], startMs, index),
     annotations: [],
   };
 }
@@ -497,14 +544,15 @@ function normalizeWords(words, lineStartMs, lineIndex) {
   return words
     .map((word, index) => {
       const offsetMs = Number(word.offset_ms ?? word.offsetMs ?? 0);
-      const startMs = lineStartMs + offsetMs;
-      const durationMs = optionalNumber(word.duration_ms ?? word.durationMs) || 0;
+      const absoluteStartMs = optionalNumber(word.start_ms ?? word.startMs ?? word.time_ms ?? word.timeMs);
+      const startMs = absoluteStartMs ?? lineStartMs + offsetMs;
+      const durationMs = optionalNumber(word.duration_ms ?? word.durationMs ?? word.duration) || 0;
       return {
         id: `${lineIndex}-${index}-${startMs}`,
         startMs,
         durationMs,
         endMs: startMs + durationMs,
-        text: word.text || '',
+        text: textValue(word.text ?? word.value ?? word.char ?? word.character ?? word.content),
         annotations: [],
       };
     })

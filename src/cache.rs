@@ -478,6 +478,8 @@ pub struct CachedFetchMetadata {
     pub result: Option<SearchResult>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub document: Option<crate::model::LyricDocument>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub annotations: Vec<crate::model::Annotation>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

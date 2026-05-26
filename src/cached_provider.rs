@@ -102,6 +102,7 @@ impl LyricProvider for CachedProvider {
                     input_format: fetched.input_format,
                     result: Some(result.clone()),
                     document: fetched.document.clone(),
+                    annotations: fetched.annotations.clone(),
                 })?;
                 self.cache.put(CachePut {
                     key: &key,
@@ -170,7 +171,7 @@ fn cached_fetch_hit(body: Vec<u8>, metadata: serde_json::Value) -> Result<Fetche
         input_format: metadata.input_format,
         raw: body,
         document: metadata.document,
-        annotations: Vec::new(),
+        annotations: metadata.annotations,
     })
 }
 
@@ -292,6 +293,7 @@ mod tests {
             input_format: InputFormat::Krc,
             result: Some(result.clone()),
             document: None,
+            annotations: Vec::new(),
         })
         .unwrap();
         cache

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createPortal } from 'react-dom';
 import { LyricPlaybackView } from './LyricPlaybackView.jsx';
-import { defaultLyricSettings, normalizeLyricPayload, readLyricSettings, resolveLyricGradient } from './lyricPlayback.js';
+import { defaultLyricSettings, formatSourceName, normalizeLyricPayload, readLyricSettings, resolveLyricGradient } from './lyricPlayback.js';
 import {
   BarChart3,
   Database,
@@ -1449,7 +1449,8 @@ function formatDurationMs(durationMs) {
 }
 
 function displaySource(entry) {
-  return entry?.display_source || entry?.extra?.display_source || entry?.source || '-';
+  const source = formatSourceName(entry?.display_source || entry?.extra?.display_source || entry?.source);
+  return source || '-';
 }
 
 function isAggregateResult(entry) {

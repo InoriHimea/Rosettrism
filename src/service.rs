@@ -409,10 +409,12 @@ impl ServiceContext {
                 for result in selected {
                     match provider.fetch(&result).await {
                         Ok(fetched) => {
+                            let input_format = fetched.input_format;
                             let annotations = fetched.annotations.clone();
                             let document = decode_fetched(fetched)?;
                             items.push(SpecificJsonItem {
                                 result,
+                                input_format,
                                 document,
                                 annotations,
                             });
@@ -716,6 +718,7 @@ impl ServiceContext {
         Ok(SpecificFetchResult::Json {
             source,
             result,
+            input_format,
             document,
             annotations,
             unified: Some(unified),
@@ -765,6 +768,7 @@ pub enum SpecificFetchResult {
     Json {
         source: Source,
         result: SearchResult,
+        input_format: crate::decoder::InputFormat,
         document: LyricDocument,
         annotations: Vec<Annotation>,
         unified: Option<UnifiedLyric>,
@@ -798,6 +802,7 @@ pub struct SpecificRawItem {
 #[derive(Debug, Serialize)]
 pub struct SpecificJsonItem {
     pub result: SearchResult,
+    pub input_format: crate::decoder::InputFormat,
     pub document: LyricDocument,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub annotations: Vec<Annotation>,

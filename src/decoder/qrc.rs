@@ -238,9 +238,6 @@ fn parse_qrc_lines(text: &str) -> Result<LyricDocument> {
         Regex::new(r"^\[([a-zA-Z]+):(.*)\]$").map_err(|err| Error::Parse(err.to_string()))?;
     let prefix_word_re = Regex::new(r"\((\d+),(\d+)(?:,[^)]*)?\)([^()]+)")
         .map_err(|err| Error::Parse(err.to_string()))?;
-    let postfix_word_re = Regex::new(r"([^()]+?)\((\d+),(\d+)(?:,[^)]*)?\)")
-        .map_err(|err| Error::Parse(err.to_string()))?;
-
     let mut doc = LyricDocument::default();
     let mut non_empty_index = 0usize;
 
@@ -277,7 +274,7 @@ fn parse_qrc_lines(text: &str) -> Result<LyricDocument> {
         let start_ms = parse_u32(&caps, 1)?;
         let duration_ms = parse_u32(&caps, 2)?;
         let body = caps.get(3).map(|m| m.as_str()).unwrap_or_default();
-        let words = parse_qrc_words(body, start_ms, &prefix_word_re, &postfix_word_re)?;
+        let words = parse_qrc_words(body, start_ms, &prefix_word_re)?;
         let text = if words.is_empty() {
             strip_qrc_word_tags(body)
         } else {
@@ -317,7 +314,6 @@ fn parse_qrc_words(
     body: &str,
     line_start_ms: u32,
     prefix_word_re: &Regex,
-    postfix_word_re: &Regex,
 ) -> Result<Vec<LyricWord>> {
     if body.trim_start().starts_with('(') {
         let prefix_words = collect_prefix_words(body, line_start_ms, prefix_word_re)?;
@@ -326,7 +322,7 @@ fn parse_qrc_words(
         }
     }
 
-    collect_postfix_words(body, line_start_ms, postfix_word_re)
+    collect_postfix_words(body, line_start_ms)
 }
 
 fn collect_prefix_words(body: &str, line_start_ms: u32, word_re: &Regex) -> Result<Vec<LyricWord>> {
@@ -351,31 +347,51 @@ fn collect_prefix_words(body: &str, line_start_ms: u32, word_re: &Regex) -> Resu
     Ok(words)
 }
 
-fn collect_postfix_words(
-    body: &str,
-    line_start_ms: u32,
-    word_re: &Regex,
-) -> Result<Vec<LyricWord>> {
+fn collect_postfix_words(body: &str, line_start_ms: u32) -> Result<Vec<LyricWord>> {
     let mut words = Vec::new();
-    for caps in word_re.captures_iter(body) {
-        let text = caps
-            .get(1)
-            .map(|m| m.as_str())
-            .unwrap_or_default()
-            .trim_start()
-            .to_string();
-        if text.is_empty() {
+    let bytes = body.as_bytes();
+    let mut cursor = 0usize;
+    let mut text_start = 0usize;
+
+    while cursor < bytes.len() {
+        if bytes[cursor] != b'(' {
+            cursor += 1;
             continue;
         }
 
-        let absolute_start = parse_u32(&caps, 2)?;
-        words.push(LyricWord {
-            offset_ms: absolute_start.saturating_sub(line_start_ms),
-            duration_ms: parse_u32(&caps, 3)?,
-            text,
-        });
+        let Some((absolute_start, duration_ms, tag_end)) = parse_qrc_word_tag_at(body, cursor)
+        else {
+            cursor += 1;
+            continue;
+        };
+
+        let text = body[text_start..cursor].to_string();
+        if !text.is_empty() {
+            words.push(LyricWord {
+                offset_ms: absolute_start.saturating_sub(line_start_ms),
+                duration_ms,
+                text,
+            });
+        }
+
+        cursor = tag_end;
+        text_start = tag_end;
     }
+
     Ok(words)
+}
+
+fn parse_qrc_word_tag_at(body: &str, start: usize) -> Option<(u32, u32, usize)> {
+    let tail = body.get(start..)?;
+    let end_offset = tail.find(')')?;
+    let inner = tail.get(1..end_offset)?;
+    let mut parts = inner.split(',');
+    let start_ms = parts.next()?.parse::<u32>().ok()?;
+    let duration_ms = parts.next()?.parse::<u32>().ok()?;
+    if !parts.all(|part| !part.is_empty() && part.chars().all(|ch| ch.is_ascii_digit())) {
+        return None;
+    }
+    Some((start_ms, duration_ms, start + end_offset + 1))
 }
 
 fn encrypted_candidates(payload: &[u8]) -> Vec<Vec<u8>> {
@@ -875,6 +891,19 @@ mod tests {
 
         assert_eq!(doc.lines[0].text, "你好");
         assert_eq!(doc.lines[0].words[1].duration_ms, 600);
+    }
+
+    #[test]
+    fn preserves_parenthesized_qrc_postfix_text() {
+        let doc = parse_lyric_content(
+            "[0,20098]龙(0,1827)战(1827,1827)骑(3654,1827)士(5482,1827) - (7309,1827)周(9136,1827)杰(10963,1827)伦(12790,1827) ((14617,1827)Jay (16445,1827)Chou)(18272,1827)\n",
+        )
+        .unwrap();
+
+        assert_eq!(doc.lines[0].text, "龙战骑士 - 周杰伦 (Jay Chou)");
+        assert_eq!(doc.lines[0].words[4].text, " - ");
+        assert_eq!(doc.lines[0].words[8].text, " (");
+        assert_eq!(doc.lines[0].words[10].text, "Chou)");
     }
 
     #[test]

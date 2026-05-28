@@ -580,7 +580,7 @@ function normalizeWords(words, lineStartMs, lineIndex) {
         startMs,
         durationMs,
         endMs: startMs + durationMs,
-        text: textValue(word.text ?? word.value ?? word.char ?? word.character ?? word.content),
+        text: rawTextValue(word.text ?? word.value ?? word.char ?? word.character ?? word.content),
         annotations: [],
       };
     })
@@ -856,14 +856,23 @@ function pickLineRomanized(line) {
 }
 
 function textValue(value) {
+  return textValueWithMode(value, true);
+}
+
+function rawTextValue(value) {
+  return textValueWithMode(value, false);
+}
+
+function textValueWithMode(value, trim) {
   if (typeof value === 'string') {
-    return value.trim();
+    return trim ? value.trim() : value;
   }
   if (Array.isArray(value)) {
-    return value.map((item) => textValue(item)).filter(Boolean).join(' ');
+    const items = value.map((item) => textValueWithMode(item, trim));
+    return trim ? items.filter(Boolean).join(' ') : items.join('');
   }
   if (value && typeof value === 'object') {
-    return textValue(value.text ?? value.value ?? value.content ?? value.lyric ?? value.line);
+    return textValueWithMode(value.text ?? value.value ?? value.content ?? value.lyric ?? value.line, trim);
   }
   return '';
 }

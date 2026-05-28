@@ -392,7 +392,7 @@ function LineText({ line, currentMs, active, translationMode, t }) {
     return <span className="lyric-line-text lyric-meta-text">{line.text || '· · ·'}</span>;
   }
 
-  if (!line.words.length || line.ruby?.length) {
+  if (!line.words.length) {
     const progress = active ? lyricLineProgress(line, currentMs) : 0;
     const text = line.text || '· · ·';
     const lineAnnotations = line.annotations || [];
@@ -415,7 +415,7 @@ function LineText({ line, currentMs, active, translationMode, t }) {
         return (
           <span
             className={`lyric-word lyric-progress-text${annotations.length ? ' lyric-word-annotated' : ''}${wordState}`}
-            style={lyricProgressStyle(progress)}
+            style={lyricProgressStyle(progress, true)}
             key={word.id}
           >
             {annotations.length > 0 ? <AnnotationLayer annotations={annotations} active={active} t={t} /> : null}
@@ -602,11 +602,11 @@ function AnnotationGlyph({ type }) {
   }
 }
 
-function lyricProgressStyle(progress) {
+function lyricProgressStyle(progress, exact = false) {
   const safeProgress = clampProgress(progress);
-  const fillEnd = safeProgress > 0 && safeProgress < 1
-    ? Math.min(100, safeProgress * 100 + 2.4)
-    : safeProgress * 100;
+  const fillEnd = exact || safeProgress === 0 || safeProgress === 1
+    ? safeProgress * 100
+    : Math.min(100, safeProgress * 100 + 2.4);
   return {
     '--lyric-progress': String(safeProgress),
     '--lyric-fill-end': `${fillEnd}%`,

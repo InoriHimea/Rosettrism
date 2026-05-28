@@ -217,7 +217,7 @@ function buildNormalizedLyric(base, lines, annotations) {
     artistAlias: titleParts.artistAlias,
     displayTitle,
     durationMs,
-    lines: ensureLeadingTitleLine(playableLines),
+    lines: ensureLeadingTitleLine(playableLines, displayTitle),
     annotations,
   };
 }
@@ -293,8 +293,40 @@ function formatDisplayTitle(title, artist, artistAlias) {
   return `${cleanTitle} - ${cleanArtist}${displayAlias ? `（${displayAlias}）` : ''}`;
 }
 
-function ensureLeadingTitleLine(lines) {
-  return lines;
+function ensureLeadingTitleLine(lines, displayTitle) {
+  if (!displayTitle || !lines.length) {
+    return lines;
+  }
+  const firstLine = lines[0];
+  if (firstLine.isMeta && looksLikeSameTitle(firstLine.text, displayTitle)) {
+    return [{ ...firstLine, text: displayTitle }, ...lines.slice(1)];
+  }
+  return [{
+    ...firstLine,
+    id: `meta-title-${firstLine.id}`,
+    startMs: 0,
+    durationMs: 2000,
+    endMs: 2000,
+    text: displayTitle,
+    isMeta: true,
+    words: [],
+    annotations: [],
+  }, ...lines];
+}
+
+function looksLikeSameTitle(value, displayTitle) {
+  const normalized = normalizeTitleText(value);
+  const title = normalizeTitleText(displayTitle);
+  return Boolean(title && (normalized === title || title.includes(normalized) || normalized.includes(title)));
+}
+
+function normalizeTitleText(value) {
+  return textValue(value)
+    .replace(/（[^）]*）|\([^)]*\)/g, '')
+    .replace(/([㐀-鿿])([A-Za-z][\w .'-]*)$/u, '$1')
+    .replace(/[\s—–－-]+/g, '')
+    .trim()
+    .toLowerCase();
 }
 
 function pickArtistAlias(...sources) {
@@ -500,7 +532,8 @@ function markLeadingMetadataLines(lines) {
   let metadataOpen = true;
   const hasLeadingCredits = lines.slice(1, 6).some((line) => !line.words?.length && isMetaLyricLine(line.text));
   return lines.map((line, index) => {
-    if (line.words?.length) {
+    const isLeadingTimedTitle = index === 0 && line.words?.length && looksLikeLyricTitle(line.text);
+    if (line.words?.length && !isLeadingTimedTitle) {
       metadataOpen = false;
       return { ...line, isMeta: false };
     }

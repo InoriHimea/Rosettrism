@@ -30,7 +30,9 @@ export function LyricPlaybackView({ lyric, settings, t }) {
   const hasTranslations = bodyLines.some((line) => hasLineTranslation(line));
   const candidateBodyIndex = findActiveLineIndex(bodyLines, currentMs);
   const candidateBodyLine = candidateBodyIndex >= 0 ? bodyLines[candidateBodyIndex] : null;
-  const activeBodyIndex = candidateBodyLine ? candidateBodyIndex : -1;
+  const activeBodyIndex = candidateBodyLine && currentMs >= candidateBodyLine.startMs && currentMs < candidateBodyLine.endMs
+    ? candidateBodyIndex
+    : -1;
   const activeBodyLine = activeBodyIndex >= 0 ? bodyLines[activeBodyIndex] : null;
   const activeMetaIndex = activeBodyLine ? -1 : findActiveTimedLineIndex(introMetaLines, currentMs);
   const activeMetaLine = activeMetaIndex >= 0 ? introMetaLines[activeMetaIndex] : null;

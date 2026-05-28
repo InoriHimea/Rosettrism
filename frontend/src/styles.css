@@ -1246,9 +1246,10 @@ nav button.nav-active::before {
 .lyric-annotation-mark.annotation-long-tone {
   display: block;
   height: 100%;
-  left: 0;
+  left: 50%;
   min-width: 100%;
   top: 0;
+  transform: translateX(-50%);
 }
 
 .lyric-annotation-label {

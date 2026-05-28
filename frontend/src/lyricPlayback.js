@@ -478,27 +478,32 @@ function normalizeLine(line, index, trackId) {
   const startMs = Number(line.start_ms ?? line.startMs ?? 0);
   const durationMs = optionalNumber(line.duration_ms ?? line.durationMs);
   const text = line.text || '';
+  const words = normalizeWords(line.words || line.chars || line.characters || line.extra?.words || [], startMs, index);
   return {
     id: `${trackId}-${index}-${startMs}`,
     startMs,
     durationMs,
     endMs: durationMs ? startMs + durationMs : startMs,
     text,
-    isMeta: isMetaLyricLine(text),
+    isMeta: words.length ? false : isMetaLyricLine(text),
     translation: textValue(line.translation ?? line.translation_text ?? line.translationText ?? line.translated ?? line.trans ?? line.extra?.translation),
     englishTranslation: textValue(line.english_translation ?? line.englishTranslation ?? line.english ?? line.en_translation ?? line.enTranslation ?? line.extra?.englishTranslation ?? line.extra?.english),
     reading: pickLineReading(line),
     romanized: pickLineRomanized(line) || pickLineReading(line),
     ruby: normalizeRubySpans(line.ruby || line.furigana_spans || line.furiganaSpans || line.extra?.ruby || []),
-    words: normalizeWords(line.words || line.chars || line.characters || line.extra?.words || [], startMs, index),
+    words,
     annotations: [],
   };
 }
 
 function markLeadingMetadataLines(lines) {
   let metadataOpen = true;
-  const hasLeadingCredits = lines.slice(1, 6).some((line) => isMetaLyricLine(line.text));
+  const hasLeadingCredits = lines.slice(1, 6).some((line) => !line.words?.length && isMetaLyricLine(line.text));
   return lines.map((line, index) => {
+    if (line.words?.length) {
+      metadataOpen = false;
+      return { ...line, isMeta: false };
+    }
     const isLeadingTitle = index === 0 && (hasLeadingCredits || looksLikeLyricTitle(line.text));
     const isLeadingCredit = metadataOpen && isMetaLyricLine(line.text);
     const isMeta = metadataOpen && (isLeadingTitle || isLeadingCredit);
@@ -603,8 +608,27 @@ export function attachAnnotationsToLines(lines, annotations) {
 }
 
 function findAnnotationAnchorWordIndex(words, annotation) {
+  const targetText = textValue(annotation.text).trim();
   let bestIndex = 0;
   let bestDistance = Number.POSITIVE_INFINITY;
+
+  if (targetText) {
+    for (let index = 0; index < words.length; index += 1) {
+      const word = words[index];
+      if (word.text.trim() !== targetText) {
+        continue;
+      }
+      const distance = Math.abs(annotation.startMs - word.startMs);
+      if (distance < bestDistance) {
+        bestIndex = index;
+        bestDistance = distance;
+      }
+    }
+    if (bestDistance < Number.POSITIVE_INFINITY) {
+      return bestIndex;
+    }
+  }
+
   for (let index = 0; index < words.length; index += 1) {
     const word = words[index];
     const startDistance = Math.abs(annotation.startMs - word.startMs);

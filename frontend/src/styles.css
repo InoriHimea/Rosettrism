@@ -1735,128 +1735,47 @@ nav button.nav-active::before {
 
 .lyric-karaoke-lines {
   display: grid;
-  gap: 16px;
-  inset: 0;
+  gap: 30px;
+  max-height: 360px;
   min-height: 360px;
-  padding: 42px 48px 78px;
-  place-items: center stretch;
+  overflow: auto;
+  padding: 72px 48px 146px;
   position: relative;
+  scroll-behavior: auto;
+  scrollbar-width: none;
   z-index: 1;
 }
 
-.lyric-karaoke-three-line {
-  align-content: center;
-  gap: 28px;
-  grid-template-rows: minmax(46px, auto) minmax(112px, auto) minmax(112px, auto);
-  padding-top: 44px;
+.lyric-karaoke-lines::-webkit-scrollbar {
+  display: none;
 }
 
-.lyric-karaoke-meta-line {
-  color: rgba(47, 39, 19, 0.68);
-  font-size: clamp(26px, 4vw, 40px);
-  font-weight: 900;
-  letter-spacing: -0.045em;
-  line-height: 1.25;
-  min-height: 44px;
-  overflow: hidden;
-  text-align: center;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.lyric-karaoke-line {
+  min-height: 82px;
 }
 
-.lyric-karaoke-lane-left {
-  align-items: flex-start;
-  justify-content: flex-start;
-}
-
-.lyric-karaoke-lane-right {
-  align-items: flex-end;
-  justify-content: flex-end;
-  text-align: right;
-}
-
-.lyric-karaoke-lane-right .lyric-line {
+.lyric-karaoke-line-right {
   justify-items: end;
+  justify-self: end;
   text-align: right;
   transform-origin: right center;
 }
 
-.lyric-karaoke-lane-right .lyric-words {
+.lyric-karaoke-line-left {
+  justify-self: start;
+  transform-origin: left center;
+}
+
+.lyric-karaoke-line-right .lyric-words {
   justify-content: flex-end;
 }
 
 .lyric-karaoke-lines .lyric-stage-meta {
-  align-self: start;
   padding: 0;
 }
 
-.lyric-karaoke-pair {
-  display: grid;
-  gap: 34px;
-  margin-top: auto;
-  width: 100%;
-}
-
-.lyric-karaoke-lane {
-  display: flex;
-  flex-direction: column;
-  min-height: 112px;
-}
-
-.lyric-karaoke-lane-top {
-  align-items: flex-start;
-  justify-content: flex-start;
-}
-
-.lyric-karaoke-lane-bottom {
-  align-items: flex-end;
-  justify-content: flex-end;
-  text-align: right;
-}
-
-.lyric-karaoke-lane-bottom .lyric-line {
-  justify-items: end;
-  text-align: right;
-  transform-origin: right center;
-}
-
-.lyric-karaoke-lane-bottom .lyric-words {
-  justify-content: flex-end;
-}
-
-.lyric-karaoke-line,
-.lyric-karaoke-empty,
-.lyric-karaoke-lane .lyric-line-countdown {
+.lyric-karaoke-line {
   max-width: min(86%, 660px);
-}
-
-.lyric-karaoke-empty {
-  color: rgba(64, 61, 54, 0.4);
-  font-size: clamp(34px, 5vw, 50px);
-  font-weight: 900;
-  letter-spacing: 0.12em;
-}
-
-.lyric-karaoke-lane .lyric-line-countdown {
-  align-self: flex-start;
-  font-size: clamp(34px, 5vw, 50px);
-  margin-bottom: 6px;
-  padding-left: 0;
-  transform: none;
-}
-
-.lyric-karaoke-lane .lyric-line {
-  font-size: clamp(34px, 5vw, 50px);
-}
-
-.lyric-karaoke-lane .lyric-line-active,
-.lyric-karaoke-lane .lyric-line-future,
-.lyric-karaoke-lane .lyric-line-past {
-  font-size: clamp(34px, 5vw, 50px);
-}
-
-.lyric-karaoke-lane-next .lyric-line {
-  opacity: 0.84;
 }
 
 .lyric-controls {
@@ -2156,17 +2075,7 @@ nav button.nav-active::before {
     padding: 34px 18px 78px;
   }
 
-  .lyric-karaoke-pair {
-    gap: 22px;
-  }
-
-  .lyric-karaoke-lane {
-    min-height: 76px;
-  }
-
-  .lyric-karaoke-line,
-  .lyric-karaoke-empty,
-  .lyric-karaoke-lane .lyric-line-countdown {
+  .lyric-karaoke-line {
     max-width: 94%;
   }
 
@@ -2174,15 +2083,6 @@ nav button.nav-active::before {
   .lyric-line-countdown {
     font-size: 28px;
     letter-spacing: -0.04em;
-  }
-
-  .lyric-karaoke-lane .lyric-line,
-  .lyric-karaoke-lane .lyric-line-active,
-  .lyric-karaoke-lane .lyric-line-future,
-  .lyric-karaoke-lane .lyric-line-past,
-  .lyric-karaoke-lane .lyric-line-countdown,
-  .lyric-karaoke-empty {
-    font-size: 28px;
   }
 
   .lyric-line-countdown {

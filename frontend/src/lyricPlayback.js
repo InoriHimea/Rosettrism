@@ -2,7 +2,7 @@ export const defaultLyricSettings = {
   colorMode: 'gradient',
   colorPreset: 'qq-prism',
   solidColor: '#14c9a2',
-  renderMode: 'vertical',
+  renderMode: 'karaoke',
   stageBackgroundColor: '#fff0a6',
 };
 
@@ -50,7 +50,7 @@ export function normalizeLyricPayload(payload) {
     return { playable: false, raw: payload.raw || '', lines: [], annotations: [], warnings: [] };
   }
 
-  const unified = payload.unified || (isUnifiedLyric(payload.document) ? payload.document : null);
+  const unified = payload.unified || (isUnifiedLyric(payload) ? payload : null) || (isUnifiedLyric(payload.document) ? payload.document : null);
   if (unified) {
     return normalizeUnifiedLyric(unified, payload);
   }
@@ -95,19 +95,20 @@ export function normalizeUnifiedLyric(unified, context = {}) {
   };
 
   let lines = [];
-  if (Array.isArray(unified.inline_lines) && unified.inline_lines.length > 0) {
+  const primaryTrack = pickPrimaryTrack(unified.tracks || []);
+  const trackHasWords = primaryTrack?.document?.lines?.some((line) => line.words?.length || line.chars?.length);
+  const inlineHasWords = unified.inline_lines?.some((line) => line.words?.length || line.chars?.length);
+
+  if (Array.isArray(unified.inline_lines) && unified.inline_lines.length > 0 && (inlineHasWords || !trackHasWords)) {
     lines = unified.inline_lines.map((line, index) => normalizeLine(line, index, 'inline'));
-  } else {
-    const track = pickPrimaryTrack(unified.tracks || []);
-    if (track?.document?.lines) {
-      lines = track.document.lines.map((line, index) => normalizeLine(line, index, track.kind || 'track'));
-      lines = mergeInlineLines(lines, unified.inline_lines || []);
-      base.source = track.source || base.source;
-      base.inputFormat = pickInputFormat(context, track, track.document, track.document.meta, unified, context.result, context.selectedEntry) || base.inputFormat;
-      base.title = track.document.meta?.title || base.title;
-      base.artist = track.document.meta?.artist || base.artist;
-      base.artistAlias = pickArtistAlias(track.document.meta, unified.meta, context.result, context.selectedEntry);
-    }
+  } else if (primaryTrack?.document?.lines) {
+    lines = primaryTrack.document.lines.map((line, index) => normalizeLine(line, index, primaryTrack.kind || 'track'));
+    lines = mergeInlineLines(lines, unified.inline_lines || []);
+    base.source = primaryTrack.source || base.source;
+    base.inputFormat = pickInputFormat(context, primaryTrack, primaryTrack.document, primaryTrack.document.meta, unified, context.result, context.selectedEntry) || base.inputFormat;
+    base.title = primaryTrack.document.meta?.title || base.title;
+    base.artist = primaryTrack.document.meta?.artist || base.artist;
+    base.artistAlias = pickArtistAlias(primaryTrack.document.meta, unified.meta, context.result, context.selectedEntry);
   }
 
   lines = enrichLinesFromTracks(lines, unified.tracks || []);

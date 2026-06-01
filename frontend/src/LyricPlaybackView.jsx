@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Pause, Play, RotateCcw } from 'lucide-react';
 import {
   findActiveLineIndex,
@@ -14,9 +14,8 @@ export function LyricPlaybackView({ lyric, settings, t }) {
   const startedAtRef = useRef(0);
   const linesRef = useRef(null);
   const lineRefs = useRef(new Map());
-  const reducedMotion = useMemo(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || false, []);
   const durationMs = Math.max(lyric.durationMs || 0, 1000);
-  const renderMode = settings.renderMode === 'karaoke' ? 'karaoke' : 'vertical';
+  const renderMode = settings.renderMode === 'vertical' ? 'vertical' : 'karaoke';
   const annotationTypes = [...new Map(lyric.annotations.map((annotation) => [annotation.type, annotation])).values()];
   const headingTitle = lyric.displayTitle || lyric.title || t.preview;
   const artistLabel = displayTitleIncludesArtist(headingTitle, lyric.artist)
@@ -52,11 +51,9 @@ export function LyricPlaybackView({ lyric, settings, t }) {
   const currentStripText = activeFlowLine?.text || visibleBodyLine?.text;
   const focusFlowIndex = activeFlowIndex >= 0 ? activeFlowIndex : nextFlowIndex >= 0 ? nextFlowIndex : flowLines.length - 1;
   const initialFlowLine = flowLines[0];
-  const scrollTargetId = renderMode === 'vertical'
-    ? currentMs <= 0
-      ? initialFlowLine?.id
-      : (activeFlowLine ? activeFlowLine.id : visibleFlowLine?.id)
-    : null;
+  const scrollTargetId = currentMs <= 0
+    ? initialFlowLine?.id
+    : (activeFlowLine ? activeFlowLine.id : visibleFlowLine?.id);
 
   useEffect(() => {
     if (!isPlaying) {
@@ -77,18 +74,15 @@ export function LyricPlaybackView({ lyric, settings, t }) {
     return () => cancelAnimationFrame(frameRef.current);
   }, [isPlaying, durationMs]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const container = linesRef.current;
     const node = scrollTargetId ? lineRefs.current.get(scrollTargetId) : null;
     if (!container || !node) {
       return;
     }
     const target = node.offsetTop - container.clientHeight * 0.46 + node.clientHeight / 2;
-    container.scrollTo({
-      top: Math.max(0, target),
-      behavior: reducedMotion ? 'auto' : 'smooth',
-    });
-  }, [scrollTargetId, reducedMotion]);
+    container.scrollTop = Math.max(0, target);
+  }, [scrollTargetId, renderMode]);
 
   function seek(nextMs) {
     const next = Math.max(0, Math.min(Number(nextMs), durationMs));
@@ -148,24 +142,16 @@ export function LyricPlaybackView({ lyric, settings, t }) {
       <div className={`lyric-stage lyric-stage-qq lyric-stage-${renderMode}`}>
         {renderMode === 'karaoke' ? (
           <KaraokeStage
-            lyric={lyric}
-            staticMetaLines={staticMetaLines}
             flowLines={flowLines}
-            bodyLines={bodyLines}
             currentMs={currentMs}
             activeFlowLine={activeFlowLine}
-            activeBodyLine={activeBodyLine}
-            activeBodyIndex={activeBodyIndex}
-            nextBodyLine={nextBodyLine}
-            nextBodyIndex={nextBodyIndex}
-            nextFlowLine={nextFlowLine}
-            nextFlowIndex={nextFlowIndex}
             focusFlowIndex={focusFlowIndex}
             showCountdown={showCountdown}
             countdown={countdown}
-            countdownBodyIndex={countdownBodyIndex}
             translationMode={translationMode}
             seek={seek}
+            bindLineRef={bindLineRef}
+            linesRef={linesRef}
             t={t}
           />
         ) : (
@@ -268,110 +254,42 @@ function CountdownDots({ count }) {
 }
 
 function KaraokeStage({
-  lyric,
-  staticMetaLines,
   flowLines,
-  bodyLines,
   currentMs,
   activeFlowLine,
-  activeBodyLine,
-  activeBodyIndex,
-  nextBodyLine,
-  nextBodyIndex,
-  nextFlowLine,
-  nextFlowIndex,
   focusFlowIndex,
   showCountdown,
   countdown,
-  countdownBodyIndex,
   translationMode,
   seek,
+  bindLineRef,
+  linesRef,
   t,
 }) {
-  const metaSlot = karaokeMetaSlot(staticMetaLines, activeFlowLine, nextFlowLine, nextBodyIndex, currentMs);
-  const focusIndex = activeBodyIndex >= 0 ? activeBodyIndex : nextBodyIndex >= 0 ? nextBodyIndex : bodyLines.length - 1;
-  const nextIndex = focusIndex + 1;
-  const countdownSlotIndex = countdownBodyIndex >= 0 ? countdownBodyIndex : nextBodyIndex;
-  const leftIndex = showCountdown && countdownSlotIndex >= 0
-    ? countdownSlotIndex
-    : focusIndex % 2 === 0
-      ? focusIndex
-      : nextIndex;
-  const rightIndex = showCountdown && countdownSlotIndex >= 0
-    ? countdownSlotIndex + 1
-    : focusIndex % 2 === 0
-      ? nextIndex
-      : focusIndex;
-  const leftLine = bodyLines[leftIndex] || null;
-  const rightLine = bodyLines[rightIndex] || null;
-  const leftSlot = leftLine ? { type: 'line', line: leftLine, bodyIndex: leftIndex, active: activeBodyLine?.id === leftLine.id } : null;
-  const rightSlot = rightLine ? { type: 'line', line: rightLine, bodyIndex: rightIndex, active: activeBodyLine?.id === rightLine.id } : null;
-
   return (
-    <div className="lyric-karaoke-lines lyric-karaoke-three-line" aria-live="polite">
-      <div className="lyric-karaoke-meta-line">
-        {metaSlot ? <span>{metaSlot.text}</span> : lyric.displayTitle ? <span>{lyric.displayTitle}</span> : null}
-      </div>
-      <div className="lyric-karaoke-lane lyric-karaoke-lane-left lyric-karaoke-lane-current">
-        {showCountdown ? <CountdownRow countdown={countdown} /> : null}
-        <KaraokeSlot
-          slot={leftSlot}
-          currentMs={currentMs}
-          focusBodyIndex={focusIndex}
-          translationMode={translationMode}
-          seek={seek}
-          t={t}
-        />
-      </div>
-      <div className="lyric-karaoke-lane lyric-karaoke-lane-right lyric-karaoke-lane-next">
-        <KaraokeSlot
-          slot={rightSlot}
-          currentMs={currentMs}
-          focusBodyIndex={focusIndex}
-          translationMode={translationMode}
-          seek={seek}
-          t={t}
-        />
-      </div>
+    <div className="lyric-karaoke-lines" ref={linesRef} aria-live="polite">
+      {flowLines.map((line, flowIndex) => {
+        const isActive = activeFlowLine?.id === line.id;
+        const countdownBeforeLine = showCountdown && countdown.targetLineId === line.id;
+        const laneClass = flowIndex % 2 === 0 ? 'lyric-karaoke-line-left' : 'lyric-karaoke-line-right';
+        return (
+          <React.Fragment key={line.id}>
+            {countdownBeforeLine ? (
+              <CountdownRow countdown={countdown} refCallback={bindLineRef(`countdown-${line.id}`)} />
+            ) : null}
+            <button
+              className={`${lineClassName(line, currentMs, isActive, flowIndex, focusFlowIndex)} lyric-karaoke-line ${laneClass}`}
+              type="button"
+              onClick={() => seek(line.startMs)}
+              ref={bindLineRef(line.id)}
+            >
+              <LineText line={line} currentMs={currentMs} active={isActive} translationMode={translationMode} t={t} />
+              <LineSubtext line={line} translationMode={translationMode} />
+            </button>
+          </React.Fragment>
+        );
+      })}
     </div>
-  );
-}
-
-function karaokeMetaSlot(staticMetaLines, activeFlowLine, nextFlowLine, nextBodyIndex, currentMs) {
-  if (activeFlowLine?.isMeta) {
-    return { type: 'text', text: activeFlowLine.text };
-  }
-  if (nextFlowLine?.isMeta && currentMs < nextFlowLine.startMs) {
-    return { type: 'text', text: nextFlowLine.text };
-  }
-  if (nextBodyIndex <= 0 && staticMetaLines.length) {
-    return { type: 'text', text: staticMetaLines[0].text };
-  }
-  if (!staticMetaLines.length) {
-    return null;
-  }
-  return { type: 'text', text: staticMetaLines.slice(1).map((line) => line.text).join(' / ') || staticMetaLines[0].text };
-}
-
-function KaraokeSlot({ slot, currentMs, focusBodyIndex, translationMode, seek, t }) {
-  if (!slot) {
-    return <div className="lyric-karaoke-empty">•••</div>;
-  }
-
-  if (slot.type === 'countdown') {
-    return <CountdownRow countdown={slot.countdown} />;
-  }
-
-  const { line, bodyIndex, active } = slot;
-  return (
-    <button
-      className={`${lineClassName(line, currentMs, active, bodyIndex, focusBodyIndex)} lyric-karaoke-line`}
-      type="button"
-      onClick={() => seek(line.startMs)}
-    >
-      <LineText line={line} currentMs={currentMs} active={active} translationMode={translationMode} t={t} />
-      <LineSubtext line={line} translationMode={translationMode} />
-    </button>
   );
 }
 

@@ -2,6 +2,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { LyricPlaybackView } from './src/LyricPlaybackView.jsx';
 import { defaultLyricSettings, normalizeLyricPayload } from './src/lyricPlayback.js';
+import payload from './dragon-knight-real.json';
 import './src/styles.css';
 
 const t = {
@@ -24,60 +25,8 @@ const t = {
   lyricTranslationBilingual: '双语',
 };
 
-const payload = {
-  document: {
-    meta: { source: 'QQ音乐', input_format: 'qrc' },
-    lines: [
-      {
-        start_ms: 0,
-        duration_ms: 20098,
-        text: '龙战骑士 - 周杰伦 (Jay Chou)',
-        words: [
-          { offset_ms: 0, duration_ms: 1827, text: '龙' },
-          { offset_ms: 1827, duration_ms: 1827, text: '战' },
-          { offset_ms: 3654, duration_ms: 1827, text: '骑' },
-          { offset_ms: 5482, duration_ms: 1827, text: '士' },
-          { offset_ms: 7309, duration_ms: 1827, text: ' - ' },
-          { offset_ms: 9136, duration_ms: 1827, text: '周' },
-          { offset_ms: 10963, duration_ms: 1827, text: '杰' },
-          { offset_ms: 12790, duration_ms: 1827, text: '伦' },
-          { offset_ms: 14617, duration_ms: 1827, text: ' (' },
-          { offset_ms: 16445, duration_ms: 1827, text: 'Jay ' },
-          { offset_ms: 18272, duration_ms: 1827, text: 'Chou)' },
-        ],
-      },
-      {
-        start_ms: 16346,
-        duration_ms: 3408,
-        text: '久晴天',
-        ruby: [{ startChar: 0, endChar: 1, reading: 'jiu' }],
-        words: [
-          { offset_ms: 0, duration_ms: 349, text: '久' },
-          { offset_ms: 1243, duration_ms: 548, text: '晴' },
-          { offset_ms: 1791, duration_ms: 346, text: '天' },
-        ],
-      },
-      {
-        start_ms: 21000,
-        duration_ms: 2400,
-        text: '逐字推进',
-        words: [
-          { offset_ms: 0, duration_ms: 500, text: '逐' },
-          { offset_ms: 500, duration_ms: 500, text: '字' },
-          { offset_ms: 1000, duration_ms: 500, text: '推' },
-          { offset_ms: 1500, duration_ms: 500, text: '进' },
-        ],
-      },
-    ],
-  },
-  singing_annotations: [
-    { annotation_type: 'breath', start_ms: 16346, duration_ms: 349, text: '久' },
-    { annotation_type: 'stress', start_ms: 17589, duration_ms: 548, text: '晴' },
-    { annotation_type: 'long_tone', start_ms: 18137, duration_ms: 346, text: '天' },
-  ],
-};
-
 const lyric = normalizeLyricPayload(payload);
+window.__dragonKnightPayload = payload;
 window.__dragonKnightLyric = lyric;
 window.__setDragonKnightTime = (value) => {
   const input = document.querySelector('.lyric-seek input');
@@ -90,7 +39,7 @@ window.__setDragonKnightTime = (value) => {
 createRoot(document.getElementById('root')).render(
   <LyricPlaybackView
     lyric={lyric}
-    settings={{ ...defaultLyricSettings, renderMode: 'karaoke' }}
+    settings={defaultLyricSettings}
     t={t}
   />,
 );

@@ -1,0 +1,138 @@
+@import "tailwindcss";
+
+:root {
+  --color-text: #eef7ff;
+  --color-muted: #91a4c7;
+  --color-bg: #070b18;
+  --color-surface: rgba(15, 23, 42, 0.78);
+  --color-surface-soft: rgba(19, 31, 55, 0.62);
+  --color-border: rgba(148, 163, 184, 0.22);
+  --color-border-soft: rgba(148, 163, 184, 0.14);
+  --color-primary: #8b5cf6;
+  --color-primary-hover: #a78bfa;
+  --color-secondary: rgba(30, 41, 59, 0.84);
+  --color-accent: #22d3ee;
+  --color-accent-neon: #45f3ff;
+  --color-hot: #f472b6;
+  --color-success: #34d399;
+  --color-danger: #fb7185;
+  --color-danger-soft: rgba(244, 63, 94, 0.14);
+  --color-warning-soft: rgba(251, 146, 60, 0.14);
+  --gradient-cyber: linear-gradient(135deg, #8b5cf6 0%, #f472b6 48%, #22d3ee 100%);
+  --gradient-orbital: radial-gradient(circle at 20% 20%, rgba(69, 243, 255, 0.22), transparent 28vw), radial-gradient(circle at 80% 0%, rgba(244, 114, 182, 0.18), transparent 26vw), linear-gradient(135deg, #070b18 0%, #101733 48%, #180f2f 100%);
+  --glass-panel: linear-gradient(180deg, rgba(15, 23, 42, 0.86), rgba(15, 23, 42, 0.66));
+  --glass-blur: blur(18px);
+  --shadow-glow: 0 20px 70px rgba(34, 211, 238, 0.14), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  --focus-ring: 0 0 0 4px rgba(69, 243, 255, 0.18), 0 0 0 1px rgba(69, 243, 255, 0.72);
+  --motion-fast: 160ms;
+  --motion-medium: 240ms;
+  --motion-slow: 420ms;
+  color: var(--color-text);
+  background: var(--color-bg);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+body {
+  background: var(--gradient-orbital);
+  margin: 0;
+  min-width: 320px;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  align-items: center;
+  background: linear-gradient(135deg, var(--color-primary), var(--color-accent));
+  border: 0;
+  border-radius: 12px;
+  box-shadow: 0 10px 24px rgba(124, 58, 237, 0.18);
+  color: #fff;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 8px;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 14px;
+  transition: background var(--motion-fast) ease, box-shadow var(--motion-fast) ease, color var(--motion-fast) ease, transform var(--motion-fast) ease;
+}
+
+button:hover:not(:disabled) {
+  background: linear-gradient(135deg, var(--color-primary-hover), #0891b2);
+  box-shadow: 0 14px 30px rgba(124, 58, 237, 0.24);
+  transform: translateY(-1px);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+summary:focus-visible {
+  box-shadow: var(--focus-ring);
+  outline: 0;
+}
+
+input,
+select {
+  background: rgba(15, 23, 42, 0.72);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  color: var(--color-text);
+  min-height: 40px;
+  padding: 0 12px;
+  transition: border-color var(--motion-fast) ease, box-shadow var(--motion-fast) ease, background var(--motion-fast) ease;
+}
+
+input:hover,
+select:hover {
+  border-color: rgba(124, 58, 237, 0.34);
+}
+
+input:focus-visible,
+select:focus-visible {
+  background: rgba(15, 23, 42, 0.94);
+  box-shadow: 0 0 0 4px rgba(124, 58, 237, 0.08);
+}
+
+.button-primary {
+  background: linear-gradient(135deg, var(--color-primary), var(--color-hot) 55%, var(--color-accent));
+}
+
+.button-secondary,
+.button-icon {
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(124, 58, 237, 0.16);
+  box-shadow: 0 8px 20px rgba(50, 63, 102, 0.08);
+  color: var(--color-text);
+}
+
+.button-secondary:hover:not(:disabled),
+.button-icon:hover:not(:disabled) {
+  background: rgba(34, 211, 238, 0.12);
+  color: var(--color-accent-neon);
+}
+
+.button-icon {
+  min-width: 40px;
+  padding: 0 8px;
+}
+
+.button-danger {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.button-danger:hover:not(:disabled) {
+  background: #ffdeda;
+}

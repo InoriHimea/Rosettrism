@@ -153,7 +153,15 @@ const dictionaries = {
     aiApiKeyHint: '留空时后端使用 ROSETTRISM_OPENAI_API_KEY。',
     collapseSidebar: '收起菜单',
     expandSidebar: '展开菜单',
-    qualityPending: 'AI 评分入口已预留；配置模型后可接入重新评分。',
+    qualityPending: '尚无 AI 评分记录。启用 AI 优选并执行聚合后会显示明细。',
+    aiScoreDetails: 'AI 评分明细',
+    candidateSource: '候选来源',
+    heuristicScore: '启发式分数',
+    aiScore: 'AI 分数',
+    aiReason: '原因',
+    finalSource: '最终选中来源',
+    candidateHash: '候选摘要 Hash',
+    aiModelUsed: '模型 / Base URL',
     cachePath: '缓存由 --db 或 ROSETTRISM_DB 控制。',
     language: '语言',
     chinese: '中文',
@@ -292,7 +300,15 @@ const dictionaries = {
     aiApiKeyHint: 'Leave empty to use ROSETTRISM_OPENAI_API_KEY on the server.',
     collapseSidebar: 'Collapse menu',
     expandSidebar: 'Expand menu',
-    qualityPending: 'AI scoring is ready to be wired once a model is configured.',
+    qualityPending: 'No AI score records yet. Enable AI selection and run an aggregate fetch to see details.',
+    aiScoreDetails: 'AI score details',
+    candidateSource: 'Candidate source',
+    heuristicScore: 'Heuristic score',
+    aiScore: 'AI score',
+    aiReason: 'Reason',
+    finalSource: 'Final selected source',
+    candidateHash: 'Candidate summary hash',
+    aiModelUsed: 'Model / Base URL',
     cachePath: 'Cache path is controlled by --db or ROSETTRISM_DB.',
     language: 'Language',
     chinese: '中文',
@@ -676,7 +692,7 @@ function App() {
             refreshMeta={refreshMeta}
           />
         )}
-        {activeView === 'inspector' && <InspectorView t={t} result={result} />}
+        {activeView === 'inspector' && <InspectorView t={t} result={result} stats={stats} />}
         {activeView === 'settings' && (
           <SettingsView
             t={t}
@@ -1600,16 +1616,71 @@ function formatTimestamp(timestamp) {
   return new Date(timestamp * 1000).toLocaleString();
 }
 
-function InspectorView({ t, result }) {
+function InspectorView({ t, result, stats }) {
+  const parsed = parseJsonSafe(result);
+  const directScore = parsed?.ai_score || parsed?.aiScore;
+  const recentScore = stats?.ai_scores?.[0]?.score_json;
+  const score = directScore || recentScore || null;
+  const selected = score?.scores?.find((item) => item.index === score.best_index);
+
   return (
     <section className="panel split-panel">
       <div>
         <h2>{t.inspector}</h2>
-        <p className="hint">{t.qualityPending}</p>
+        {score ? (
+          <div className="quality-card">
+            <h3>{t.aiScoreDetails}</h3>
+            <div className="quality-meta">
+              <span><strong>{t.finalSource}</strong>{selected?.source || '-'}</span>
+              <span><strong>{t.aiModelUsed}</strong>{score.model || '-'} · {score.base_url || '-'}</span>
+              <span><strong>{t.candidateHash}</strong>{score.candidate_summary_hash || '-'}</span>
+              <span><strong>{t.createdAt}</strong>{formatTimestamp(score.created_at)}</span>
+            </div>
+            <div className="quality-table">
+              <div className="quality-row quality-head">
+                <span>{t.candidateSource}</span>
+                <span>{t.heuristicScore}</span>
+                <span>{t.aiScore}</span>
+                <span>{t.aiReason}</span>
+              </div>
+              {(score.scores || []).map((candidate) => (
+                <div className={`quality-row ${candidate.index === score.best_index ? 'quality-selected' : ''}`} key={`${candidate.index}-${candidate.source}`}>
+                  <span>
+                    <strong>{candidate.source || '-'}</strong>
+                    <small>{[candidate.title, candidate.artist].filter(Boolean).join(' · ') || `#${candidate.index}`}</small>
+                  </span>
+                  <span>{formatScore(candidate.heuristic_score)}</span>
+                  <span>{formatScore(candidate.ai_score)}</span>
+                  <span>{candidate.reason || '-'}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <p className="hint">{t.qualityPending}</p>
+        )}
       </div>
-      <pre className="result compact">{result || t.resultEmpty}</pre>
+      <pre className="result compact">{result || (recentScore ? JSON.stringify(recentScore, null, 2) : t.resultEmpty)}</pre>
     </section>
   );
+}
+
+function parseJsonSafe(value) {
+  if (!value) {
+    return null;
+  }
+  try {
+    return typeof value === 'string' ? JSON.parse(value) : value;
+  } catch {
+    return null;
+  }
+}
+
+function formatScore(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return '-';
+  }
+  return Number(value).toFixed(1);
 }
 
 function SettingsView({ t, language, setLanguage, lyricSettings, setLyricSettings, aiSettings, setAiSettings, payload }) {

@@ -101,8 +101,29 @@ pub struct CacheEntryDetail {
 pub struct CacheStats {
     pub upstream_entries: i64,
     pub unified_entries: i64,
+    pub ai_score_entries: i64,
     pub fresh_upstream_entries: i64,
     pub expired_upstream_entries: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AiScoreRecord {
+    pub id: i64,
+    pub unified_cache_id: i64,
+    pub score_json: serde_json::Value,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UnifiedCacheEntryDetail {
+    pub id: i64,
+    pub cache_key: String,
+    pub body_text_preview: String,
+    pub body_hash: String,
+    pub dependencies: serde_json::Value,
+    pub created_at: i64,
+    pub expires_at: i64,
+    pub fresh: bool,
 }
 
 impl UpstreamCache {
@@ -290,6 +311,78 @@ impl UpstreamCache {
         Ok(id)
     }
 
+    pub fn put_ai_score(
+        &self,
+        unified_cache_id: i64,
+        score_json: &serde_json::Value,
+    ) -> Result<i64> {
+        let now = now_unix();
+        let score_json = serde_json::to_string(score_json)?;
+        let connection = self.lock()?;
+        connection.execute(
+            "INSERT INTO ai_scores (unified_cache_id, score_json, created_at) VALUES (?1, ?2, ?3)",
+            params![unified_cache_id, score_json, now],
+        )?;
+        Ok(connection.last_insert_rowid())
+    }
+
+    pub fn list_ai_scores(&self, unified_cache_id: i64) -> Result<Vec<AiScoreRecord>> {
+        let connection = self.lock()?;
+        let mut statement = connection.prepare(
+            "SELECT id, unified_cache_id, score_json, created_at
+             FROM ai_scores
+             WHERE unified_cache_id = ?1
+             ORDER BY created_at DESC, id DESC",
+        )?;
+        let rows = statement.query_map(params![unified_cache_id], ai_score_from_row)?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Error::from)
+    }
+
+    pub fn list_recent_ai_scores(&self, limit: usize) -> Result<Vec<AiScoreRecord>> {
+        let limit = i64::try_from(limit).unwrap_or(20).clamp(1, 100);
+        let connection = self.lock()?;
+        let mut statement = connection.prepare(
+            "SELECT id, unified_cache_id, score_json, created_at
+             FROM ai_scores
+             ORDER BY created_at DESC, id DESC
+             LIMIT ?1",
+        )?;
+        let rows = statement.query_map(params![limit], ai_score_from_row)?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Error::from)
+    }
+
+    pub fn unified_detail(&self, id: i64) -> Result<Option<UnifiedCacheEntryDetail>> {
+        let now = now_unix();
+        let connection = self.lock()?;
+        let detail = connection
+            .query_row(
+                "SELECT id, cache_key, body, body_hash, dependencies_json, created_at, expires_at
+                 FROM unified_cache
+                 WHERE id = ?1",
+                params![id],
+                |row| {
+                    let body: Vec<u8> = row.get(2)?;
+                    let dependencies_json: String = row.get(4)?;
+                    let expires_at: i64 = row.get(6)?;
+                    Ok(UnifiedCacheEntryDetail {
+                        id: row.get(0)?,
+                        cache_key: row.get(1)?,
+                        body_text_preview: text_preview(&body),
+                        body_hash: row.get(3)?,
+                        dependencies: serde_json::from_str(&dependencies_json)
+                            .unwrap_or_else(|_| json!([])),
+                        created_at: row.get(5)?,
+                        expires_at,
+                        fresh: expires_at > now,
+                    })
+                },
+            )
+            .optional()?;
+        Ok(detail)
+    }
+
     pub fn list(&self, limit: usize) -> Result<Vec<CacheEntrySummary>> {
         let now = now_unix();
         let limit = i64::try_from(limit).unwrap_or(100).clamp(1, 500);
@@ -386,6 +479,7 @@ impl UpstreamCache {
         let connection = self.lock()?;
         let upstream_entries = count(&connection, "SELECT count(*) FROM upstream_cache", &[])?;
         let unified_entries = count(&connection, "SELECT count(*) FROM unified_cache", &[])?;
+        let ai_score_entries = count(&connection, "SELECT count(*) FROM ai_scores", &[])?;
         let fresh_upstream_entries = connection.query_row(
             "SELECT count(*) FROM upstream_cache WHERE expires_at > ?1",
             params![now],
@@ -395,6 +489,7 @@ impl UpstreamCache {
         Ok(CacheStats {
             upstream_entries,
             unified_entries,
+            ai_score_entries,
             fresh_upstream_entries,
             expired_upstream_entries,
         })
@@ -455,10 +550,14 @@ impl UpstreamCache {
 
             CREATE TABLE IF NOT EXISTS ai_scores (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                unified_cache_id INTEGER,
+                unified_cache_id INTEGER NOT NULL,
                 score_json TEXT NOT NULL,
-                created_at INTEGER NOT NULL
+                created_at INTEGER NOT NULL,
+                FOREIGN KEY(unified_cache_id) REFERENCES unified_cache(id) ON DELETE CASCADE
             );
+
+            CREATE INDEX IF NOT EXISTS ai_scores_unified_cache_id_idx
+                ON ai_scores(unified_cache_id);
             "#,
         )?;
         Ok(())
@@ -579,6 +678,16 @@ fn text_preview(body: &[u8]) -> String {
     String::from_utf8_lossy(slice).to_string()
 }
 
+fn ai_score_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AiScoreRecord> {
+    let score_json: String = row.get(2)?;
+    Ok(AiScoreRecord {
+        id: row.get(0)?,
+        unified_cache_id: row.get(1)?,
+        score_json: serde_json::from_str(&score_json).unwrap_or_else(|_| json!({})),
+        created_at: row.get(3)?,
+    })
+}
+
 fn count(connection: &Connection, sql: &str, params: &[&dyn rusqlite::ToSql]) -> Result<i64> {
     Ok(connection.query_row(sql, params, |row| row.get(0))?)
 }
@@ -669,6 +778,44 @@ mod tests {
         assert_eq!(detail.query.as_deref(), Some("Song Artist"));
         assert_eq!(detail.item_id.as_deref(), Some("abc-123"));
         assert!(detail.body_text_preview.contains("Song"));
+
+        drop(cache);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn stores_and_lists_ai_scores_for_unified_cache() {
+        let path = std::env::temp_dir().join(format!(
+            "rosettrism-ai-score-{}-{}.sqlite",
+            now_unix(),
+            std::process::id()
+        ));
+        let cache = UpstreamCache::open(&path).unwrap();
+        let unified_id = cache
+            .put_unified(
+                "unified-ai-score-test",
+                br#"{"mode":"tracks","results":[]}"#,
+                &[],
+                Duration::from_secs(60),
+            )
+            .unwrap();
+        let score = json!({
+            "model": "gpt-4o-mini",
+            "base_url": "https://api.openai.com/v1",
+            "candidate_summary_hash": "abc123",
+            "best_index": 0,
+            "scores": [{"index": 0, "source": "qq", "heuristic_score": 90.0, "ai_score": 95.0, "reason": "best timing"}],
+            "reason": "best timing",
+            "created_at": now_unix()
+        });
+
+        cache.put_ai_score(unified_id, &score).unwrap();
+
+        let scores = cache.list_ai_scores(unified_id).unwrap();
+        assert_eq!(scores.len(), 1);
+        assert_eq!(scores[0].unified_cache_id, unified_id);
+        assert_eq!(scores[0].score_json["candidate_summary_hash"], "abc123");
+        assert_eq!(cache.stats().unwrap().ai_score_entries, 1);
 
         drop(cache);
         let _ = std::fs::remove_file(path);

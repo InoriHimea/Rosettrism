@@ -4,7 +4,7 @@
 
 Rosettrism is a Rust single-binary lyric tool. It can decode local KRC/QRC/YRC/LRC/TTML files, fetch lyrics from online sources, cache upstream requests with SQLite, and aggregate multiple sources into a unified JSON result.
 
-Version 4.0 adds a local HTTP server, an embedded dashboard, TTL upstream caching, and multi-source lyric merging. Version 4.2 adds QQ Music singing annotations (助唱标注) support.
+Version 4.0 adds a local HTTP server, an embedded dashboard, TTL upstream caching, and multi-source lyric merging. Version 4.2 adds QQ Music singing annotations (助唱标注) support. Current builds make AI candidate selection traceable instead of merely reserved: aggregate responses and cache APIs expose the model, endpoint, candidate hash, scores, reason, and selected source.
 
 ## Highlights
 
@@ -12,7 +12,7 @@ Version 4.0 adds a local HTTP server, an embedded dashboard, TTL upstream cachin
 - Online sources: Kugou, QQ Music, Netease, Apple Music, Musixmatch, PetitLyrics, LRCLIB, UtaTen, JOYSOUND, Migu H5, LINE MUSIC, KKBOX, Genius, AZLyrics, Songtexte, Uta-Net, J-Lyric, J-Total, Kashinavi, UtaMap, Lyrical Nonsense, Animesongz, AWA, TuneCore, RockLyric, Spotify Lyrics, and Offline DB.
 - Singing annotations: QQ Music singing annotations (助唱标注) are automatically fetched and included in the output. Annotations mark vocal techniques such as stress (重音), breath (换气), long tone (长音), portamento up (上滑音), and portamento down (下滑音) with per-syllable timing.
 - TTL cache: provider `search` and `fetch` calls are cached in SQLite. The default TTL is 7 days. Before TTL expiry, Rosettrism reuses the previous upstream result and does not call the source again.
-- Aggregation: when `fetch` is called without `--source`, Rosettrism queries a curated source pool, prefers high-quality timed or word-timed lyrics, and fills missing ruby/reading/romanized tracks when available.
+- Aggregation: when `fetch` is called without `--source`, Rosettrism queries a curated source pool, prefers high-quality timed or word-timed lyrics, and fills missing ruby/reading/romanized tracks when available. Optional OpenAI-compatible AI selection records per-candidate scores and the final reason in `ai_score` and `ai_scores`.
 - Unified JSON: default output is multi-track JSON. `--merge-mode inline` can emit a line-oriented merged view.
 - Source-specific mode: when `--source` is provided, `--format raw` or `--format json` must also be provided.
 - Server mode: `rosettrism server` starts a local Axum API and serves the embedded dashboard.
@@ -116,10 +116,10 @@ Useful endpoints:
 - `GET /api/sources`
 - `POST /api/fetch`
 - `GET /api/cache`
-- `GET /api/cache/:id`
+- `GET /api/cache/:id` (includes `ai_scores` for unified cache records)
 - `DELETE /api/cache/:id`
 - `POST /api/cache/:id/revalidate`
-- `GET /api/stats`
+- `GET /api/stats` (includes cache counts and recent `ai_scores`)
 
 ## Cache
 
@@ -130,7 +130,7 @@ The cache database path is chosen in this order:
 - `LRC_DECODE_DB`
 - system data directory fallback
 
-Cache tables include upstream raw operation cache, derived unified cache, fetch runs, AI score placeholders, and schema migrations.
+Cache tables include upstream raw operation cache, derived unified cache, fetch runs, traceable AI scoring records, and schema migrations. AI records are linked to `unified_cache` rows and store model, base URL, candidate summary hash, `best_index`, per-candidate heuristic/AI scores, reason, and creation time.
 
 The upstream cache key is based on source, operation, normalized request data, and request version. Cookies and tokens are not included in cache keys.
 

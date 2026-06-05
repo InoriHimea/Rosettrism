@@ -411,10 +411,16 @@ async fn cache_detail(
 ) -> ApiResult<Json<serde_json::Value>> {
     authorize(&state, &headers)?;
     let cache = require_cache(&state)?;
-    let Some(entry) = cache.detail(id)? else {
+    let entry = cache.detail(id)?;
+    let unified_entry = cache.unified_detail(id)?;
+    if entry.is_none() && unified_entry.is_none() {
         return Err(ApiError::not_found("cache entry not found"));
-    };
-    Ok(Json(json!({ "entry": entry })))
+    }
+    Ok(Json(json!({
+        "entry": entry,
+        "unified_entry": unified_entry,
+        "ai_scores": cache.list_ai_scores(id)?
+    })))
 }
 
 async fn cache_delete(
@@ -448,7 +454,10 @@ async fn stats(
 ) -> ApiResult<Json<serde_json::Value>> {
     authorize(&state, &headers)?;
     let cache = require_cache(&state)?;
-    Ok(Json(json!({ "cache": cache.stats()? })))
+    Ok(Json(json!({
+        "cache": cache.stats()?,
+        "ai_scores": cache.list_recent_ai_scores(20)?
+    })))
 }
 
 async fn index() -> impl IntoResponse {

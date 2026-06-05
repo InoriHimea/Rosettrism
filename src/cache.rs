@@ -102,8 +102,28 @@ pub struct CacheStats {
     pub upstream_entries: i64,
     pub unified_entries: i64,
     pub ai_score_entries: i64,
+    pub fetch_run_entries: i64,
     pub fresh_upstream_entries: i64,
     pub expired_upstream_entries: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FetchRunRecord {
+    pub id: i64,
+    pub query: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    pub mode: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FetchRunStatusCount {
+    pub status: String,
+    pub count: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -353,6 +373,59 @@ impl UpstreamCache {
             .map_err(Error::from)
     }
 
+    pub fn start_fetch_run(&self, query: &str, source: Option<Source>, mode: &str) -> Result<i64> {
+        let now = now_unix();
+        let source = source.map(|source| source.cli_name().to_string());
+        let connection = self.lock()?;
+        connection.execute(
+            "INSERT INTO fetch_runs (query, source, mode, status, message, created_at)
+             VALUES (?1, ?2, ?3, 'started', NULL, ?4)",
+            params![query, source, mode, now],
+        )?;
+        Ok(connection.last_insert_rowid())
+    }
+
+    pub fn finish_fetch_run(&self, id: i64, status: &str, message: Option<&str>) -> Result<()> {
+        let connection = self.lock()?;
+        connection.execute(
+            "UPDATE fetch_runs SET status = ?1, message = ?2 WHERE id = ?3",
+            params![status, message, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_fetch_runs(&self, limit: usize) -> Result<Vec<FetchRunRecord>> {
+        let limit = i64::try_from(limit).unwrap_or(50).clamp(1, 500);
+        let connection = self.lock()?;
+        let mut statement = connection.prepare(
+            "SELECT id, query, source, mode, status, message, created_at
+             FROM fetch_runs
+             ORDER BY created_at DESC, id DESC
+             LIMIT ?1",
+        )?;
+        let rows = statement.query_map(params![limit], fetch_run_from_row)?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Error::from)
+    }
+
+    pub fn fetch_run_status_counts(&self) -> Result<Vec<FetchRunStatusCount>> {
+        let connection = self.lock()?;
+        let mut statement = connection.prepare(
+            "SELECT status, count(*)
+             FROM fetch_runs
+             GROUP BY status
+             ORDER BY count(*) DESC, status ASC",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok(FetchRunStatusCount {
+                status: row.get(0)?,
+                count: row.get(1)?,
+            })
+        })?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Error::from)
+    }
+
     pub fn unified_detail(&self, id: i64) -> Result<Option<UnifiedCacheEntryDetail>> {
         let now = now_unix();
         let connection = self.lock()?;
@@ -480,6 +553,7 @@ impl UpstreamCache {
         let upstream_entries = count(&connection, "SELECT count(*) FROM upstream_cache", &[])?;
         let unified_entries = count(&connection, "SELECT count(*) FROM unified_cache", &[])?;
         let ai_score_entries = count(&connection, "SELECT count(*) FROM ai_scores", &[])?;
+        let fetch_run_entries = count(&connection, "SELECT count(*) FROM fetch_runs", &[])?;
         let fresh_upstream_entries = connection.query_row(
             "SELECT count(*) FROM upstream_cache WHERE expires_at > ?1",
             params![now],
@@ -490,6 +564,7 @@ impl UpstreamCache {
             upstream_entries,
             unified_entries,
             ai_score_entries,
+            fetch_run_entries,
             fresh_upstream_entries,
             expired_upstream_entries,
         })
@@ -678,6 +753,18 @@ fn text_preview(body: &[u8]) -> String {
     String::from_utf8_lossy(slice).to_string()
 }
 
+fn fetch_run_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<FetchRunRecord> {
+    Ok(FetchRunRecord {
+        id: row.get(0)?,
+        query: row.get(1)?,
+        source: row.get(2)?,
+        mode: row.get(3)?,
+        status: row.get(4)?,
+        message: row.get(5)?,
+        created_at: row.get(6)?,
+    })
+}
+
 fn ai_score_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AiScoreRecord> {
     let score_json: String = row.get(2)?;
     Ok(AiScoreRecord {
@@ -778,6 +865,55 @@ mod tests {
         assert_eq!(detail.query.as_deref(), Some("Song Artist"));
         assert_eq!(detail.item_id.as_deref(), Some("abc-123"));
         assert!(detail.body_text_preview.contains("Song"));
+
+        drop(cache);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn records_and_counts_fetch_runs() {
+        let path = std::env::temp_dir().join(format!(
+            "rosettrism-fetch-runs-{}-{}.sqlite",
+            now_unix(),
+            std::process::id()
+        ));
+        let cache = UpstreamCache::open(&path).unwrap();
+
+        let first_id = cache
+            .start_fetch_run("Song Artist", Some(Source::Lrclib), "fetch_source_result")
+            .unwrap();
+        cache
+            .finish_fetch_run(first_id, "cache_hit", Some("served_unified_cache: id=42"))
+            .unwrap();
+        let second_id = cache
+            .start_fetch_run("Other Song", None, "aggregate_fetch")
+            .unwrap();
+        cache
+            .finish_fetch_run(
+                second_id,
+                "no_lyrics_found",
+                Some("no_lyrics_found: all selected sources returned no usable lyric"),
+            )
+            .unwrap();
+
+        let runs = cache.list_fetch_runs(10).unwrap();
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0].id, second_id);
+        assert_eq!(runs[0].status, "no_lyrics_found");
+        assert_eq!(runs[1].source.as_deref(), Some("lrclib"));
+        assert_eq!(
+            runs[1].message.as_deref(),
+            Some("served_unified_cache: id=42")
+        );
+
+        let counts = cache.fetch_run_status_counts().unwrap();
+        assert!(counts
+            .iter()
+            .any(|count| count.status == "cache_hit" && count.count == 1));
+        assert!(counts
+            .iter()
+            .any(|count| count.status == "no_lyrics_found" && count.count == 1));
+        assert_eq!(cache.stats().unwrap().fetch_run_entries, 2);
 
         drop(cache);
         let _ = std::fs::remove_file(path);

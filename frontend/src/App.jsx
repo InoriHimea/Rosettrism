@@ -92,6 +92,10 @@ const dictionaries = {
     sourceMix: '来源分布',
     operationMix: '操作类型',
     recentActivity: '最近缓存',
+    recentRuns: '最近任务',
+    errorDistribution: '错误分布',
+    mode: '模式',
+    message: '消息',
     noData: '暂无数据',
     freshRatio: '新鲜率',
     totalEntries: '总记录',
@@ -243,6 +247,10 @@ const dictionaries = {
     sourceMix: 'Source mix',
     operationMix: 'Operation mix',
     recentActivity: 'Recent cache',
+    recentRuns: 'Recent runs',
+    errorDistribution: 'Error distribution',
+    mode: 'Mode',
+    message: 'Message',
     noData: 'No data',
     freshRatio: 'Fresh ratio',
     totalEntries: 'Total entries',
@@ -728,6 +736,7 @@ function App() {
           <CacheView
             t={t}
             cache={cache}
+            stats={stats}
             selectedCacheEntry={selectedCacheEntry}
             cacheDetail={cacheDetail}
             cacheDetailBusy={cacheDetailBusy}
@@ -861,7 +870,58 @@ function Overview({ t, stats, cache, setActiveView }) {
           )}
         </div>
       </article>
+
+      <RecentRunsPanel t={t} runs={stats?.fetch_runs || []} />
+
+      <article className="chart-panel">
+        <div className="chart-title">
+          <div>
+            <h2>{t.errorDistribution}</h2>
+            <p>{stats?.cache?.fetch_run_entries ?? 0} {t.entries}</p>
+          </div>
+          <Server size={20} />
+        </div>
+        <BarList rows={(stats?.fetch_run_status_counts || []).map((row) => ({ label: row.status, value: row.count }))} empty={t.noData} />
+      </article>
     </section>
+  );
+}
+
+
+function RecentRunsPanel({ t, runs }) {
+  return (
+    <article className="chart-panel wide-panel">
+      <div className="chart-title">
+        <div>
+          <h2>{t.recentRuns}</h2>
+          <p>{runs.length} {t.entries}</p>
+        </div>
+        <RefreshCw size={20} />
+      </div>
+      <div className="run-list">
+        <div className="run-row run-row-head">
+          <strong>{t.queryLabel}</strong>
+          <span>{t.source}</span>
+          <span>{t.mode}</span>
+          <span>{t.status}</span>
+          <span>{t.message}</span>
+          <span>{t.createdAt}</span>
+        </div>
+        {runs.length === 0 ? <span className="empty-state">{t.noData}</span> : null}
+        {runs.slice(0, 8).map((run) => (
+          <div className="run-row" key={run.id}>
+            <strong title={run.query}>{run.query || '-'}</strong>
+            <span>{run.source || 'aggregate'}</span>
+            <span>{run.mode}</span>
+            <span className={`status-badge ${run.status === 'success' || run.status === 'cache_store' || run.status === 'cache_hit' ? 'status-fresh' : 'status-expired'}`}>
+              {run.status}
+            </span>
+            <span title={run.message || ''}>{run.message || '-'}</span>
+            <span>{formatTimestamp(run.created_at)}</span>
+          </div>
+        ))}
+      </div>
+    </article>
   );
 }
 
@@ -1321,6 +1381,7 @@ function ResultDialog({ t, entry, detail, detailData, busy, lyricSettings, scrol
 function CacheView({
   t,
   cache,
+  stats,
   selectedCacheEntry,
   cacheDetail,
   cacheDetailBusy,
@@ -1338,6 +1399,7 @@ function CacheView({
           <RefreshCw size={18} />
         </button>
       </div>
+      <RecentRunsPanel t={t} runs={stats?.fetch_runs || []} />
       <div className="cache-layout">
         <div className="cache-list">
           <div className="cache-row cache-row-head">

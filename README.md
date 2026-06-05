@@ -15,7 +15,7 @@ Version 4.0 adds a local HTTP server, an embedded dashboard, TTL upstream cachin
 - Aggregation: when `fetch` is called without `--source`, Rosettrism queries a curated source pool, prefers high-quality timed or word-timed lyrics, and fills missing ruby/reading/romanized tracks when available. Optional OpenAI-compatible AI selection records per-candidate scores and the final reason in `ai_score` and `ai_scores`.
 - Unified JSON: default output is multi-track JSON. `--merge-mode inline` can emit a line-oriented merged view.
 - Source-specific mode: when `--source` is provided, `--format raw` or `--format json` must also be provided.
-- Server mode: `rosettrism server` starts a local Axum API and serves the embedded dashboard.
+- Server mode: `rosettrism server` starts a local Axum API and serves the embedded dashboard. Non-local bindings require `ROSETTRISM_SERVER_TOKEN`; the dashboard can store that token in `sessionStorage` and sends it with API requests.
 
 Rosettrism does not implement CAPTCHA bypass, credential harvesting, SSL pinning bypass, private app signing, or non-public protocol automation.
 
@@ -92,13 +92,14 @@ Start the local server:
 rosettrism server --host 127.0.0.1 --port 8080 --open
 ```
 
-If binding to a non-local host, set `ROSETTRISM_SERVER_TOKEN`.
+If binding to a non-local host, set `ROSETTRISM_SERVER_TOKEN`. Clients must send that value as either `x-rosettrism-token: <token>` or `Authorization: Bearer <token>`; missing or invalid tokens receive a JSON `401` response such as `{ "error": "missing or invalid server token" }`.
 
 Fetch unified JSON:
 
 ```powershell
 curl -X POST http://127.0.0.1:8080/api/fetch ^
   -H "content-type: application/json" ^
+  -H "x-rosettrism-token: %ROSETTRISM_SERVER_TOKEN%" ^
   -d "{\"query\":\"song title artist\",\"merge_mode\":\"tracks\",\"top\":1}"
 ```
 
@@ -107,8 +108,14 @@ Fetch source raw text:
 ```powershell
 curl -X POST http://127.0.0.1:8080/api/fetch ^
   -H "content-type: application/json" ^
+  -H "Authorization: Bearer %ROSETTRISM_SERVER_TOKEN%" ^
   -d "{\"query\":\"song title artist\",\"source\":\"qq\",\"format\":\"raw\"}"
 ```
+
+Dashboard token usage:
+
+- Localhost servers without `ROSETTRISM_SERVER_TOKEN` need no dashboard token.
+- For remote servers, open Settings, enter the same Server Token value configured in `ROSETTRISM_SERVER_TOKEN`, then refresh or retry the API action. The dashboard stores it in `sessionStorage`, so it is cleared when the browser session ends; use **Clear token** to remove it immediately.
 
 Useful endpoints:
 

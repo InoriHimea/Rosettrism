@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createPortal } from 'react-dom';
 import { LyricPlaybackView } from './LyricPlaybackView.jsx';
@@ -151,6 +151,10 @@ const dictionaries = {
     aiApiKey: 'API Key',
     aiModel: '模型名',
     aiApiKeyHint: '留空时后端使用 ROSETTRISM_OPENAI_API_KEY。',
+    serverAccess: 'Server Token',
+    serverToken: 'Server Token',
+    serverTokenHint: '远端绑定时填写 ROSETTRISM_SERVER_TOKEN。Token 仅保存在本次浏览器会话。',
+    clearServerToken: '清除 Token',
     collapseSidebar: '收起菜单',
     expandSidebar: '展开菜单',
     qualityPending: '尚无 AI 评分记录。启用 AI 优选并执行聚合后会显示明细。',
@@ -298,6 +302,10 @@ const dictionaries = {
     aiApiKey: 'API key',
     aiModel: 'Model',
     aiApiKeyHint: 'Leave empty to use ROSETTRISM_OPENAI_API_KEY on the server.',
+    serverAccess: 'Server access',
+    serverToken: 'Server Token',
+    serverTokenHint: 'Use ROSETTRISM_SERVER_TOKEN when the server is bound remotely. The token is stored only for this browser session.',
+    clearServerToken: 'Clear token',
     collapseSidebar: 'Collapse menu',
     expandSidebar: 'Expand menu',
     qualityPending: 'No AI score records yet. Enable AI selection and run an aggregate fetch to see details.',
@@ -344,6 +352,16 @@ const defaultAiSettings = {
   model: '',
 };
 
+const serverTokenStorageKey = 'rosettrism-server-token';
+
+function readServerToken() {
+  try {
+    return sessionStorage.getItem(serverTokenStorageKey) || '';
+  } catch {
+    return '';
+  }
+}
+
 function readAiSettings() {
   try {
     const stored = JSON.parse(localStorage.getItem('rosettrism-ai-settings') || 'null');
@@ -373,6 +391,7 @@ function App() {
   const [resultDetailScrollTick, setResultDetailScrollTick] = useState(0);
   const [lyricSettings, setLyricSettings] = useState(readLyricSettings);
   const [aiSettings, setAiSettings] = useState(readAiSettings);
+  const [serverToken, setServerToken] = useState(readServerToken);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [selectedCacheEntry, setSelectedCacheEntry] = useState(null);
@@ -380,9 +399,21 @@ function App() {
   const [cacheDetailBusy, setCacheDetailBusy] = useState(false);
   const t = dictionaries[language] || dictionaries.zh;
 
+  const apiFetch = useCallback(
+    (path, options = {}) => {
+      const headers = new Headers(options.headers || {});
+      const token = serverToken.trim();
+      if (token) {
+        headers.set('x-rosettrism-token', token);
+      }
+      return fetch(path, { ...options, headers });
+    },
+    [serverToken],
+  );
+
   useEffect(() => {
     refreshMeta();
-  }, []);
+  }, [apiFetch]);
 
   useEffect(() => {
     localStorage.setItem('rosettrism-language', language);
@@ -399,6 +430,19 @@ function App() {
   useEffect(() => {
     localStorage.setItem('rosettrism-ai-settings', JSON.stringify(aiSettings));
   }, [aiSettings]);
+
+  useEffect(() => {
+    try {
+      const token = serverToken.trim();
+      if (token) {
+        sessionStorage.setItem(serverTokenStorageKey, token);
+      } else {
+        sessionStorage.removeItem(serverTokenStorageKey);
+      }
+    } catch {
+      return;
+    }
+  }, [serverToken]);
 
   const aiScoringPayload = useMemo(() => buildAiScoringPayload(aiSettings), [aiSettings]);
 
@@ -441,9 +485,9 @@ function App() {
   async function refreshMeta() {
     try {
       const [healthRes, statsRes, cacheRes] = await Promise.all([
-        fetch('/api/health'),
-        fetch('/api/stats'),
-        fetch('/api/cache'),
+        apiFetch('/api/health'),
+        apiFetch('/api/stats'),
+        apiFetch('/api/cache'),
       ]);
       if (!healthRes.ok || !statsRes.ok || !cacheRes.ok) {
         return;
@@ -476,7 +520,7 @@ function App() {
     setSearchResults([]);
     setSearchWarnings([]);
     try {
-      const response = await fetch('/api/search', {
+      const response = await apiFetch('/api/search', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(searchPayload),
@@ -502,7 +546,7 @@ function App() {
     setError('');
     setResult('');
     try {
-      const response = await fetch('/api/fetch', {
+      const response = await apiFetch('/api/fetch', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(aggregatePayload),
@@ -542,7 +586,7 @@ function App() {
     setResultDetailBusy(true);
     setError('');
     try {
-      const response = await fetch('/api/fetch-result', {
+      const response = await apiFetch('/api/fetch-result', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -576,7 +620,7 @@ function App() {
     if (!window.confirm(t.deleteConfirm)) {
       return;
     }
-    await fetch(`/api/cache/${id}`, { method: 'DELETE' });
+    await apiFetch(`/api/cache/${id}`, { method: 'DELETE' });
     if (selectedCacheEntry?.id === id) {
       setSelectedCacheEntry(null);
       setCacheDetail(null);
@@ -589,7 +633,7 @@ function App() {
     setCacheDetail(null);
     setCacheDetailBusy(true);
     try {
-      const response = await fetch(`/api/cache/${entry.id}`);
+      const response = await apiFetch(`/api/cache/${entry.id}`);
       if (!response.ok) {
         throw new Error(await response.text());
       }
@@ -702,6 +746,8 @@ function App() {
             setLyricSettings={setLyricSettings}
             aiSettings={aiSettings}
             setAiSettings={setAiSettings}
+            serverToken={serverToken}
+            setServerToken={setServerToken}
             payload={searchPayload}
           />
         )}
@@ -1683,7 +1729,7 @@ function formatScore(value) {
   return Number(value).toFixed(1);
 }
 
-function SettingsView({ t, language, setLanguage, lyricSettings, setLyricSettings, aiSettings, setAiSettings, payload }) {
+function SettingsView({ t, language, setLanguage, lyricSettings, setLyricSettings, aiSettings, setAiSettings, serverToken, setServerToken, payload }) {
   const previewStyle = {
     '--lyric-solid-color': lyricSettings.solidColor,
     '--lyric-gradient': resolveLyricGradient(lyricSettings.colorPreset),
@@ -1701,6 +1747,23 @@ function SettingsView({ t, language, setLanguage, lyricSettings, setLyricSetting
             <option value="en">{t.english}</option>
           </select>
         </label>
+        <div className="settings-group">
+          <strong>{t.serverAccess}</strong>
+          <p className="hint">{t.serverTokenHint}</p>
+          <label className="field-label">
+            {t.serverToken}
+            <input
+              type="password"
+              value={serverToken}
+              autoComplete="off"
+              placeholder="ROSETTRISM_SERVER_TOKEN"
+              onChange={(event) => setServerToken(event.target.value)}
+            />
+          </label>
+          <button className="button-secondary settings-token-clear" type="button" onClick={() => setServerToken('')} disabled={!serverToken}>
+            {t.clearServerToken}
+          </button>
+        </div>
         <div className="settings-group">
           <strong>{t.aiScoring}</strong>
           <p className="hint">{t.aiScoringHint}</p>

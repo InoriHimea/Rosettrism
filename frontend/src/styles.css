@@ -2099,3 +2099,77 @@ nav button.nav-active::before {
     left: -8px;
   }
 }
+
+.quality-card {
+  display: grid;
+  gap: 1rem;
+}
+
+.quality-card h3 {
+  margin: 0;
+}
+
+.quality-meta {
+  display: grid;
+  gap: 0.5rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.quality-meta span {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.quality-meta strong {
+  color: var(--text);
+}
+
+.quality-table {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+}
+
+.quality-row {
+  display: grid;
+  grid-template-columns: minmax(9rem, 1.2fr) 7rem 6rem minmax(12rem, 2fr);
+  gap: 0.75rem;
+  padding: 0.8rem;
+  border-top: 1px solid var(--border);
+  align-items: start;
+}
+
+.quality-row:first-child {
+  border-top: 0;
+}
+
+.quality-head {
+  background: rgba(15, 23, 42, 0.04);
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.quality-selected {
+  background: rgba(20, 201, 162, 0.1);
+}
+
+.quality-row span {
+  min-width: 0;
+}
+
+.quality-row small {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--muted);
+}
+
+@media (max-width: 900px) {
+  .quality-row {
+    grid-template-columns: 1fr;
+  }
+}

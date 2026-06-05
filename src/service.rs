@@ -5,8 +5,9 @@ use clap::ValueEnum;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 
-use crate::cache::{default_ttl, UpstreamCache};
+use crate::cache::{default_ttl, now_unix, UpstreamCache};
 use crate::cached_provider::CachedProvider;
 use crate::decoder::{decode_bytes, decode_raw_bytes, InputFormat};
 use crate::model::{
@@ -123,6 +124,31 @@ pub struct AggregateFetchResponse {
     pub results: Vec<UnifiedLyric>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_score: Option<AiScoringResult>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiScoringResult {
+    pub model: String,
+    pub base_url: String,
+    pub candidate_summary_hash: String,
+    pub best_index: usize,
+    pub scores: Vec<AiCandidateScore>,
+    pub reason: String,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiCandidateScore {
+    pub index: usize,
+    pub source: String,
+    pub title: String,
+    pub artist: String,
+    pub heuristic_score: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_score: Option<f32>,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -238,6 +264,7 @@ impl ServiceContext {
         warnings.retain(|warning| !is_low_signal_aggregate_warning(warning));
 
         candidates.sort_by(compare_candidate_quality);
+        let mut ai_score = None;
         match self
             .select_best_candidate_with_ai(&candidates, request.ai_scoring.as_ref())
             .await
@@ -245,12 +272,13 @@ impl ServiceContext {
             Ok(Some(selection)) => {
                 warnings.push(format!(
                     "AI lyric selection chose {} with score {:.1}: {}",
-                    candidates[selection.index].source.cli_name(),
-                    selection.score,
+                    candidates[selection.best_index].source.cli_name(),
+                    selection.best_score().unwrap_or(0.0),
                     selection.reason
                 ));
-                let selected = candidates.remove(selection.index);
+                let selected = candidates.remove(selection.best_index);
                 candidates.insert(0, selected);
+                ai_score = Some(selection);
             }
             Ok(None) => {}
             Err(err) => warnings.push(format!("AI lyric selection skipped: {err}")),
@@ -266,6 +294,7 @@ impl ServiceContext {
             mode: request.merge_mode,
             results,
             warnings,
+            ai_score: ai_score.clone(),
         };
 
         if let Some(cache) = &self.cache {
@@ -276,6 +305,9 @@ impl ServiceContext {
                 .flat_map(|result| result.cache_refs.clone())
                 .collect::<Vec<_>>();
             let id = cache.put_unified(&cache_key, &body, &dependency_keys, ttl)?;
+            if let Some(ai_score) = &ai_score {
+                cache.put_ai_score(id, &serde_json::to_value(ai_score)?)?;
+            }
             response.warnings.push(format!("stored unified cache {id}"));
         }
 
@@ -523,11 +555,11 @@ impl ServiceContext {
             Ok(Some(selection)) => {
                 warnings.push(format!(
                     "AI lyric selection chose {} with score {:.1}: {}",
-                    candidates[selection.index].source.cli_name(),
-                    selection.score,
+                    candidates[selection.best_index].source.cli_name(),
+                    selection.best_score().unwrap_or(0.0),
                     selection.reason
                 ));
-                let selected = candidates.remove(selection.index);
+                let selected = candidates.remove(selection.best_index);
                 candidates.insert(0, selected);
             }
             Ok(None) => {}
@@ -547,13 +579,17 @@ impl ServiceContext {
         &self,
         candidates: &[SourceCandidate],
         config: Option<&AiScoringConfig>,
-    ) -> Result<Option<AiCandidateSelection>> {
+    ) -> Result<Option<AiScoringResult>> {
         let Some(config) = resolve_ai_scoring_config(config) else {
             return Ok(None);
         };
         if candidates.len() < 2 {
             return Ok(None);
         }
+
+        let summaries = candidate_summaries(candidates);
+        let summary_json = serde_json::to_string(&summaries)?;
+        let summary_hash = hash_json(summary_json.as_bytes());
 
         let request = json!({
             "model": config.model,
@@ -565,7 +601,7 @@ impl ServiceContext {
                 },
                 {
                     "role": "user",
-                    "content": serde_json::to_string(&candidate_summaries(candidates))?
+                    "content": summary_json
                 }
             ]
         });
@@ -593,7 +629,7 @@ impl ServiceContext {
             .ok_or_else(|| {
                 Error::Provider("OpenAI compatible response missing message content".into())
             })?;
-        parse_ai_candidate_selection(content, candidates.len())
+        parse_ai_candidate_selection(content, &config, &summaries, summary_hash)
     }
 
     pub async fn provider(
@@ -832,13 +868,6 @@ struct ResolvedAiScoringConfig {
     model: String,
 }
 
-#[derive(Debug, Clone)]
-struct AiCandidateSelection {
-    index: usize,
-    score: f32,
-    reason: String,
-}
-
 #[derive(Debug, Serialize)]
 struct AiCandidateSummary {
     index: usize,
@@ -937,46 +966,86 @@ fn candidate_summaries(candidates: &[SourceCandidate]) -> Vec<AiCandidateSummary
 
 fn parse_ai_candidate_selection(
     content: &str,
-    candidate_len: usize,
-) -> Result<Option<AiCandidateSelection>> {
+    config: &ResolvedAiScoringConfig,
+    summaries: &[AiCandidateSummary],
+    summary_hash: String,
+) -> Result<Option<AiScoringResult>> {
     let value: serde_json::Value = serde_json::from_str(content.trim())?;
     let best_index = value
         .get("best_index")
         .and_then(|value| value.as_u64())
         .ok_or_else(|| Error::Provider("AI response missing best_index".into()))?
         as usize;
-    if best_index >= candidate_len {
+    if best_index >= summaries.len() {
         return Err(Error::Provider(format!(
             "AI response best_index {best_index} is out of range"
         )));
     }
-    let score_item = value
+    let response_scores = value
         .get("scores")
         .and_then(|value| value.as_array())
-        .and_then(|scores| {
-            scores.iter().find(|score| {
+        .cloned()
+        .unwrap_or_default();
+    let scores = summaries
+        .iter()
+        .map(|summary| {
+            let score_item = response_scores.iter().find(|score| {
                 score
                     .get("index")
                     .and_then(|index| index.as_u64())
-                    .is_some_and(|index| index as usize == best_index)
-            })
-        });
-    let score = score_item
-        .and_then(|item| item.get("score"))
-        .and_then(|score| score.as_f64())
-        .unwrap_or(0.0) as f32;
-    let reason = score_item
-        .and_then(|item| item.get("reason"))
-        .and_then(|reason| reason.as_str())
+                    .is_some_and(|index| index as usize == summary.index)
+            });
+            AiCandidateScore {
+                index: summary.index,
+                source: summary.source.clone(),
+                title: summary.title.clone(),
+                artist: summary.artist.clone(),
+                heuristic_score: summary.heuristic_score,
+                ai_score: score_item
+                    .and_then(|item| item.get("score"))
+                    .and_then(|score| score.as_f64())
+                    .map(|score| score as f32),
+                reason: score_item
+                    .and_then(|item| item.get("reason"))
+                    .and_then(|reason| reason.as_str())
+                    .unwrap_or("")
+                    .chars()
+                    .take(240)
+                    .collect(),
+            }
+        })
+        .collect::<Vec<_>>();
+    let reason = scores
+        .iter()
+        .find(|score| score.index == best_index)
+        .map(|score| score.reason.as_str())
+        .filter(|reason| !reason.is_empty())
         .unwrap_or("selected by AI")
-        .chars()
-        .take(180)
-        .collect();
-    Ok(Some(AiCandidateSelection {
-        index: best_index,
-        score,
+        .to_string();
+    Ok(Some(AiScoringResult {
+        model: config.model.clone(),
+        base_url: config.base_url.clone(),
+        candidate_summary_hash: summary_hash,
+        best_index,
+        scores,
         reason,
+        created_at: now_unix(),
     }))
+}
+
+impl AiScoringResult {
+    fn best_score(&self) -> Option<f32> {
+        self.scores
+            .iter()
+            .find(|score| score.index == self.best_index)
+            .and_then(|score| score.ai_score)
+    }
+}
+
+fn hash_json(body: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(body);
+    format!("{:x}", hasher.finalize())
 }
 
 fn build_unified(

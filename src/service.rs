@@ -196,8 +196,26 @@ impl Default for ServiceContext {
     }
 }
 
+const FETCH_STATUS_SUCCESS: &str = "success";
+const FETCH_STATUS_ERROR: &str = "error";
+const FETCH_STATUS_CACHE_HIT: &str = "cache_hit";
+const FETCH_STATUS_CACHE_STORE: &str = "cache_store";
+const FETCH_STATUS_PROVIDER_WARNING: &str = "provider_warning";
+const FETCH_STATUS_AI_SKIPPED: &str = "ai_skipped";
+const FETCH_STATUS_NO_LYRICS: &str = "no_lyrics_found";
+
 impl ServiceContext {
     pub async fn aggregate_fetch(
+        &self,
+        request: AggregateFetchRequest,
+    ) -> Result<AggregateFetchResponse> {
+        let run_id = self.start_fetch_run(&request.query, None, "aggregate_fetch")?;
+        let result = self.aggregate_fetch_inner(request).await;
+        self.finish_fetch_run_from_result(run_id, &result)?;
+        result
+    }
+
+    async fn aggregate_fetch_inner(
         &self,
         mut request: AggregateFetchRequest,
     ) -> Result<AggregateFetchResponse> {
@@ -226,7 +244,7 @@ impl ServiceContext {
                     let mut response: AggregateFetchResponse = serde_json::from_slice(&hit.body)?;
                     response
                         .warnings
-                        .push(format!("served unified cache {}", hit.id));
+                        .push(format!("served_unified_cache: id={}", hit.id));
                     return Ok(response);
                 }
             }
@@ -252,7 +270,7 @@ impl ServiceContext {
             match handle.await {
                 Ok(Ok(candidate)) => candidates.push(candidate),
                 Ok(Err(err)) => warnings.push(err.to_string()),
-                Err(err) => warnings.push(format!("provider task failed: {err}")),
+                Err(err) => warnings.push(format!("provider_warning: provider task failed: {err}")),
             }
         }
 
@@ -281,7 +299,7 @@ impl ServiceContext {
                 ai_score = Some(selection);
             }
             Ok(None) => {}
-            Err(err) => warnings.push(format!("AI lyric selection skipped: {err}")),
+            Err(err) => warnings.push(format!("ai_skipped: {err}")),
         }
 
         let results = candidates
@@ -308,13 +326,25 @@ impl ServiceContext {
             if let Some(ai_score) = &ai_score {
                 cache.put_ai_score(id, &serde_json::to_value(ai_score)?)?;
             }
-            response.warnings.push(format!("stored unified cache {id}"));
+            response
+                .warnings
+                .push(format!("stored_unified_cache: id={id}"));
         }
 
         Ok(response)
     }
 
     pub async fn search_sources(
+        &self,
+        request: SourceSearchRequest,
+    ) -> Result<MultiSourceSearchResponse> {
+        let run_id = self.start_fetch_run(&request.query, None, "search_sources")?;
+        let result = self.search_sources_inner(request).await;
+        self.finish_fetch_run_from_result(run_id, &result)?;
+        result
+    }
+
+    async fn search_sources_inner(
         &self,
         mut request: SourceSearchRequest,
     ) -> Result<MultiSourceSearchResponse> {
@@ -353,7 +383,7 @@ impl ServiceContext {
                     groups.push(group);
                 }
                 Ok(Err(err)) => warnings.push(err.to_string()),
-                Err(err) => warnings.push(format!("provider task failed: {err}")),
+                Err(err) => warnings.push(format!("provider_warning: provider task failed: {err}")),
             }
         }
 
@@ -494,6 +524,22 @@ impl ServiceContext {
         ttl: Option<Duration>,
         force: bool,
     ) -> Result<SpecificFetchResult> {
+        let query = fetch_run_query_for_result(&result);
+        let run_id = self.start_fetch_run(&query, Some(result.source), "fetch_source_result")?;
+        let fetch_result = self
+            .fetch_source_result_inner(result, format, ttl, force)
+            .await;
+        self.finish_fetch_run_from_result(run_id, &fetch_result)?;
+        fetch_result
+    }
+
+    async fn fetch_source_result_inner(
+        &self,
+        result: SearchResult,
+        format: SpecificFetchFormat,
+        ttl: Option<Duration>,
+        force: bool,
+    ) -> Result<SpecificFetchResult> {
         let ttl = ttl.unwrap_or(self.default_ttl);
         let source = result.source;
         let provider = self
@@ -517,6 +563,23 @@ impl ServiceContext {
     }
 
     pub async fn fetch_aggregate_members(
+        &self,
+        members: Vec<SearchResult>,
+        merge_mode: MergeMode,
+        ttl: Option<Duration>,
+        force: bool,
+        ai_scoring: Option<&AiScoringConfig>,
+    ) -> Result<UnifiedLyric> {
+        let query = fetch_run_query_for_members(&members);
+        let run_id = self.start_fetch_run(&query, None, "fetch_aggregate_members")?;
+        let result = self
+            .fetch_aggregate_members_inner(members, merge_mode, ttl, force, ai_scoring)
+            .await;
+        self.finish_fetch_run_from_result(run_id, &result)?;
+        result
+    }
+
+    async fn fetch_aggregate_members_inner(
         &self,
         members: Vec<SearchResult>,
         merge_mode: MergeMode,
@@ -563,7 +626,7 @@ impl ServiceContext {
                 candidates.insert(0, selected);
             }
             Ok(None) => {}
-            Err(err) => warnings.push(format!("AI lyric selection skipped: {err}")),
+            Err(err) => warnings.push(format!("ai_skipped: {err}")),
         }
 
         let mut unified = build_unified(&candidates[0], &candidates, merge_mode);
@@ -573,6 +636,33 @@ impl ServiceContext {
         ));
         unified.warnings = warnings;
         Ok(unified)
+    }
+
+    fn start_fetch_run(
+        &self,
+        query: &str,
+        source: Option<Source>,
+        mode: &str,
+    ) -> Result<Option<i64>> {
+        self.cache
+            .as_ref()
+            .map(|cache| cache.start_fetch_run(query, source, mode))
+            .transpose()
+    }
+
+    fn finish_fetch_run_from_result<T: FetchRunOutcome>(
+        &self,
+        run_id: Option<i64>,
+        result: &Result<T>,
+    ) -> Result<()> {
+        let Some(run_id) = run_id else {
+            return Ok(());
+        };
+        let (status, message) = classify_fetch_run_result(result);
+        if let Some(cache) = &self.cache {
+            cache.finish_fetch_run(run_id, status, message.as_deref())?;
+        }
+        Ok(())
     }
 
     async fn select_best_candidate_with_ai(
@@ -1031,6 +1121,125 @@ fn parse_ai_candidate_selection(
         reason,
         created_at: now_unix(),
     }))
+}
+
+trait FetchRunOutcome {
+    fn fetch_run_warnings(&self) -> &[String];
+}
+
+impl FetchRunOutcome for AggregateFetchResponse {
+    fn fetch_run_warnings(&self) -> &[String] {
+        &self.warnings
+    }
+}
+
+impl FetchRunOutcome for MultiSourceSearchResponse {
+    fn fetch_run_warnings(&self) -> &[String] {
+        &self.warnings
+    }
+}
+
+impl FetchRunOutcome for UnifiedLyric {
+    fn fetch_run_warnings(&self) -> &[String] {
+        &self.warnings
+    }
+}
+
+impl FetchRunOutcome for SpecificFetchResult {
+    fn fetch_run_warnings(&self) -> &[String] {
+        match self {
+            SpecificFetchResult::Raw { .. } | SpecificFetchResult::Json { .. } => &[],
+            SpecificFetchResult::RawMany { warnings, .. }
+            | SpecificFetchResult::JsonMany { warnings, .. } => warnings,
+        }
+    }
+}
+
+fn classify_fetch_run_result<T: FetchRunOutcome>(
+    result: &Result<T>,
+) -> (&'static str, Option<String>) {
+    match result {
+        Ok(value) => classify_fetch_run_warnings(value.fetch_run_warnings()),
+        Err(err) => {
+            let message = err.to_string();
+            let status = if message.contains("no_lyrics_found")
+                || message.contains("no lyric candidates")
+                || message.contains("no aggregate members")
+            {
+                FETCH_STATUS_NO_LYRICS
+            } else if message.contains("ai_skipped")
+                || message.contains("AI lyric selection skipped")
+            {
+                FETCH_STATUS_AI_SKIPPED
+            } else if message.contains("provider_warning")
+                || message.contains("provider task failed")
+            {
+                FETCH_STATUS_PROVIDER_WARNING
+            } else {
+                FETCH_STATUS_ERROR
+            };
+            (status, Some(message))
+        }
+    }
+}
+
+fn classify_fetch_run_warnings(warnings: &[String]) -> (&'static str, Option<String>) {
+    if let Some(message) = warnings
+        .iter()
+        .find(|warning| warning.starts_with("served_unified_cache:"))
+    {
+        return (FETCH_STATUS_CACHE_HIT, Some(message.clone()));
+    }
+    if let Some(message) = warnings
+        .iter()
+        .find(|warning| warning.starts_with("ai_skipped:"))
+    {
+        return (FETCH_STATUS_AI_SKIPPED, Some(message.clone()));
+    }
+    if let Some(message) = warnings
+        .iter()
+        .find(|warning| warning.starts_with("provider_warning:"))
+    {
+        return (FETCH_STATUS_PROVIDER_WARNING, Some(message.clone()));
+    }
+    if let Some(message) = warnings
+        .iter()
+        .find(|warning| warning.starts_with("stored_unified_cache:"))
+    {
+        return (FETCH_STATUS_CACHE_STORE, Some(message.clone()));
+    }
+    (FETCH_STATUS_SUCCESS, None)
+}
+
+fn fetch_run_query_for_result(result: &SearchResult) -> String {
+    [result.title.as_str(), result.artist.as_str()]
+        .into_iter()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+        .if_empty_then(|| result.id.clone())
+}
+
+fn fetch_run_query_for_members(members: &[SearchResult]) -> String {
+    members
+        .first()
+        .map(fetch_run_query_for_result)
+        .unwrap_or_else(|| "aggregate members".into())
+}
+
+trait EmptyStringExt {
+    fn if_empty_then(self, fallback: impl FnOnce() -> String) -> String;
+}
+
+impl EmptyStringExt for String {
+    fn if_empty_then(self, fallback: impl FnOnce() -> String) -> String {
+        if self.is_empty() {
+            fallback()
+        } else {
+            self
+        }
+    }
 }
 
 impl AiScoringResult {

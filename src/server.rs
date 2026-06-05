@@ -79,6 +79,7 @@ fn app(state: AppState) -> Router {
         .route("/api/cache", get(cache_list))
         .route("/api/cache/:id", get(cache_detail).delete(cache_delete))
         .route("/api/cache/:id/revalidate", post(cache_revalidate))
+        .route("/api/runs", get(fetch_runs))
         .route("/api/stats", get(stats))
         .route("/", get(index))
         .route("/*path", get(asset))
@@ -448,6 +449,18 @@ async fn cache_revalidate(
     })))
 }
 
+async fn fetch_runs(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    authorize(&state, &headers)?;
+    let cache = require_cache(&state)?;
+    Ok(Json(json!({
+        "runs": cache.list_fetch_runs(100)?,
+        "status_counts": cache.fetch_run_status_counts()?
+    })))
+}
+
 async fn stats(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -456,7 +469,9 @@ async fn stats(
     let cache = require_cache(&state)?;
     Ok(Json(json!({
         "cache": cache.stats()?,
-        "ai_scores": cache.list_recent_ai_scores(20)?
+        "ai_scores": cache.list_recent_ai_scores(20)?,
+        "fetch_runs": cache.list_fetch_runs(20)?,
+        "fetch_run_status_counts": cache.fetch_run_status_counts()?
     })))
 }
 

@@ -11,7 +11,7 @@ Version 4.0 adds a local HTTP server, an embedded dashboard, TTL upstream cachin
 - Local decode: KRC, QQ QRC/XML, Netease YRC, Apple Music TTML, LRC, plain text, and Rosettrism JSON.
 - Online sources: Kugou, QQ Music, Netease, Apple Music, Musixmatch, PetitLyrics, LRCLIB, UtaTen, JOYSOUND, Migu H5, LINE MUSIC, KKBOX, Genius, AZLyrics, Songtexte, Uta-Net, J-Lyric, J-Total, Kashinavi, UtaMap, Lyrical Nonsense, Animesongz, AWA, TuneCore, RockLyric, Spotify Lyrics, and Offline DB.
 - Singing annotations: QQ Music singing annotations (助唱标注) are automatically fetched and included in the output. Annotations mark vocal techniques such as stress (重音), breath (换气), long tone (长音), portamento up (上滑音), and portamento down (下滑音) with per-syllable timing.
-- TTL cache: provider `search` and `fetch` calls are cached in SQLite. The default TTL is 7 days. Before TTL expiry, Rosettrism reuses the previous upstream result and does not call the source again.
+- TTL cache: provider `search` and `fetch` calls are cached in SQLite. The default TTL is 7 days. Before TTL expiry, Rosettrism reuses the previous upstream result and does not call the source again. Fetch run observability records recent queries, sources, modes, statuses, messages, cache hits/stores, AI skips, provider warnings, and no-lyrics outcomes.
 - Aggregation: when `fetch` is called without `--source`, Rosettrism queries a curated source pool, prefers high-quality timed or word-timed lyrics, and fills missing ruby/reading/romanized tracks when available. Optional OpenAI-compatible AI selection records per-candidate scores and the final reason in `ai_score` and `ai_scores`.
 - Unified JSON: default output is multi-track JSON. `--merge-mode inline` can emit a line-oriented merged view.
 - Source-specific mode: when `--source` is provided, `--format raw` or `--format json` must also be provided.
@@ -126,7 +126,8 @@ Useful endpoints:
 - `GET /api/cache/:id` (includes `ai_scores` for unified cache records)
 - `DELETE /api/cache/:id`
 - `POST /api/cache/:id/revalidate`
-- `GET /api/stats` (includes cache counts and recent `ai_scores`)
+- `GET /api/runs` (recent fetch/search runs plus status/error distribution)
+- `GET /api/stats` (includes cache counts, recent `ai_scores`, recent `fetch_runs`, and fetch-run status distribution)
 
 ## Cache
 
@@ -137,7 +138,7 @@ The cache database path is chosen in this order:
 - `LRC_DECODE_DB`
 - system data directory fallback
 
-Cache tables include upstream raw operation cache, derived unified cache, fetch runs, traceable AI scoring records, and schema migrations. AI records are linked to `unified_cache` rows and store model, base URL, candidate summary hash, `best_index`, per-candidate heuristic/AI scores, reason, and creation time.
+Cache tables include upstream raw operation cache, derived unified cache, fetch runs, traceable AI scoring records, and schema migrations. `fetch_runs` is an active observability feature: aggregate fetches, multi-source searches, selected-result fetches, and aggregate-member fetches record `query`, `source`, `mode`, normalized `status`, `message`, and `created_at`. The dashboard Overview/Cache pages and `/api/runs` show recent runs and status distribution for errors such as `provider_warning`, `ai_skipped`, and `no_lyrics_found`, plus cache outcomes such as `cache_hit` and `cache_store`. AI records are linked to `unified_cache` rows and store model, base URL, candidate summary hash, `best_index`, per-candidate heuristic/AI scores, reason, and creation time.
 
 The upstream cache key is based on source, operation, normalized request data, and request version. Cookies and tokens are not included in cache keys.
 

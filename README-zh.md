@@ -9,7 +9,7 @@ Rosettrism 是一个 Rust 单二进制歌词工具。它可以解码本地 KRC/Q
 - 本地解码：KRC、QQ QRC/XML、网易云 YRC、Apple Music TTML、LRC、纯文本和 Rosettrism JSON。
 - 在线源：酷狗、QQ 音乐、网易云、Apple Music、Musixmatch、PetitLyrics、LRCLIB、UtaTen、JOYSOUND、咪咕 H5、LINE MUSIC、KKBOX、Genius、AZLyrics、Songtexte、Uta-Net、J-Lyric、J-Total、Kashinavi、UtaMap、Lyrical Nonsense、Animesongz、AWA、TuneCore、RockLyric、Spotify Lyrics 和离线数据库。
 - 助唱标注：自动获取 QQ 音乐的助唱标注数据并包含在输出中。标注标记了重音、换气、长音、上滑音、下滑音等声乐技巧，精确到每个音节的时间。
-- TTL 缓存：provider 的 `search` 和 `fetch` 调用结果缓存在 SQLite 中，默认 TTL 为 7 天。TTL 过期前，Rosettrism 复用之前的上游结果，不再重复请求。
+- TTL 缓存：provider 的 `search` 和 `fetch` 调用结果缓存在 SQLite 中，默认 TTL 为 7 天。TTL 过期前，Rosettrism 复用之前的上游结果，不再重复请求。Fetch run 可观测性会记录最近的查询、来源、模式、状态、消息、缓存命中/写入、AI 跳过、provider warning 与无歌词结果。
 - 聚合：当 `fetch` 不指定 `--source` 时，Rosettrism 查询预设的源池，优先选择高质量的逐行/逐字时间轴歌词，并在可用时补充 ruby/reading/romanized 轨道。可选的 OpenAI 兼容 AI 优选会把每个候选的评分和最终原因记录到 `ai_score` / `ai_scores`。
 - 统一 JSON：默认输出为多轨 JSON。`--merge-mode inline` 可输出逐行合并视图。
 - 指定源模式：指定 `--source` 时，必须同时提供 `--format raw` 或 `--format json`。
@@ -124,7 +124,8 @@ curl -X POST http://127.0.0.1:8080/api/fetch ^
 - `GET /api/cache/:id`（统一缓存记录会包含 `ai_scores`）
 - `DELETE /api/cache/:id`
 - `POST /api/cache/:id/revalidate`
-- `GET /api/stats`（包含缓存计数和最近 `ai_scores`）
+- `GET /api/runs`（最近 fetch/search 任务与状态/错误分布）
+- `GET /api/stats`（包含缓存计数、最近 `ai_scores`、最近 `fetch_runs` 与 fetch-run 状态分布）
 
 ## 缓存
 
@@ -135,7 +136,7 @@ curl -X POST http://127.0.0.1:8080/api/fetch ^
 - `LRC_DECODE_DB`
 - 系统数据目录回退
 
-缓存表包括上游原始操作缓存、派生统一缓存、获取记录、可追踪 AI 评分记录和 schema 迁移。AI 记录关联到 `unified_cache` 行，存储模型、base URL、候选摘要 hash、`best_index`、各候选启发式/AI 分数、原因与创建时间。
+缓存表包括上游原始操作缓存、派生统一缓存、获取记录、可追踪 AI 评分记录和 schema 迁移。`fetch_runs` 是实际可用的可观测性功能：聚合 fetch、多源 search、选中结果 fetch 与聚合成员 fetch 会记录 `query`、`source`、`mode`、标准化 `status`、`message` 和 `created_at`。仪表盘 Overview/Cache 页面与 `/api/runs` 会展示最近任务和状态分布，包括 `provider_warning`、`ai_skipped`、`no_lyrics_found` 等错误/跳过状态，以及 `cache_hit`、`cache_store` 等缓存结果。AI 记录关联到 `unified_cache` 行，存储模型、base URL、候选摘要 hash、`best_index`、各候选启发式/AI 分数、原因与创建时间。
 
 上游缓存键基于源、操作、规范化请求数据和请求版本。Cookie 和 token 不包含在缓存键中。
 

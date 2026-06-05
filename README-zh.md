@@ -13,7 +13,7 @@ Rosettrism 是一个 Rust 单二进制歌词工具。它可以解码本地 KRC/Q
 - 聚合：当 `fetch` 不指定 `--source` 时，Rosettrism 查询预设的源池，优先选择高质量的逐行/逐字时间轴歌词，并在可用时补充 ruby/reading/romanized 轨道。可选的 OpenAI 兼容 AI 优选会把每个候选的评分和最终原因记录到 `ai_score` / `ai_scores`。
 - 统一 JSON：默认输出为多轨 JSON。`--merge-mode inline` 可输出逐行合并视图。
 - 指定源模式：指定 `--source` 时，必须同时提供 `--format raw` 或 `--format json`。
-- 服务器模式：`rosettrism server` 启动本地 Axum API 并提供内嵌仪表盘。
+- 服务器模式：`rosettrism server` 启动本地 Axum API 并提供内嵌仪表盘。绑定非本地地址时必须设置 `ROSETTRISM_SERVER_TOKEN`；仪表盘会将该 token 保存在 `sessionStorage` 并随 API 请求发送。
 
 Rosettrism 不实现验证码绕过、凭证采集、SSL Pinning 绕过、私有应用签名或非公开协议自动化。
 
@@ -90,13 +90,14 @@ rosettrism search "歌曲名 歌手" -o .\candidates.json
 rosettrism server --host 127.0.0.1 --port 8080 --open
 ```
 
-绑定非本地地址时需设置 `ROSETTRISM_SERVER_TOKEN`。
+绑定非本地地址时需设置 `ROSETTRISM_SERVER_TOKEN`。客户端必须通过 `x-rosettrism-token: <token>` 或 `Authorization: Bearer <token>` 发送该值；缺失或错误时会收到 JSON `401` 响应，例如 `{ "error": "missing or invalid server token" }`。
 
 获取统一 JSON：
 
 ```powershell
 curl -X POST http://127.0.0.1:8080/api/fetch ^
   -H "content-type: application/json" ^
+  -H "x-rosettrism-token: %ROSETTRISM_SERVER_TOKEN%" ^
   -d "{\"query\":\"歌曲名 歌手\",\"merge_mode\":\"tracks\",\"top\":1}"
 ```
 
@@ -105,8 +106,14 @@ curl -X POST http://127.0.0.1:8080/api/fetch ^
 ```powershell
 curl -X POST http://127.0.0.1:8080/api/fetch ^
   -H "content-type: application/json" ^
+  -H "Authorization: Bearer %ROSETTRISM_SERVER_TOKEN%" ^
   -d "{\"query\":\"歌曲名 歌手\",\"source\":\"qq\",\"format\":\"raw\"}"
 ```
+
+仪表盘 token 使用方式：
+
+- 未设置 `ROSETTRISM_SERVER_TOKEN` 的 localhost 服务不需要在仪表盘填写 token。
+- 连接远端服务时，打开“设置”，填写与 `ROSETTRISM_SERVER_TOKEN` 相同的 Server Token，然后刷新或重试 API 操作。仪表盘只会把 token 保存在 `sessionStorage`，浏览器会话结束后即清除；也可以使用“清除 Token”立即移除。
 
 可用端点：
 

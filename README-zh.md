@@ -17,6 +17,17 @@ Rosettrism 是一个 Rust 单二进制歌词工具。它可以解码本地 KRC/Q
 
 Rosettrism 不实现验证码绕过、凭证采集、SSL Pinning 绕过、私有应用签名或非公开协议自动化。
 
+## 開發工作流
+
+Rosettrism 的需求、計畫、版本與標籤流程建議採用「先記錄、再實作、最後驗收」的節奏，讓每次功能變更都能追溯。
+
+1. **追加 requirement**：若有新需求，先在 `requirement.md` 以 `## vX.Y.Z — YYYY-MM-DD — 主題` 格式追加章節，內容至少包含目標、驗收條件、實作狀態與關聯 plan。
+2. **建立 plan**：每次開發前複製 `.plan/TEMPLATE.md`，建立時間命名計畫，例如 `.plan/2026-06-05-lyrics-ai-scoring.md`，並填寫背景、目標、非目標、風險、階段 task checklist、驗收條件與測試紀錄。
+3. **對齊 semantic version**：版本號遵循 semantic versioning；破壞性變更提升 major，向後相容的新功能提升 minor，修補或文件修正提升 patch。
+4. **實作與同步文件**：開發期間持續更新 plan 的完成狀態；若功能範圍或驗收條件改變，需同步更新 `requirement.md` 與相關 README。
+5. **驗收與 tag**：完成後執行必要測試，將測試結果記錄在 plan；若準備發布，使用與版本一致的 tag（例如 `v1.2.0`），並確認 release note 可回連到 requirement 與 plan。
+6. **後續 CI 檢查**：若之後允許修改 CI，可加入靜態檢查腳本，在偵測到功能檔案變更時，提醒或要求同步更新 `requirement.md` 或 `.plan/`。
+
 ## 构建
 
 ```powershell

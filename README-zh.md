@@ -290,6 +290,7 @@ rosettrism search --help
 ```bash
 cargo fmt --check
 NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost cargo test
+scripts/check-plan-requirement.sh --base HEAD
 cd frontend && npm run build
 ```
 

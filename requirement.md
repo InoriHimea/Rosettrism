@@ -74,3 +74,143 @@
 - [x] `/api/stats`、`/api/cache/:id` 评分明细输出
 - [x] Inspector AI 评分表格
 - [x] 文档同步
+
+## v1.2.0 — 2026-06-05 — Dashboard Server Token 驗證整合
+
+### 目標
+- 讓 Dashboard 在 `ROSETTRISM_SERVER_TOKEN` 啟用時仍可安全呼叫 API。
+- 將前端 API 呼叫集中到共用 client，統一注入 `x-rosettrism-token` 與 JSON 錯誤解析。
+- 在設定頁提供 Server Token 輸入與清除流程，並避免長期保存敏感 token。
+
+### 驗收條件
+- 遠端綁定且啟用 token 時，Dashboard 可透過設定頁 token 成功呼叫 `/api/*`。
+- 未帶 token 或 token 錯誤時，後端回傳可讀的 401 JSON 錯誤。
+- README / README-zh 說明 Dashboard token 使用方式與 `sessionStorage` 儲存策略。
+
+### 實作狀態
+- [x] `frontend/src/api/client.js` 共用 API client
+- [x] `sessionStorage` token 讀寫與清除
+- [x] Settings 頁 Server Token 欄位
+- [x] API 401 錯誤訊息改善
+- [x] 文件同步
+
+### 關聯 plan
+- `.plan/2026-06-06-six-version-completion-audit.md`（歷史需求補登與合併後複查）
+
+## v1.3.0 — 2026-06-05 — fetch_runs 任務紀錄與可觀測性
+
+### 目標
+- 將 `fetch_runs` 從資料表預留升級為實際任務紀錄系統。
+- 記錄聚合 fetch、多來源 search、指定結果 fetch 與聚合成員 fetch 的 query、source、mode、status、message 與 created_at。
+- 透過 API 與 Dashboard 展示近期任務與狀態分布。
+
+### 驗收條件
+- `src/cache.rs` 提供 start / finish / list / status count 方法。
+- `src/service.rs` 在主要 fetch/search 路徑建立並完成 fetch run。
+- `/api/runs` 與 `/api/stats` 可輸出近期任務與狀態分布。
+- Overview / Cache 視圖可展示最近任務。
+
+### 實作狀態
+- [x] `fetch_runs` 寫入與查詢方法
+- [x] service fetch/search 路徑接入
+- [x] `/api/runs` 與 stats 輸出
+- [x] Dashboard 最近任務面板
+- [x] README / README-zh 可觀測性說明
+
+### 關聯 plan
+- `.plan/2026-06-06-six-version-completion-audit.md`（歷史需求補登與合併後複查）
+
+## v1.4.0 — 2026-06-05 — Dashboard 前端拆分與設計系統基礎
+
+### 目標
+- 將過大的 `App.jsx` 與單一 CSS 拆分為 views、hooks、api client、i18n 與分層 styles。
+- 降低後續科技感 UI、動畫與 plugin/skill 化改造的耦合風險。
+- 保留現有播放與搜尋行為，優先完成結構性重構。
+
+### 驗收條件
+- `frontend/src/App.jsx` 不再承載大部分 view 實作細節。
+- Overview、Fetch、Cache、Inspector、Settings 皆有獨立 view 檔案。
+- API 呼叫、AI 設定、lyric 設定、cache entries、sidebar 狀態皆可由獨立模組追蹤。
+- 樣式已拆分為 tokens、layout、components、lyric-stage。
+
+### 實作狀態
+- [x] views 拆分
+- [x] hooks 拆分
+- [x] API client 拆分
+- [x] i18n 字典拆分
+- [x] styles 分層
+- [x] 前端 build 驗證
+
+### 關聯 plan
+- `.plan/2026-06-06-six-version-completion-audit.md`（歷史需求補登與合併後複查）
+
+## v1.5.0 — 2026-06-05 — requirement 與 .plan 工作流制度化
+
+### 目標
+- 建立 `.plan/` 目錄規範，讓每次開發前的需求、階段、驗收與測試紀錄可版本追蹤。
+- 建立 plan template，降低後續維護者漏寫需求與任務狀態的風險。
+- 在 README-zh 補充開發工作流，優先採 zh-TW 描述。
+
+### 驗收條件
+- `.plan/README.md` 說明命名規則與使用流程。
+- `.plan/TEMPLATE.md` 包含背景、目標、非目標、風險、階段 checklist、驗收條件、測試紀錄與完成狀態。
+- `requirement.md` 定義版本化追加格式。
+- README-zh 有開發工作流章節。
+
+### 實作狀態
+- [x] `.plan/README.md`
+- [x] `.plan/TEMPLATE.md`
+- [x] `requirement.md` 追加格式
+- [x] README-zh 開發工作流
+- [x] `.plan` 納入版本追蹤
+
+### 關聯 plan
+- `.plan/2026-06-06-six-version-completion-audit.md`（歷史需求補登與合併後複查）
+
+## v1.6.0 — 2026-06-05 — Unified JSON Schema 與客戶端相容性策略
+
+### 目標
+- 為 `UnifiedLyric` 建立正式 JSON Schema 與相容性說明。
+- 在聚合輸出中提供 `schema_version`，讓客戶端可依版本做降級策略。
+- 以 fixtures 與測試驗證典型來源輸出仍能符合 schema 與 Rust model。
+
+### 驗收條件
+- `schema/unified-lyric.schema.json` 描述核心 UnifiedLyric 結構。
+- `docs/unified-json.md` 說明 tracks、inline、annotations、ruby、translation、reading、romanized 的解析規則。
+- `tests/unified_schema.rs` 驗證 schema 本身與 fixtures。
+- README / README-zh 指向 schema 與客戶端建議解析策略。
+
+### 實作狀態
+- [x] `schema_version` 欄位
+- [x] JSON Schema 文件
+- [x] Unified JSON 相容性文件
+- [x] 多來源 fixtures
+- [x] schema / model 測試
+- [x] README / README-zh 同步
+
+### 關聯 plan
+- `.plan/2026-06-06-six-version-completion-audit.md`（歷史需求補登與合併後複查）
+
+## v1.7.0 — 2026-06-06 — 六大版本完成度複查與後續優化評估
+
+### 目標
+- 重新檢查 v1.1.0 至 v1.6.0 六項大版本成果是否已有可追蹤落點。
+- 補齊已合併功能在 `requirement.md` 中缺少的版本化歷史。
+- 產出後續可優化空間，協助下一輪開發排序。
+
+### 驗收條件
+- 新增完成度複查報告，列出六大版本狀態、主要落點與複查判斷。
+- 本次 plan 已建立並標記各階段完成。
+- 後續優化建議按短期、中期、長期分類。
+- Rust 測試與前端 build 通過。
+
+### 實作狀態
+- [x] 六大版本完成度矩陣
+- [x] v1.2.0 至 v1.6.0 需求歷史補登
+- [x] v1.7.0 複查需求追加
+- [x] 後續優化建議整理
+- [x] CLI fixture 路徑跨平台修正
+- [x] 測試與 build 驗證
+
+### 關聯 plan
+- `.plan/2026-06-06-six-version-completion-audit.md`

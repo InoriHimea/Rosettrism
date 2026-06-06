@@ -236,3 +236,26 @@
 
 ### 关联 plan
 - `.plan/2026-06-06-readme-agpl-open-source-refresh.md`
+
+## v1.9.0 — 2026-06-06 — Plan / Requirement 一致性检查
+
+### 目标
+- 在进入下一阶段开发前，为当前已修改优化版本建立 release tag，并继续推进短期优化计划。
+- 新增轻量工作流检查，提醒维护者在修改功能相关文件时同步更新 `requirement.md` 或 `.plan/`。
+- 支援本地 staged 检查与 CI / 分支检查常用的 base ref 对比模式。
+
+### 验收条件
+- 当前 HEAD 已建立 `v4.8.13` annotated tag，作为上一轮优化版本切点。
+- `scripts/check-plan-requirement.sh` 可检查 feature-sensitive 变更是否伴随 `requirement.md` 或 `.plan/` 更新。
+- README / README-zh 的推荐检查命令包含该脚本。
+- 本次 plan 文件记录 tag、实现与测试结果。
+
+### 实作状态
+- [x] 建立 `v4.8.13` annotated tag
+- [x] 新增 plan / requirement 一致性检查脚本
+- [x] README / README-zh 开发检查同步
+- [x] 本次 plan 与需求历史追加
+- [x] 脚本、格式与 Rust 测试验证
+
+### 关联 plan
+- `.plan/2026-06-06-plan-requirement-consistency-check.md`

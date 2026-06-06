@@ -1148,7 +1148,136 @@ impl IntoResponse for ApiError {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    use axum::body::to_bytes;
+    use axum::http::{Method, Request};
+    use tower::ServiceExt;
+
     use super::*;
+    use crate::cache::CachePut;
+
+    #[tokio::test]
+    async fn api_routes_return_json_with_cache_enabled() {
+        let cache = test_cache("api_routes_return_json_with_cache_enabled");
+        let cache_id = cache
+            .put(CachePut {
+                key: "upstream-route",
+                source: Source::Lrclib,
+                operation: "fetch",
+                status_code: 200,
+                body: br#"{"lyrics":"hello"}"#,
+                metadata: &json!({ "query": "hello", "item_id": "lrclib-1" }),
+                ttl: Duration::from_secs(60),
+            })
+            .unwrap();
+        let run_id = cache
+            .start_fetch_run("hello", Some(Source::Lrclib), "fetch")
+            .unwrap();
+        cache.finish_fetch_run(run_id, "success", None).unwrap();
+        let app = test_app(cache, None);
+
+        let (health_status, health) = get_json(app.clone(), "/api/health", None).await;
+        assert_eq!(health_status, StatusCode::OK);
+        assert_eq!(health["ok"], true);
+        assert_eq!(health["cache"], true);
+
+        let (stats_status, stats) = get_json(app.clone(), "/api/stats", None).await;
+        assert_eq!(stats_status, StatusCode::OK);
+        assert_eq!(stats["cache"]["upstream_entries"], 1);
+        assert_eq!(stats["fetch_run_status_counts"][0]["status"], "success");
+
+        let (runs_status, runs) = get_json(app.clone(), "/api/runs", None).await;
+        assert_eq!(runs_status, StatusCode::OK);
+        assert_eq!(runs["runs"][0]["query"], "hello");
+
+        let (cache_status, detail) = get_json(app, &format!("/api/cache/{cache_id}"), None).await;
+        assert_eq!(cache_status, StatusCode::OK);
+        assert_eq!(detail["entry"]["id"], cache_id);
+        assert!(detail["unified_entry"].is_null());
+    }
+
+    #[tokio::test]
+    async fn server_token_auth_accepts_explicit_and_bearer_headers() {
+        let app = test_app(test_cache("server_token_auth"), Some("secret-token"));
+
+        let (missing_status, missing) = get_json(app.clone(), "/api/health", None).await;
+        assert_eq!(missing_status, StatusCode::UNAUTHORIZED);
+        assert_eq!(missing["error"], "missing or invalid server token");
+
+        let (explicit_status, explicit) = get_json(
+            app.clone(),
+            "/api/health",
+            Some(("x-rosettrism-token", "secret-token")),
+        )
+        .await;
+        assert_eq!(explicit_status, StatusCode::OK);
+        assert_eq!(explicit["ok"], true);
+
+        let (bearer_status, bearer) = get_json(
+            app,
+            "/api/health",
+            Some(("authorization", "Bearer secret-token")),
+        )
+        .await;
+        assert_eq!(bearer_status, StatusCode::OK);
+        assert_eq!(bearer["ok"], true);
+    }
+
+    #[tokio::test]
+    async fn cache_detail_returns_upstream_entry_by_id() {
+        let cache = test_cache("cache_detail_upstream");
+        let id = cache
+            .put(CachePut {
+                key: "upstream-detail",
+                source: Source::Qq,
+                operation: "search",
+                status_code: 200,
+                body: br#"{"results":[]}"#,
+                metadata: &json!({ "query": "track" }),
+                ttl: Duration::from_secs(60),
+            })
+            .unwrap();
+
+        let (status, detail) =
+            get_json(test_app(cache, None), &format!("/api/cache/{id}"), None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(detail["entry"]["id"], id);
+        assert_eq!(detail["entry"]["source"], "qq");
+        assert!(detail["unified_entry"].is_null());
+    }
+
+    #[tokio::test]
+    async fn cache_detail_returns_unified_entry_by_id() {
+        let cache = test_cache("cache_detail_unified");
+        let id = cache
+            .put_unified(
+                "unified-detail",
+                br#"{"metadata":{"title":"Track"},"lines":[]}"#,
+                &["upstream-a".to_string()],
+                Duration::from_secs(60),
+            )
+            .unwrap();
+
+        let (status, detail) =
+            get_json(test_app(cache, None), &format!("/api/cache/{id}"), None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(detail["entry"].is_null());
+        assert_eq!(detail["unified_entry"]["id"], id);
+        assert_eq!(detail["unified_entry"]["dependencies"][0], "upstream-a");
+    }
+
+    #[tokio::test]
+    async fn cache_detail_returns_not_found_for_missing_id() {
+        let (status, detail) = get_json(
+            test_app(test_cache("cache_detail_missing"), None),
+            "/api/cache/9999",
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(detail["error"], "cache entry not found");
+    }
 
     #[test]
     fn rejects_non_local_host_without_token() {
@@ -1306,6 +1435,47 @@ mod tests {
             Some(2)
         );
         assert!(aggregate_members(&results[0]).unwrap().is_some());
+    }
+
+    async fn get_json(
+        app: Router,
+        uri: &str,
+        header: Option<(&str, &str)>,
+    ) -> (StatusCode, serde_json::Value) {
+        let mut request = Request::builder().method(Method::GET).uri(uri);
+        if let Some((name, value)) = header {
+            request = request.header(name, value);
+        }
+        let response = app
+            .oneshot(request.body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let value = serde_json::from_slice(&body).unwrap();
+        (status, value)
+    }
+
+    fn test_app(cache: UpstreamCache, server_token: Option<&str>) -> Router {
+        app(AppState {
+            context: ServiceContext {
+                cache: Some(cache),
+                ..ServiceContext::default()
+            },
+            server_token: server_token.map(str::to_string),
+        })
+    }
+
+    fn test_cache(name: &str) -> UpstreamCache {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "rosettrism-{name}-{}-{now}.sqlite",
+            std::process::id()
+        ));
+        UpstreamCache::open(path).unwrap()
     }
 
     fn result(

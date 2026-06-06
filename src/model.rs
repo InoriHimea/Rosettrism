@@ -1,5 +1,11 @@
 use serde::{Deserialize, Serialize};
 
+pub const UNIFIED_LYRIC_SCHEMA_VERSION: &str = "1.0";
+
+fn default_unified_lyric_schema_version() -> String {
+    UNIFIED_LYRIC_SCHEMA_VERSION.to_string()
+}
+
 /// 标注类型枚举
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -145,8 +151,10 @@ pub enum UnifiedLyricMode {
     Inline,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct UnifiedLyric {
+    #[serde(default = "default_unified_lyric_schema_version")]
+    pub schema_version: String,
     pub meta: LyricMeta,
     pub mode: UnifiedLyricMode,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -162,4 +170,21 @@ pub struct UnifiedLyric {
     pub warnings: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub annotations: Vec<Annotation>,
+}
+
+impl Default for UnifiedLyric {
+    fn default() -> Self {
+        Self {
+            schema_version: default_unified_lyric_schema_version(),
+            meta: LyricMeta::default(),
+            mode: UnifiedLyricMode::default(),
+            tracks: Vec::new(),
+            inline_lines: Vec::new(),
+            source_refs: Vec::new(),
+            score: UnifiedLyricScore::default(),
+            cache_refs: Vec::new(),
+            warnings: Vec::new(),
+            annotations: Vec::new(),
+        }
+    }
 }

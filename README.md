@@ -13,7 +13,7 @@ Version 4.0 adds a local HTTP server, an embedded dashboard, TTL upstream cachin
 - Singing annotations: QQ Music singing annotations (助唱标注) are automatically fetched and included in the output. Annotations mark vocal techniques such as stress (重音), breath (换气), long tone (长音), portamento up (上滑音), and portamento down (下滑音) with per-syllable timing.
 - TTL cache: provider `search` and `fetch` calls are cached in SQLite. The default TTL is 7 days. Before TTL expiry, Rosettrism reuses the previous upstream result and does not call the source again. Fetch run observability records recent queries, sources, modes, statuses, messages, cache hits/stores, AI skips, provider warnings, and no-lyrics outcomes.
 - Aggregation: when `fetch` is called without `--source`, Rosettrism queries a curated source pool, prefers high-quality timed or word-timed lyrics, and fills missing ruby/reading/romanized tracks when available. Optional OpenAI-compatible AI selection records per-candidate scores and the final reason in `ai_score` and `ai_scores`.
-- Unified JSON: default output is multi-track JSON. `--merge-mode inline` can emit a line-oriented merged view.
+- Unified JSON: default output is multi-track JSON. `--merge-mode inline` can emit a line-oriented merged view. The schema lives at `schema/unified-lyric.schema.json`, and aggregate responses include `schema_version` (current value: `1.0`).
 - Source-specific mode: when `--source` is provided, `--format raw` or `--format json` must also be provided.
 - Server mode: `rosettrism server` starts a local Axum API and serves the embedded dashboard. Non-local bindings require `ROSETTRISM_SERVER_TOKEN`; the dashboard can store that token in `sessionStorage` and sends it with API requests.
 
@@ -56,6 +56,10 @@ Aggregate sources into unified JSON:
 rosettrism fetch "song title artist" --merge-mode tracks --top 1
 rosettrism fetch "song title artist" --merge-mode inline --top 3 -o .\unified.json
 ```
+
+### Unified JSON schema
+
+Unified aggregate output is described by `schema/unified-lyric.schema.json`; compatibility rules for `tracks`, `inline`, annotations, ruby, translations, readings, and romanization are documented in `docs/unified-json.md`. Client parsers should ignore unknown fields so newer Rosettrism builds can add optional data without breaking existing apps. Use `schema_version` for downgrade behavior: accept compatible `1.x` payloads optimistically, and for a newer major version fall back to the base `tracks[0].document.lines` or `inline_lines` if present.
 
 Force a refresh and override TTL:
 

@@ -1,0 +1,206 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rosettrism.local/schema/unified-lyric.schema.json",
+  "title": "Rosettrism UnifiedLyric",
+  "description": "Unified multi-source lyric payload emitted by aggregate fetches.",
+  "type": "object",
+  "required": ["schema_version", "meta", "mode", "score"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0",
+      "description": "Unified lyric schema version. Clients should use this for compatibility decisions."
+    },
+    "meta": { "$ref": "#/$defs/LyricMeta" },
+    "mode": { "$ref": "#/$defs/UnifiedLyricMode" },
+    "tracks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/LyricTrack" },
+      "default": []
+    },
+    "inline_lines": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/InlineLyricLine" },
+      "default": []
+    },
+    "source_refs": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "score": { "$ref": "#/$defs/UnifiedLyricScore" },
+    "cache_refs": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "annotations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Annotation" },
+      "default": []
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "mode": { "const": "tracks" } }, "required": ["mode"] },
+      "then": { "required": ["tracks"] }
+    },
+    {
+      "if": { "properties": { "mode": { "const": "inline" } }, "required": ["mode"] },
+      "then": { "required": ["inline_lines"] }
+    }
+  ],
+  "$defs": {
+    "Annotation": {
+      "type": "object",
+      "required": ["annotation_type", "start_ms", "duration_ms", "text"],
+      "properties": {
+        "annotation_type": { "$ref": "#/$defs/AnnotationType" },
+        "start_ms": { "$ref": "#/$defs/UnsignedMilliseconds" },
+        "duration_ms": { "$ref": "#/$defs/UnsignedMilliseconds" },
+        "text": { "type": "string" }
+      }
+    },
+    "AnnotationType": {
+      "type": "string",
+      "enum": ["stress", "breath", "long_tone", "portamento_up", "portamento_down"]
+    },
+    "InlineLyricLine": {
+      "type": "object",
+      "required": ["start_ms", "duration_ms", "text"],
+      "properties": {
+        "start_ms": { "$ref": "#/$defs/UnsignedMilliseconds" },
+        "duration_ms": { "$ref": "#/$defs/NullableUnsignedMilliseconds" },
+        "text": { "type": "string" },
+        "translation": { "type": "string" },
+        "reading": { "type": "string" },
+        "romanized": { "type": "string" },
+        "ruby": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/LyricRubySpan" },
+          "default": []
+        },
+        "source_refs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        }
+      }
+    },
+    "LyricDocument": {
+      "type": "object",
+      "required": ["meta", "lines"],
+      "properties": {
+        "meta": { "$ref": "#/$defs/LyricMeta" },
+        "lines": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/LyricLine" }
+        }
+      }
+    },
+    "LyricLine": {
+      "type": "object",
+      "required": ["start_ms", "duration_ms", "text", "words"],
+      "properties": {
+        "start_ms": { "$ref": "#/$defs/UnsignedMilliseconds" },
+        "duration_ms": { "$ref": "#/$defs/NullableUnsignedMilliseconds" },
+        "text": { "type": "string" },
+        "words": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/LyricWord" },
+          "default": []
+        },
+        "ruby": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/LyricRubySpan" },
+          "default": []
+        },
+        "translation": { "type": "string" },
+        "reading": { "type": "string" },
+        "romanized": { "type": "string" }
+      }
+    },
+    "LyricMeta": {
+      "type": "object",
+      "properties": {
+        "title": { "type": ["string", "null"] },
+        "artist": { "type": ["string", "null"] },
+        "album": { "type": ["string", "null"] },
+        "by": { "type": ["string", "null"] },
+        "offset_ms": { "type": ["integer", "null"] },
+        "source": { "type": ["string", "null"] }
+      }
+    },
+    "LyricRubySpan": {
+      "type": "object",
+      "required": ["start_char", "end_char", "text", "reading"],
+      "properties": {
+        "start_char": { "type": "integer", "minimum": 0 },
+        "end_char": { "type": "integer", "minimum": 0 },
+        "text": { "type": "string" },
+        "reading": { "type": "string" }
+      }
+    },
+    "LyricTrack": {
+      "type": "object",
+      "required": ["kind", "source", "document", "quality"],
+      "properties": {
+        "kind": { "$ref": "#/$defs/LyricTrackKind" },
+        "language": { "type": "string" },
+        "source": { "type": "string" },
+        "document": { "$ref": "#/$defs/LyricDocument" },
+        "quality": { "$ref": "#/$defs/LyricTrackQuality" }
+      }
+    },
+    "LyricTrackKind": {
+      "type": "string",
+      "enum": ["original", "translation", "reading", "romanized", "ruby", "plain_fallback"]
+    },
+    "LyricTrackQuality": {
+      "type": "object",
+      "required": ["score", "line_count", "timed_line_count", "word_timing_count"],
+      "properties": {
+        "score": { "type": "number" },
+        "line_count": { "type": "integer", "minimum": 0 },
+        "timed_line_count": { "type": "integer", "minimum": 0 },
+        "word_timing_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "LyricWord": {
+      "type": "object",
+      "required": ["offset_ms", "duration_ms", "text"],
+      "properties": {
+        "offset_ms": { "$ref": "#/$defs/UnsignedMilliseconds" },
+        "duration_ms": { "$ref": "#/$defs/UnsignedMilliseconds" },
+        "text": { "type": "string" }
+      }
+    },
+    "UnifiedLyricMode": {
+      "type": "string",
+      "enum": ["tracks", "inline"]
+    },
+    "UnifiedLyricScore": {
+      "type": "object",
+      "required": ["final_score", "timing_score", "completeness_score", "enrichment_score"],
+      "properties": {
+        "final_score": { "type": "number" },
+        "timing_score": { "type": "number" },
+        "completeness_score": { "type": "number" },
+        "enrichment_score": { "type": "number" }
+      }
+    },
+    "NullableUnsignedMilliseconds": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "UnsignedMilliseconds": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

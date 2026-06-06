@@ -237,6 +237,21 @@
 ### 关联 plan
 - `.plan/2026-06-06-readme-agpl-open-source-refresh.md`
 
+### 測試基線追加目標（2026-06-06）
+- 為 Server API 建立 Axum router 層級測試，覆蓋 `/api/health`、`/api/stats`、`/api/runs`、`/api/cache/:id`。
+- 固定 Server Token 驗證：未帶 token 回 `401` JSON；`x-rosettrism-token` 與 `Authorization: Bearer` 正確時通過。
+- 為 `cache_detail` handler 固定 upstream、unified、missing id 三種情境。
+- Rust 測試基線明確使用 localhost proxy bypass：`NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost cargo test`。
+- Frontend 至少提供 `npm test` smoke script，驗證 Dashboard 可載入、Settings token input 可操作、Fetch 頁可渲染。
+
+### 測試基線驗收結果（2026-06-06）
+- [x] `src/server.rs` 已新增 Axum router integration tests，涵蓋指定 API endpoint。
+- [x] Server Token 401 JSON、`x-rosettrism-token`、`Authorization: Bearer` 三種情境已納入測試。
+- [x] `cache_detail` upstream / unified / missing id 三種分支已納入測試。
+- [x] `frontend/package.json` 已新增 `test` script，並以 Playwright smoke 覆蓋 Dashboard / Settings / Fetch 基線。
+- [x] Rust 測試與 frontend build 通過；`npm test` 在目前容器因缺少 Playwright Chromium 且 CDN 下載 403 而記錄為環境限制。
+- [x] 本次補強 plan 已建立：`.plan/2026-06-06-v1.8-test-baseline.md`。
+
 ## v1.9.0 — 2026-06-06 — Plan / Requirement 一致性检查
 
 ### 目标

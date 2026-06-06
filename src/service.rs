@@ -1349,6 +1349,7 @@ fn build_unified(
     };
 
     UnifiedLyric {
+        schema_version: crate::model::UNIFIED_LYRIC_SCHEMA_VERSION.to_string(),
         meta: merged_meta(base),
         mode: merge_mode.into(),
         tracks,

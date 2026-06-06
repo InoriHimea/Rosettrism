@@ -11,7 +11,7 @@ Rosettrism 是一个 Rust 单二进制歌词工具。它可以解码本地 KRC/Q
 - 助唱标注：自动获取 QQ 音乐的助唱标注数据并包含在输出中。标注标记了重音、换气、长音、上滑音、下滑音等声乐技巧，精确到每个音节的时间。
 - TTL 缓存：provider 的 `search` 和 `fetch` 调用结果缓存在 SQLite 中，默认 TTL 为 7 天。TTL 过期前，Rosettrism 复用之前的上游结果，不再重复请求。Fetch run 可观测性会记录最近的查询、来源、模式、状态、消息、缓存命中/写入、AI 跳过、provider warning 与无歌词结果。
 - 聚合：当 `fetch` 不指定 `--source` 时，Rosettrism 查询预设的源池，优先选择高质量的逐行/逐字时间轴歌词，并在可用时补充 ruby/reading/romanized 轨道。可选的 OpenAI 兼容 AI 优选会把每个候选的评分和最终原因记录到 `ai_score` / `ai_scores`。
-- 统一 JSON：默认输出为多轨 JSON。`--merge-mode inline` 可输出逐行合并视图。
+- 统一 JSON：默认输出为多轨 JSON。`--merge-mode inline` 可输出逐行合并视图。Schema 位于 `schema/unified-lyric.schema.json`，聚合响应包含 `schema_version`（当前值：`1.0`）。
 - 指定源模式：指定 `--source` 时，必须同时提供 `--format raw` 或 `--format json`。
 - 服务器模式：`rosettrism server` 启动本地 Axum API 并提供内嵌仪表盘。绑定非本地地址时必须设置 `ROSETTRISM_SERVER_TOKEN`；仪表盘会将该 token 保存在 `sessionStorage` 并随 API 请求发送。
 
@@ -65,6 +65,11 @@ rosettrism decode .\lyric.krc --format lrc -o .\lyric.lrc
 rosettrism fetch "歌曲名 歌手" --merge-mode tracks --top 1
 rosettrism fetch "歌曲名 歌手" --merge-mode inline --top 3 -o .\unified.json
 ```
+
+
+### 统一 JSON Schema
+
+统一聚合输出由 `schema/unified-lyric.schema.json` 描述；`tracks`、`inline`、annotations、ruby、translation、reading 与 romanized 的兼容规则见 `docs/unified-json.md`。客户端解析器应忽略未知字段，这样新版 Rosettrism 增加可选数据时不会破坏已有应用。建议根据 `schema_version` 做降级：对兼容的 `1.x` 版本乐观解析；遇到新的主版本时，优先回退显示 `tracks[0].document.lines` 或已有的 `inline_lines`。
 
 强制刷新并覆盖 TTL：
 

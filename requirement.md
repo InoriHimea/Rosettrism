@@ -214,3 +214,25 @@
 
 ### 關聯 plan
 - `.plan/2026-06-06-six-version-completion-audit.md`
+
+## v1.8.0 — 2026-06-06 — README 开源格式与 AGPLv3 授权同步
+
+### 目标
+- 将 README / README-zh 调整为常见开源项目格式，包含项目简介、功能特性、安装、快速开始、CLI/API、路线图、开发、贡献与协议。
+- 明确回答当前项目在一轮计划完成后仍建议继续做功能迭代与优化，并按短期、中期、长期给出优先方向。
+- 将项目授权 metadata 与仓库 LICENSE 统一为 AGPLv3。
+
+### 验收条件
+- README / README-zh 可作为开源项目首页使用，并保留原有核心使用说明。
+- README / README-zh 明确指向完成度复查报告与后续优化路线图。
+- `Cargo.toml` 与 `frontend/package.json` 的 license 字段为 `AGPL-3.0-only`，与 AGPLv3 LICENSE 一致。
+
+### 实作状态
+- [x] README 开源格式重写
+- [x] README-zh 开源格式重写
+- [x] 后续迭代与优化路线图补充
+- [x] Rust crate license metadata 更新
+- [x] Frontend package license metadata 更新
+
+### 关联 plan
+- `.plan/2026-06-06-readme-agpl-open-source-refresh.md`

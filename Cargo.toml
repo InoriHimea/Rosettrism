@@ -3,7 +3,7 @@ name = "rosettrism"
 version = "4.8.13"
 edition = "2021"
 description = "Rosettrism CLI, server, and library for fetching, caching, aggregating, and decoding lyrics"
-license = "MIT"
+license = "AGPL-3.0-only"
 
 [lib]
 name = "rosettrism"

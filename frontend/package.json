@@ -1,6 +1,7 @@
 {
   "name": "rosettrism-dashboard",
   "private": true,
+  "license": "AGPL-3.0-only",
   "version": "4.8.13",
   "type": "module",
   "scripts": {

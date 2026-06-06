@@ -1,6 +1,7 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;
+use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
@@ -74,7 +75,9 @@ fn decode_ignores_cookie_file() {
     let mut cmd = Command::cargo_bin("rosettrism").unwrap();
     cmd.arg("--cookie-file")
         .arg(&missing_cookie)
-        .args(["decode", "tests\\fixtures\\sample.qrc", "-o"])
+        .arg("decode")
+        .arg(PathBuf::from("tests").join("fixtures").join("sample.qrc"))
+        .arg("-o")
         .arg(&output);
     cmd.assert().success();
 

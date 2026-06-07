@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 
 use axum::body::Body;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, HeaderValue, Response, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
@@ -72,6 +72,7 @@ pub async fn run(options: ServerOptions) -> Result<()> {
 fn app(state: AppState) -> Router {
     Router::new()
         .route("/api/health", get(health))
+        .route("/api/providers/health", get(providers_health))
         .route("/api/sources", get(sources))
         .route("/api/search", post(search))
         .route("/api/fetch", post(fetch))
@@ -103,6 +104,25 @@ async fn health(
         "ok": true,
         "version": env!("CARGO_PKG_VERSION"),
         "cache": state.context.cache.is_some()
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct ProviderHealthQuery {
+    limit: Option<usize>,
+}
+
+async fn providers_health(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<ProviderHealthQuery>,
+) -> ApiResult<Json<serde_json::Value>> {
+    authorize(&state, &headers)?;
+    let cache = require_cache(&state)?;
+    let limit = query.limit.unwrap_or(20).clamp(1, 500);
+    Ok(Json(json!({
+        "sample_size": limit,
+        "providers": cache.provider_health(limit)?,
     })))
 }
 
@@ -531,7 +551,8 @@ async fn stats(
         "cache": cache.stats()?,
         "ai_scores": cache.list_recent_ai_scores(20)?,
         "fetch_runs": cache.list_fetch_runs(20)?,
-        "fetch_run_status_counts": cache.fetch_run_status_counts()?
+        "fetch_run_status_counts": cache.fetch_run_status_counts()?,
+        "provider_health": cache.provider_health(20)?
     })))
 }
 
@@ -1234,7 +1255,18 @@ mod tests {
         let run_id = cache
             .start_fetch_run("hello", Some(Source::Lrclib), "fetch")
             .unwrap();
-        cache.finish_fetch_run(run_id, "success", None).unwrap();
+        cache
+            .finish_fetch_run(
+                run_id,
+                "success",
+                None,
+                crate::cache::FetchRunMetadata {
+                    provider_count: Some(1),
+                    candidate_count: Some(1),
+                    cache_event: None,
+                },
+            )
+            .unwrap();
         let app = test_app(cache, None);
 
         let (health_status, health) = get_json(app.clone(), "/api/health", None).await;
@@ -1246,6 +1278,12 @@ mod tests {
         assert_eq!(stats_status, StatusCode::OK);
         assert_eq!(stats["cache"]["upstream_entries"], 1);
         assert_eq!(stats["fetch_run_status_counts"][0]["status"], "success");
+        assert_eq!(stats["provider_health"][0]["source"], "lrclib");
+
+        let (provider_status, provider_health) =
+            get_json(app.clone(), "/api/providers/health?limit=5", None).await;
+        assert_eq!(provider_status, StatusCode::OK);
+        assert_eq!(provider_health["providers"][0]["status"], "healthy");
 
         let (runs_status, runs) = get_json(app.clone(), "/api/runs", None).await;
         assert_eq!(runs_status, StatusCode::OK);

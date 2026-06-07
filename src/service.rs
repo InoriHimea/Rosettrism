@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
-use crate::cache::{default_ttl, now_unix, UpstreamCache};
+use crate::cache::{default_ttl, now_unix, FetchRunMetadata, UpstreamCache};
 use crate::cached_provider::CachedProvider;
 use crate::decoder::{decode_bytes, decode_raw_bytes, InputFormat};
 use crate::model::{
@@ -118,6 +118,18 @@ pub struct AiScoringConfig {
     pub model: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FetchRunStructuredMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub candidate_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_warning_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_event: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AggregateFetchResponse {
     pub mode: MergeMode,
@@ -126,6 +138,8 @@ pub struct AggregateFetchResponse {
     pub warnings: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ai_score: Option<AiScoringResult>,
+    #[serde(default, skip_serializing_if = "is_default_fetch_metadata")]
+    pub metadata: FetchRunStructuredMetadata,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -171,6 +185,8 @@ pub struct MultiSourceSearchResponse {
     pub sources: Vec<SourceSearchResult>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
+    #[serde(default, skip_serializing_if = "is_default_fetch_metadata")]
+    pub metadata: FetchRunStructuredMetadata,
 }
 
 #[derive(Clone)]
@@ -245,6 +261,7 @@ impl ServiceContext {
                     response
                         .warnings
                         .push(format!("served_unified_cache: id={}", hit.id));
+                    response.metadata.cache_event = Some("cache_hit".into());
                     return Ok(response);
                 }
             }
@@ -308,11 +325,24 @@ impl ServiceContext {
             .map(|candidate| build_unified(candidate, &candidates, request.merge_mode))
             .collect::<Vec<_>>();
 
+        let provider_warning_count = provider_warning_count(&warnings);
         let mut response = AggregateFetchResponse {
             mode: request.merge_mode,
             results,
             warnings,
             ai_score: ai_score.clone(),
+            metadata: FetchRunStructuredMetadata {
+                provider_count: Some(
+                    candidates
+                        .iter()
+                        .map(|candidate| candidate.source.cli_name())
+                        .collect::<std::collections::BTreeSet<_>>()
+                        .len(),
+                ),
+                candidate_count: Some(candidates.len()),
+                provider_warning_count: Some(provider_warning_count),
+                cache_event: None,
+            },
         };
 
         if let Some(cache) = &self.cache {
@@ -329,6 +359,7 @@ impl ServiceContext {
             response
                 .warnings
                 .push(format!("stored_unified_cache: id={id}"));
+            response.metadata.cache_event = Some("cache_store".into());
         }
 
         Ok(response)
@@ -393,8 +424,15 @@ impl ServiceContext {
         }
         results.truncate(request.limit);
 
+        let provider_warning_count = warnings.len();
         Ok(MultiSourceSearchResponse {
             query: request.query,
+            metadata: FetchRunStructuredMetadata {
+                provider_count: Some(groups.len() + provider_warning_count),
+                candidate_count: Some(results.len()),
+                provider_warning_count: Some(provider_warning_count),
+                cache_event: None,
+            },
             results,
             sources: groups,
             warnings,
@@ -659,8 +697,9 @@ impl ServiceContext {
             return Ok(());
         };
         let (status, message) = classify_fetch_run_result(result);
+        let metadata = fetch_run_metadata_from_result(result);
         if let Some(cache) = &self.cache {
-            cache.finish_fetch_run(run_id, status, message.as_deref())?;
+            cache.finish_fetch_run(run_id, status, message.as_deref(), metadata)?;
         }
         Ok(())
     }
@@ -1125,11 +1164,19 @@ fn parse_ai_candidate_selection(
 
 trait FetchRunOutcome {
     fn fetch_run_warnings(&self) -> &[String];
+
+    fn fetch_run_metadata(&self) -> FetchRunMetadata {
+        FetchRunMetadata::default()
+    }
 }
 
 impl FetchRunOutcome for AggregateFetchResponse {
     fn fetch_run_warnings(&self) -> &[String] {
         &self.warnings
+    }
+
+    fn fetch_run_metadata(&self) -> FetchRunMetadata {
+        metadata_for_run(&self.metadata)
     }
 }
 
@@ -1137,11 +1184,23 @@ impl FetchRunOutcome for MultiSourceSearchResponse {
     fn fetch_run_warnings(&self) -> &[String] {
         &self.warnings
     }
+
+    fn fetch_run_metadata(&self) -> FetchRunMetadata {
+        metadata_for_run(&self.metadata)
+    }
 }
 
 impl FetchRunOutcome for UnifiedLyric {
     fn fetch_run_warnings(&self) -> &[String] {
         &self.warnings
+    }
+
+    fn fetch_run_metadata(&self) -> FetchRunMetadata {
+        FetchRunMetadata {
+            provider_count: Some(self.source_refs.len() as i64),
+            candidate_count: Some(self.cache_refs.len() as i64),
+            cache_event: None,
+        }
     }
 }
 
@@ -1153,6 +1212,61 @@ impl FetchRunOutcome for SpecificFetchResult {
             | SpecificFetchResult::JsonMany { warnings, .. } => warnings,
         }
     }
+
+    fn fetch_run_metadata(&self) -> FetchRunMetadata {
+        match self {
+            SpecificFetchResult::Raw { .. } | SpecificFetchResult::Json { .. } => {
+                FetchRunMetadata {
+                    provider_count: Some(1),
+                    candidate_count: Some(1),
+                    cache_event: None,
+                }
+            }
+            SpecificFetchResult::RawMany { results, .. } => FetchRunMetadata {
+                provider_count: Some(1),
+                candidate_count: Some(results.len() as i64),
+                cache_event: None,
+            },
+            SpecificFetchResult::JsonMany { results, .. } => FetchRunMetadata {
+                provider_count: Some(1),
+                candidate_count: Some(results.len() as i64),
+                cache_event: None,
+            },
+        }
+    }
+}
+
+fn fetch_run_metadata_from_result<T: FetchRunOutcome>(result: &Result<T>) -> FetchRunMetadata {
+    result
+        .as_ref()
+        .map(FetchRunOutcome::fetch_run_metadata)
+        .unwrap_or_default()
+}
+
+fn provider_warning_count(warnings: &[String]) -> usize {
+    warnings
+        .iter()
+        .filter(|warning| {
+            warning.starts_with("provider_warning:")
+                || warning.contains("provider task failed")
+                || warning.contains("enrichment skipped")
+        })
+        .count()
+}
+
+fn metadata_for_run(metadata: &FetchRunStructuredMetadata) -> FetchRunMetadata {
+    FetchRunMetadata {
+        provider_count: metadata.provider_count.map(|value| value as i64),
+        candidate_count: metadata.candidate_count.map(|value| value as i64),
+        cache_event: metadata.cache_event.clone(),
+    }
+}
+
+fn is_default_fetch_metadata(metadata: &FetchRunStructuredMetadata) -> bool {
+    metadata.provider_count.is_none()
+        && metadata.candidate_count.is_none()
+        && metadata.provider_warning_count.is_none()
+        && metadata.cache_event.is_none()
 }
 
 fn classify_fetch_run_result<T: FetchRunOutcome>(

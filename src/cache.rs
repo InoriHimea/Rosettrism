@@ -135,6 +135,17 @@ pub struct AiScoreRecord {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct UnifiedCacheEntrySummary {
+    pub id: i64,
+    pub cache_key: String,
+    pub body_hash: String,
+    pub created_at: i64,
+    pub expires_at: i64,
+    pub fresh: bool,
+    pub dependency_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct UnifiedCacheEntryDetail {
     pub id: i64,
     pub cache_key: String,
@@ -156,6 +167,7 @@ impl UpstreamCache {
         }
 
         let connection = Connection::open(path)?;
+        connection.pragma_update(None, "foreign_keys", "ON")?;
         let cache = Self {
             inner: Arc::new(Mutex::new(connection)),
         };
@@ -456,6 +468,37 @@ impl UpstreamCache {
         Ok(detail)
     }
 
+    pub fn list_unified(&self, limit: usize) -> Result<Vec<UnifiedCacheEntrySummary>> {
+        let now = now_unix();
+        let limit = i64::try_from(limit).unwrap_or(100).clamp(1, 500);
+        let connection = self.lock()?;
+        let mut statement = connection.prepare(
+            "SELECT id, cache_key, body_hash, dependencies_json, created_at, expires_at
+             FROM unified_cache
+             ORDER BY created_at DESC
+             LIMIT ?1",
+        )?;
+        let rows = statement.query_map(params![limit], |row| {
+            let dependencies_json: String = row.get(3)?;
+            let dependencies = serde_json::from_str::<Vec<String>>(&dependencies_json)
+                .map(|dependencies| dependencies.len())
+                .unwrap_or(0);
+            let expires_at: i64 = row.get(5)?;
+            Ok(UnifiedCacheEntrySummary {
+                id: row.get(0)?,
+                cache_key: row.get(1)?,
+                body_hash: row.get(2)?,
+                created_at: row.get(4)?,
+                expires_at,
+                fresh: expires_at > now,
+                dependency_count: dependencies,
+            })
+        })?;
+
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Error::from)
+    }
+
     pub fn list(&self, limit: usize) -> Result<Vec<CacheEntrySummary>> {
         let now = now_unix();
         let limit = i64::try_from(limit).unwrap_or(100).clamp(1, 500);
@@ -544,6 +587,19 @@ impl UpstreamCache {
         let connection = self.lock()?;
         let changed =
             connection.execute("DELETE FROM upstream_cache WHERE id = ?1", params![id])?;
+        Ok(changed > 0)
+    }
+
+    pub fn delete_unified(&self, id: i64) -> Result<bool> {
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction()?;
+        transaction.execute(
+            "DELETE FROM ai_scores WHERE unified_cache_id = ?1",
+            params![id],
+        )?;
+        let changed =
+            transaction.execute("DELETE FROM unified_cache WHERE id = ?1", params![id])?;
+        transaction.commit()?;
         Ok(changed > 0)
     }
 

@@ -70,6 +70,7 @@ function App() {
     health,
     stats,
     cache,
+    unifiedCache,
     selectedCacheEntry,
     cacheDetail,
     cacheDetailBusy,
@@ -287,6 +288,7 @@ function App() {
           <CacheView
             t={t}
             cache={cache}
+            unifiedCache={unifiedCache}
             stats={stats}
             selectedCacheEntry={selectedCacheEntry}
             cacheDetail={cacheDetail}

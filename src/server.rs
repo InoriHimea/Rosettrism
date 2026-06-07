@@ -1168,63 +1168,147 @@ struct ApiFetchResultRequest {
 
 type ApiResult<T> = std::result::Result<T, ApiError>;
 
+#[derive(Debug, Serialize)]
+struct ApiErrorBody {
+    code: &'static str,
+    message: String,
+    details: Option<Value>,
+    retryable: bool,
+}
+
 #[derive(Debug)]
 struct ApiError {
     status: StatusCode,
-    message: String,
+    body: ApiErrorBody,
 }
 
 impl ApiError {
-    fn bad_request(message: impl Into<String>) -> Self {
+    fn new(
+        status: StatusCode,
+        code: &'static str,
+        message: impl Into<String>,
+        details: Option<Value>,
+        retryable: bool,
+    ) -> Self {
         Self {
-            status: StatusCode::BAD_REQUEST,
-            message: message.into(),
+            status,
+            body: ApiErrorBody {
+                code,
+                message: message.into(),
+                details,
+                retryable,
+            },
         }
+    }
+
+    fn bad_request(message: impl Into<String>) -> Self {
+        let message = message.into();
+        let code = if message == "cache is disabled" {
+            "cache_disabled"
+        } else {
+            "validation_error"
+        };
+        Self::new(StatusCode::BAD_REQUEST, code, message, None, false)
     }
 
     fn unauthorized(message: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::UNAUTHORIZED,
-            message: message.into(),
-        }
+        Self::new(
+            StatusCode::UNAUTHORIZED,
+            "auth_missing_or_invalid",
+            message,
+            None,
+            false,
+        )
     }
 
     fn not_found(message: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::NOT_FOUND,
-            message: message.into(),
-        }
+        Self::new(
+            StatusCode::NOT_FOUND,
+            "no_lyrics_found",
+            message,
+            None,
+            false,
+        )
     }
 }
 
 impl From<Error> for ApiError {
     fn from(value: Error) -> Self {
-        Self {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            message: value.to_string(),
-        }
+        let message = value.to_string();
+        let (status, code, retryable) = match &value {
+            Error::Provider(_) if message.contains("ai_skipped") => {
+                (StatusCode::BAD_GATEWAY, "ai_skipped", true)
+            }
+            Error::Provider(_) if message.contains("provider_warning") => {
+                (StatusCode::BAD_GATEWAY, "provider_warning", true)
+            }
+            Error::Provider(_) if looks_like_no_lyrics_error(&message) => {
+                (StatusCode::NOT_FOUND, "no_lyrics_found", false)
+            }
+            Error::Provider(_) | Error::Network(_) => {
+                (StatusCode::BAD_GATEWAY, "provider_warning", true)
+            }
+            Error::Service(_) if message.contains("invalid source") => {
+                (StatusCode::BAD_REQUEST, "validation_error", false)
+            }
+            Error::Service(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal_error", false),
+            Error::Json(_) | Error::Parse(_) | Error::Decode(_) | Error::UnknownFormat => {
+                (StatusCode::BAD_REQUEST, "validation_error", false)
+            }
+            Error::Storage(_) | Error::Sqlite(_) | Error::Io(_) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, "internal_error", false)
+            }
+        };
+        Self::new(
+            status,
+            code,
+            message,
+            Some(error_details(&value)),
+            retryable,
+        )
     }
 }
 
 impl From<serde_json::Error> for ApiError {
     fn from(value: serde_json::Error) -> Self {
-        Self {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            message: value.to_string(),
-        }
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "validation_error",
+            value.to_string(),
+            Some(json!({ "source": "serde_json" })),
+            false,
+        )
     }
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> axum::response::Response {
-        (
-            self.status,
-            Json(json!({
-                "error": self.message
-            })),
-        )
-            .into_response()
+        (self.status, Json(self.body)).into_response()
     }
+}
+
+fn looks_like_no_lyrics_error(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("no_lyrics_found")
+        || lower.contains("no lyric")
+        || lower.contains("no aggregate members could be fetched")
+}
+
+fn error_details(value: &Error) -> Value {
+    json!({
+        "source": match value {
+            Error::UnknownFormat => "unknown_format",
+            Error::Decode(_) => "decode",
+            Error::Parse(_) => "parse",
+            Error::Provider(_) => "provider",
+            Error::Service(_) => "service",
+            Error::Storage(_) => "storage",
+            Error::Network(_) => "network",
+            Error::Sqlite(_) => "sqlite",
+            Error::Io(_) => "io",
+            Error::Json(_) => "json",
+        }
+    })
 }
 
 #[cfg(test)]
@@ -1237,6 +1321,34 @@ mod tests {
 
     use super::*;
     use crate::cache::CachePut;
+
+    #[test]
+    fn api_error_maps_common_codes() {
+        let cache = ApiError::bad_request("cache is disabled");
+        assert_eq!(cache.status, StatusCode::BAD_REQUEST);
+        assert_eq!(cache.body.code, "cache_disabled");
+        assert!(!cache.body.retryable);
+
+        let validation = ApiError::bad_request("query must not be empty");
+        assert_eq!(validation.body.code, "validation_error");
+
+        let provider_warning = ApiError::from(Error::Provider(
+            "provider_warning: provider task failed".into(),
+        ));
+        assert_eq!(provider_warning.status, StatusCode::BAD_GATEWAY);
+        assert_eq!(provider_warning.body.code, "provider_warning");
+        assert!(provider_warning.body.retryable);
+
+        let ai_skipped = ApiError::from(Error::Provider("ai_skipped: missing key".into()));
+        assert_eq!(ai_skipped.body.code, "ai_skipped");
+        assert!(ai_skipped.body.retryable);
+
+        let no_lyrics = ApiError::from(Error::Provider(
+            "no_lyrics_found: all selected sources returned no usable lyric".into(),
+        ));
+        assert_eq!(no_lyrics.status, StatusCode::NOT_FOUND);
+        assert_eq!(no_lyrics.body.code, "no_lyrics_found");
+    }
 
     #[tokio::test]
     async fn api_routes_return_json_with_cache_enabled() {
@@ -1301,7 +1413,9 @@ mod tests {
 
         let (missing_status, missing) = get_json(app.clone(), "/api/health", None).await;
         assert_eq!(missing_status, StatusCode::UNAUTHORIZED);
-        assert_eq!(missing["error"], "missing or invalid server token");
+        assert_eq!(missing["code"], "auth_missing_or_invalid");
+        assert_eq!(missing["message"], "missing or invalid server token");
+        assert_eq!(missing["retryable"], false);
 
         let (explicit_status, explicit) = get_json(
             app.clone(),
@@ -1374,7 +1488,8 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::NOT_FOUND);
-        assert_eq!(detail["error"], "cache entry not found");
+        assert_eq!(detail["code"], "no_lyrics_found");
+        assert_eq!(detail["message"], "cache entry not found");
     }
     #[tokio::test]
     async fn cache_list_splits_upstream_and_unified_entries() {
@@ -1441,7 +1556,8 @@ mod tests {
         let (detail_status, detail) =
             get_json(app, &format!("/api/unified-cache/{unified_id}"), None).await;
         assert_eq!(detail_status, StatusCode::NOT_FOUND);
-        assert_eq!(detail["error"], "unified cache entry not found");
+        assert_eq!(detail["code"], "no_lyrics_found");
+        assert_eq!(detail["message"], "unified cache entry not found");
     }
 
     #[test]

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { RefreshCw, X } from 'lucide-react';
+import { RefreshCw, Search, Sparkles, X } from 'lucide-react';
 import { LyricPlaybackView } from '../LyricPlaybackView.jsx';
 import { normalizeLyricPayload } from '../lyricPlayback.js';
+import { apiErrorAdvice, hasProviderWarning, normalizeApiError } from '../api/errors.js';
 import { displaySource, formatDurationMs, hasSingingAnnotations, isAggregateResult, isQqResult } from '../utils/lyricResults.js';
 
 const sourceOptions = ['', 'netease', 'qq', 'kugou', 'lrclib', 'migu', 'utaten', 'joysound', 'uta-net', 'lyrical-nonsense'];
@@ -32,6 +33,7 @@ export function FetchView({
   closeResultDetail,
   fetchSelectedResult,
   refreshMeta,
+  setActiveView,
 }) {
   const hasSearchInput = [body.query, body.title, body.artist, body.id].some((value) => String(value || '').trim());
   const canAggregate = !source && String(body.query || body.title || body.artist || '').trim();
@@ -158,7 +160,7 @@ export function FetchView({
           </button>
         </div>
       </form>
-      {error ? <ErrorMessage t={t} error={error} /> : null}
+      {error ? <ErrorMessage t={t} error={error} setActiveView={setActiveView} /> : null}
       <SearchResultsList
         t={t}
         results={searchResults}
@@ -216,6 +218,7 @@ function SearchResultsList({ t, results, warnings, busy, touched, openResultDeta
       {warnings.length > 0 ? (
         <details className="warning-list">
           <summary>{t.warnings}: {warnings.length}</summary>
+          {hasProviderWarning(warnings) ? <p>{t.apiError_provider_warning}</p> : null}
           <ul>
             {warnings.slice(0, 8).map((warning) => (
               <li key={warning}>{warning}</li>
@@ -280,11 +283,21 @@ function SearchResultsList({ t, results, warnings, busy, touched, openResultDeta
   );
 }
 
-function ErrorMessage({ t, error }) {
+function ErrorMessage({ t, error, setActiveView }) {
+  const normalized = normalizeApiError(error);
+  const advice = apiErrorAdvice(normalized, t);
   return (
     <div className="error" role="alert">
       <strong>{t.errorTitle}</strong>
-      <pre>{error}</pre>
+      {normalized?.code ? <span className="status-badge">{normalized.code}</span> : null}
+      <pre>{normalized?.message || String(error)}</pre>
+      {advice ? <p>{advice}</p> : null}
+      {normalized?.details ? <pre>{JSON.stringify(normalized.details, null, 2)}</pre> : null}
+      {normalized?.code === 'auth_missing_or_invalid' ? (
+        <button className="button-secondary" type="button" onClick={() => setActiveView?.('settings')}>
+          {t.openSettings}
+        </button>
+      ) : null}
     </div>
   );
 }

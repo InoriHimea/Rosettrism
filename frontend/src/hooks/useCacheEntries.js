@@ -64,7 +64,7 @@ export function useCacheEntries(apiClient, t) {
       const data = await apiClient.getJson(endpoint);
       setCacheDetail(data);
     } catch (err) {
-      setCacheDetail({ error: err.message });
+      setCacheDetail({ error: err });
     } finally {
       setCacheDetailBusy(false);
     }

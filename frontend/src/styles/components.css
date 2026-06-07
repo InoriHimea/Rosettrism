@@ -705,3 +705,25 @@
   font-weight: 700;
 }
 
+
+.cache-section-title {
+  align-items: center;
+  border-top: 1px solid var(--color-border-soft);
+  color: var(--color-muted);
+  display: flex;
+  font-size: 0.82rem;
+  gap: 0.5rem;
+  justify-content: space-between;
+  margin-top: 14px;
+  padding: 12px 4px 6px;
+  text-transform: uppercase;
+}
+
+.cache-section-title:first-child {
+  border-top: 0;
+  margin-top: 0;
+}
+
+.unified-cache-row-head {
+  grid-template-columns: minmax(160px, 1.4fr) 96px 90px minmax(110px, 0.8fr) 44px;
+}

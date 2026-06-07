@@ -79,6 +79,14 @@ fn app(state: AppState) -> Router {
         .route("/api/cache", get(cache_list))
         .route("/api/cache/:id", get(cache_detail).delete(cache_delete))
         .route("/api/cache/:id/revalidate", post(cache_revalidate))
+        .route(
+            "/api/unified-cache/:id",
+            get(unified_cache_detail).delete(unified_cache_delete),
+        )
+        .route(
+            "/api/unified-cache/:id/revalidate",
+            post(unified_cache_revalidate),
+        )
         .route("/api/runs", get(fetch_runs))
         .route("/api/stats", get(stats))
         .route("/", get(index))
@@ -401,8 +409,13 @@ async fn cache_list(
 ) -> ApiResult<Json<serde_json::Value>> {
     authorize(&state, &headers)?;
     let cache = require_cache(&state)?;
-    let entries = cache.list(100)?;
-    Ok(Json(json!({ "entries": entries })))
+    let upstream_entries = cache.list(100)?;
+    let unified_entries = cache.list_unified(100)?;
+    Ok(Json(json!({
+        "upstream_entries": upstream_entries,
+        "unified_entries": unified_entries,
+        "entries": upstream_entries
+    })))
 }
 
 async fn cache_detail(
@@ -419,6 +432,28 @@ async fn cache_detail(
     }
     Ok(Json(json!({
         "entry": entry,
+        "unified_entry": unified_entry,
+        "ai_scores": unified_entry
+            .as_ref()
+            .map(|entry| cache.list_ai_scores(entry.id))
+            .transpose()?
+            .unwrap_or_default()
+    })))
+}
+
+async fn unified_cache_detail(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<serde_json::Value>> {
+    authorize(&state, &headers)?;
+    let cache = require_cache(&state)?;
+    let unified_entry = cache.unified_detail(id)?;
+    if unified_entry.is_none() {
+        return Err(ApiError::not_found("unified cache entry not found"));
+    }
+    Ok(Json(json!({
+        "entry": null,
         "unified_entry": unified_entry,
         "ai_scores": cache.list_ai_scores(id)?
     })))
@@ -445,6 +480,31 @@ async fn cache_revalidate(
     let deleted = cache.delete(id)?;
     Ok(Json(json!({
         "revalidate": "deleted_cached_entry",
+        "deleted": deleted
+    })))
+}
+
+async fn unified_cache_delete(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<serde_json::Value>> {
+    authorize(&state, &headers)?;
+    let cache = require_cache(&state)?;
+    let deleted = cache.delete_unified(id)?;
+    Ok(Json(json!({ "deleted": deleted })))
+}
+
+async fn unified_cache_revalidate(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<serde_json::Value>> {
+    authorize(&state, &headers)?;
+    let cache = require_cache(&state)?;
+    let deleted = cache.delete_unified(id)?;
+    Ok(Json(json!({
+        "revalidate": "deleted_unified_cached_entry",
         "deleted": deleted
     })))
 }
@@ -1278,6 +1338,73 @@ mod tests {
         assert_eq!(status, StatusCode::NOT_FOUND);
         assert_eq!(detail["error"], "cache entry not found");
     }
+    #[tokio::test]
+    async fn cache_list_splits_upstream_and_unified_entries() {
+        let cache = test_cache("cache_list_split");
+        let upstream_id = cache
+            .put(CachePut {
+                key: "upstream-list",
+                source: Source::Qq,
+                operation: "search",
+                status_code: 200,
+                body: br#"{"results":[]}"#,
+                metadata: &json!({ "query": "track" }),
+                ttl: Duration::from_secs(60),
+            })
+            .unwrap();
+        let unified_id = cache
+            .put_unified(
+                "unified-list",
+                br#"{"metadata":{"title":"Track"},"lines":[]}"#,
+                &["upstream-list".to_string(), "upstream-other".to_string()],
+                Duration::from_secs(60),
+            )
+            .unwrap();
+
+        let (status, list) = get_json(test_app(cache, None), "/api/cache", None).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(list["upstream_entries"][0]["id"], upstream_id);
+        assert_eq!(list["unified_entries"][0]["id"], unified_id);
+        assert_eq!(list["unified_entries"][0]["dependency_count"], 2);
+        assert_eq!(list["entries"][0]["id"], upstream_id);
+    }
+
+    #[tokio::test]
+    async fn deleting_unified_cache_removes_ai_scores() {
+        let cache = test_cache("delete_unified_ai_scores");
+        let unified_id = cache
+            .put_unified(
+                "unified-delete",
+                br#"{"metadata":{"title":"Track"},"lines":[]}"#,
+                &[],
+                Duration::from_secs(60),
+            )
+            .unwrap();
+        cache
+            .put_ai_score(unified_id, &json!({ "candidate_summary_hash": "abc123" }))
+            .unwrap();
+        assert_eq!(cache.stats().unwrap().ai_score_entries, 1);
+
+        let app = test_app(cache.clone(), None);
+        let (status, deleted) = delete_json(
+            app.clone(),
+            &format!("/api/unified-cache/{unified_id}"),
+            None,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(deleted["deleted"], true);
+        assert!(cache.unified_detail(unified_id).unwrap().is_none());
+        assert_eq!(cache.list_ai_scores(unified_id).unwrap().len(), 0);
+        assert_eq!(cache.stats().unwrap().ai_score_entries, 0);
+
+        let (detail_status, detail) =
+            get_json(app, &format!("/api/unified-cache/{unified_id}"), None).await;
+        assert_eq!(detail_status, StatusCode::NOT_FOUND);
+        assert_eq!(detail["error"], "unified cache entry not found");
+    }
 
     #[test]
     fn rejects_non_local_host_without_token() {
@@ -1443,6 +1570,25 @@ mod tests {
         header: Option<(&str, &str)>,
     ) -> (StatusCode, serde_json::Value) {
         let mut request = Request::builder().method(Method::GET).uri(uri);
+        if let Some((name, value)) = header {
+            request = request.header(name, value);
+        }
+        let response = app
+            .oneshot(request.body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let value = serde_json::from_slice(&body).unwrap();
+        (status, value)
+    }
+
+    async fn delete_json(
+        app: Router,
+        uri: &str,
+        header: Option<(&str, &str)>,
+    ) -> (StatusCode, serde_json::Value) {
+        let mut request = Request::builder().method(Method::DELETE).uri(uri);
         if let Some((name, value)) = header {
             request = request.header(name, value);
         }

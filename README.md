@@ -175,6 +175,7 @@ Available endpoints:
 
 - `GET /api/health`
 - `GET /api/sources`
+- `GET /api/providers/health?limit=20`
 - `POST /api/fetch`
 - `GET /api/cache`
 - `GET /api/cache/:id`
@@ -200,7 +201,9 @@ Cache database path precedence:
 
 The cache stores upstream raw operations, derived unified responses, fetch-run records, traceable AI score records, and schema migrations. Upstream cache keys are based on source, operation, normalized request data, and request version. Cookies and tokens are not included in cache keys.
 
-Fetch-run observability covers aggregate fetches, multi-source searches, selected result fetches, and aggregate member fetches. The dashboard Overview/Cache views and `/api/runs` expose statuses such as `provider_warning`, `ai_skipped`, `no_lyrics_found`, `cache_hit`, and `cache_store`.
+Fetch-run observability covers aggregate fetches, multi-source searches, selected result fetches, and aggregate member fetches. The dashboard Overview/Cache views and `/api/runs` expose statuses such as `provider_warning`, `ai_skipped`, `no_lyrics_found`, `cache_hit`, and `cache_store`. Each run stores `started_at`, optional `finished_at`, `duration_ms`, `provider_count`, `candidate_count`, and `cache_event`; `created_at` is retained as the insert timestamp for older clients.
+
+Provider health is built from recent `fetch_runs` rows with a concrete `source`, not from live probes. `GET /api/providers/health?limit=N` and `/api/stats.provider_health` summarize the latest N runs per provider: success rate, average duration, warning/error ratios, and the last warning or error message. Status definitions are: `healthy` when recent success is at least 80% and there are no errors or elevated warnings, `degraded` when warnings/errors appear or success drops below 80%, and `critical` when errors dominate or success falls below 50%. If a provider is degraded, inspect the last error, compare cache hit/store events against upstream calls, retry with `--force` only after checking rate limits, and verify provider cookies or regional availability.
 
 ## Singing annotations
 

@@ -1,4 +1,4 @@
-import { BarChart3, Database, RefreshCw, Server } from 'lucide-react';
+import { Activity, BarChart3, Database, RefreshCw, Server } from 'lucide-react';
 import { formatTimestamp } from '../utils/format.js';
 
 export function OverviewView({ t, stats, cache, setActiveView }) {
@@ -9,6 +9,7 @@ export function OverviewView({ t, stats, cache, setActiveView }) {
   const sourceRows = groupedRows(cache, 'source').slice(0, 7);
   const operationRows = operationSummary(cache, t);
   const recentRows = cache.slice(0, 8);
+  const providerHealth = (stats?.provider_health || []).slice(0, 8);
 
   return (
     <section className="dashboard-grid">
@@ -86,6 +87,8 @@ export function OverviewView({ t, stats, cache, setActiveView }) {
         </div>
       </article>
 
+      <ProviderHealthPanel t={t} rows={providerHealth} />
+
       <RecentRunsPanel t={t} runs={stats?.fetch_runs || []} />
 
       <article className="chart-panel">
@@ -102,6 +105,54 @@ export function OverviewView({ t, stats, cache, setActiveView }) {
   );
 }
 
+
+
+export function ProviderHealthPanel({ t, rows }) {
+  return (
+    <article className="chart-panel wide-panel">
+      <div className="chart-title">
+        <div>
+          <h2>{t.providerHealth}</h2>
+          <p>{t.providerHealthHint}</p>
+        </div>
+        <Activity size={20} />
+      </div>
+      <div className="provider-health-list">
+        <div className="provider-health-row provider-health-head">
+          <strong>{t.source}</strong>
+          <span>{t.healthStatus}</span>
+          <span>{t.successRate}</span>
+          <span>{t.avgDuration}</span>
+          <span>{t.warningErrorRate}</span>
+          <span>{t.lastError}</span>
+        </div>
+        {rows.length === 0 ? <span className="empty-state">{t.noData}</span> : null}
+        {rows.map((row) => {
+          const successPercent = Math.round((row.success_rate || 0) * 100);
+          const warningPercent = Math.round((row.warning_rate || 0) * 100);
+          const errorPercent = Math.round((row.error_rate || 0) * 100);
+          return (
+            <div className="provider-health-row" key={row.source}>
+              <strong title={row.source}>{row.source}</strong>
+              <span className={`health-light health-${row.status || 'unknown'}`}>
+                <i />{row.status || 'unknown'}
+              </span>
+              <span>
+                <span className="mini-bar" aria-label={`${t.successRate} ${successPercent}%`}>
+                  <i style={{ width: `${Math.max(4, successPercent)}%` }} />
+                </span>
+                {successPercent}% / {row.sample_size}
+              </span>
+              <span>{row.average_duration_ms == null ? '-' : `${Math.round(row.average_duration_ms)} ms`}</span>
+              <span>{warningPercent}% / {errorPercent}%</span>
+              <span title={row.last_error || ''}>{row.last_error || '-'}</span>
+            </div>
+          );
+        })}
+      </div>
+    </article>
+  );
+}
 
 export function RecentRunsPanel({ t, runs }) {
   return (

@@ -118,6 +118,43 @@ pub struct FetchRunRecord {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
     pub created_at: i64,
+    pub started_at: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finished_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_count: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub candidate_count: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_event: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct FetchRunMetadata {
+    pub provider_count: Option<i64>,
+    pub candidate_count: Option<i64>,
+    pub cache_event: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ProviderHealthRecord {
+    pub source: String,
+    pub sample_size: i64,
+    pub success_count: i64,
+    pub warning_count: i64,
+    pub error_count: i64,
+    pub success_rate: f64,
+    pub warning_rate: f64,
+    pub error_rate: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub average_duration_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_finished_at: Option<i64>,
+    pub status: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -390,18 +427,38 @@ impl UpstreamCache {
         let source = source.map(|source| source.cli_name().to_string());
         let connection = self.lock()?;
         connection.execute(
-            "INSERT INTO fetch_runs (query, source, mode, status, message, created_at)
-             VALUES (?1, ?2, ?3, 'started', NULL, ?4)",
+            "INSERT INTO fetch_runs (query, source, mode, status, message, created_at, started_at)
+             VALUES (?1, ?2, ?3, 'started', NULL, ?4, ?4)",
             params![query, source, mode, now],
         )?;
         Ok(connection.last_insert_rowid())
     }
 
-    pub fn finish_fetch_run(&self, id: i64, status: &str, message: Option<&str>) -> Result<()> {
+    pub fn finish_fetch_run(
+        &self,
+        id: i64,
+        status: &str,
+        message: Option<&str>,
+        metadata: FetchRunMetadata,
+    ) -> Result<()> {
+        let finished_at = now_unix();
+        let cache_event = metadata.cache_event.as_deref();
         let connection = self.lock()?;
         connection.execute(
-            "UPDATE fetch_runs SET status = ?1, message = ?2 WHERE id = ?3",
-            params![status, message, id],
+            "UPDATE fetch_runs
+             SET status = ?1, message = ?2, finished_at = ?3,
+                 duration_ms = max(0, (?3 - started_at) * 1000),
+                 provider_count = ?4, candidate_count = ?5, cache_event = ?6
+             WHERE id = ?7",
+            params![
+                status,
+                message,
+                finished_at,
+                metadata.provider_count,
+                metadata.candidate_count,
+                cache_event,
+                id
+            ],
         )?;
         Ok(())
     }
@@ -410,14 +467,58 @@ impl UpstreamCache {
         let limit = i64::try_from(limit).unwrap_or(50).clamp(1, 500);
         let connection = self.lock()?;
         let mut statement = connection.prepare(
-            "SELECT id, query, source, mode, status, message, created_at
+            "SELECT id, query, source, mode, status, message, created_at, started_at, finished_at,
+                    duration_ms, provider_count, candidate_count, cache_event
              FROM fetch_runs
-             ORDER BY created_at DESC, id DESC
+             ORDER BY started_at DESC, id DESC
              LIMIT ?1",
         )?;
         let rows = statement.query_map(params![limit], fetch_run_from_row)?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
             .map_err(Error::from)
+    }
+
+    pub fn provider_health(&self, limit_per_source: usize) -> Result<Vec<ProviderHealthRecord>> {
+        let limit_per_source = limit_per_source.clamp(1, 500);
+        let connection = self.lock()?;
+        let mut statement = connection.prepare(
+            "SELECT id, query, source, mode, status, message, created_at, started_at, finished_at,
+                    duration_ms, provider_count, candidate_count, cache_event
+             FROM fetch_runs
+             WHERE source IS NOT NULL
+             ORDER BY source ASC, started_at DESC, id DESC",
+        )?;
+        let rows = statement.query_map([], fetch_run_from_row)?;
+        let mut buckets: std::collections::BTreeMap<String, Vec<FetchRunRecord>> =
+            std::collections::BTreeMap::new();
+        for row in rows {
+            let run = row?;
+            let Some(source) = run.source.clone() else {
+                continue;
+            };
+            let bucket = buckets.entry(source).or_default();
+            if bucket.len() < limit_per_source {
+                bucket.push(run);
+            }
+        }
+
+        let mut records = buckets
+            .into_iter()
+            .map(|(source, runs)| provider_health_from_runs(source, &runs))
+            .collect::<Vec<_>>();
+        records.sort_by(|left, right| {
+            left.success_rate
+                .partial_cmp(&right.success_rate)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| {
+                    right
+                        .error_rate
+                        .partial_cmp(&left.error_rate)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .then_with(|| left.source.cmp(&right.source))
+        });
+        Ok(records)
     }
 
     pub fn fetch_run_status_counts(&self) -> Result<Vec<FetchRunStatusCount>> {
@@ -676,7 +777,13 @@ impl UpstreamCache {
                 mode TEXT NOT NULL,
                 status TEXT NOT NULL,
                 message TEXT,
-                created_at INTEGER NOT NULL
+                created_at INTEGER NOT NULL,
+                started_at INTEGER NOT NULL,
+                finished_at INTEGER,
+                duration_ms INTEGER,
+                provider_count INTEGER,
+                candidate_count INTEGER,
+                cache_event TEXT
             );
 
             CREATE TABLE IF NOT EXISTS ai_scores (
@@ -691,6 +798,7 @@ impl UpstreamCache {
                 ON ai_scores(unified_cache_id);
             "#,
         )?;
+        ensure_fetch_run_columns(&connection)?;
         Ok(())
     }
 
@@ -809,6 +917,122 @@ fn text_preview(body: &[u8]) -> String {
     String::from_utf8_lossy(slice).to_string()
 }
 
+fn ensure_fetch_run_columns(connection: &Connection) -> Result<()> {
+    let mut statement = connection.prepare("PRAGMA table_info(fetch_runs)")?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
+    let columns = rows.collect::<std::result::Result<std::collections::HashSet<_>, _>>()?;
+    let migrations = [
+        (
+            "started_at",
+            "ALTER TABLE fetch_runs ADD COLUMN started_at INTEGER",
+        ),
+        (
+            "finished_at",
+            "ALTER TABLE fetch_runs ADD COLUMN finished_at INTEGER",
+        ),
+        (
+            "duration_ms",
+            "ALTER TABLE fetch_runs ADD COLUMN duration_ms INTEGER",
+        ),
+        (
+            "provider_count",
+            "ALTER TABLE fetch_runs ADD COLUMN provider_count INTEGER",
+        ),
+        (
+            "candidate_count",
+            "ALTER TABLE fetch_runs ADD COLUMN candidate_count INTEGER",
+        ),
+        (
+            "cache_event",
+            "ALTER TABLE fetch_runs ADD COLUMN cache_event TEXT",
+        ),
+    ];
+    for (column, sql) in migrations {
+        if !columns.contains(column) {
+            connection.execute(sql, [])?;
+        }
+    }
+    connection.execute(
+        "UPDATE fetch_runs SET started_at = created_at WHERE started_at IS NULL",
+        [],
+    )?;
+    Ok(())
+}
+
+fn provider_health_from_runs(source: String, runs: &[FetchRunRecord]) -> ProviderHealthRecord {
+    let sample_size = runs.len() as i64;
+    let success_count = runs
+        .iter()
+        .filter(|run| is_success_status(&run.status))
+        .count() as i64;
+    let warning_count = runs
+        .iter()
+        .filter(|run| is_warning_status(&run.status))
+        .count() as i64;
+    let error_count = runs
+        .iter()
+        .filter(|run| is_error_status(&run.status))
+        .count() as i64;
+    let durations = runs
+        .iter()
+        .filter_map(|run| run.duration_ms)
+        .collect::<Vec<_>>();
+    let average_duration_ms = if durations.is_empty() {
+        None
+    } else {
+        Some(durations.iter().sum::<i64>() as f64 / durations.len() as f64)
+    };
+    let last_error = runs
+        .iter()
+        .find(|run| is_error_status(&run.status) || is_warning_status(&run.status))
+        .and_then(|run| run.message.clone().or_else(|| Some(run.status.clone())));
+    let last_finished_at = runs.iter().filter_map(|run| run.finished_at).max();
+    let denominator = sample_size.max(1) as f64;
+    let success_rate = success_count as f64 / denominator;
+    let warning_rate = warning_count as f64 / denominator;
+    let error_rate = error_count as f64 / denominator;
+    let status = if sample_size == 0 {
+        "unknown"
+    } else if error_rate >= 0.5 || success_rate < 0.5 {
+        "critical"
+    } else if warning_rate >= 0.25 || error_rate > 0.0 || success_rate < 0.8 {
+        "degraded"
+    } else {
+        "healthy"
+    }
+    .to_string();
+
+    ProviderHealthRecord {
+        source,
+        sample_size,
+        success_count,
+        warning_count,
+        error_count,
+        success_rate,
+        warning_rate,
+        error_rate,
+        average_duration_ms,
+        last_error,
+        last_finished_at,
+        status,
+    }
+}
+
+fn is_success_status(status: &str) -> bool {
+    matches!(status, "success" | "cache_hit" | "cache_store")
+}
+
+fn is_warning_status(status: &str) -> bool {
+    matches!(
+        status,
+        "provider_warning" | "ai_skipped" | "no_lyrics_found"
+    )
+}
+
+fn is_error_status(status: &str) -> bool {
+    status == "error"
+}
+
 fn fetch_run_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<FetchRunRecord> {
     Ok(FetchRunRecord {
         id: row.get(0)?,
@@ -818,6 +1042,12 @@ fn fetch_run_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<FetchRunRecor
         status: row.get(4)?,
         message: row.get(5)?,
         created_at: row.get(6)?,
+        started_at: row.get(7)?,
+        finished_at: row.get(8)?,
+        duration_ms: row.get(9)?,
+        provider_count: row.get(10)?,
+        candidate_count: row.get(11)?,
+        cache_event: row.get(12)?,
     })
 }
 
@@ -939,7 +1169,16 @@ mod tests {
             .start_fetch_run("Song Artist", Some(Source::Lrclib), "fetch_source_result")
             .unwrap();
         cache
-            .finish_fetch_run(first_id, "cache_hit", Some("served_unified_cache: id=42"))
+            .finish_fetch_run(
+                first_id,
+                "cache_hit",
+                Some("served_unified_cache: id=42"),
+                FetchRunMetadata {
+                    provider_count: Some(1),
+                    candidate_count: Some(1),
+                    cache_event: Some("cache_hit".into()),
+                },
+            )
             .unwrap();
         let second_id = cache
             .start_fetch_run("Other Song", None, "aggregate_fetch")
@@ -949,6 +1188,11 @@ mod tests {
                 second_id,
                 "no_lyrics_found",
                 Some("no_lyrics_found: all selected sources returned no usable lyric"),
+                FetchRunMetadata {
+                    provider_count: Some(2),
+                    candidate_count: Some(0),
+                    cache_event: None,
+                },
             )
             .unwrap();
 

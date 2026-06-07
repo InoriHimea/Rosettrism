@@ -727,3 +727,83 @@
 .unified-cache-row-head {
   grid-template-columns: minmax(160px, 1.4fr) 96px 90px minmax(110px, 0.8fr) 44px;
 }
+
+.provider-health-list {
+  display: grid;
+  min-width: 0;
+}
+
+.provider-health-row {
+  align-items: center;
+  border-top: 1px solid #edf1ec;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(110px, 0.9fr) 112px minmax(140px, 1fr) 108px 110px minmax(160px, 1.1fr);
+  min-height: 44px;
+}
+
+.provider-health-row:first-child {
+  border-top: 0;
+}
+
+.provider-health-head {
+  color: #314036;
+  font-weight: 700;
+  min-height: 34px;
+}
+
+.provider-health-row strong,
+.provider-health-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.health-light {
+  align-items: center;
+  display: inline-flex;
+  gap: 7px;
+  text-transform: capitalize;
+}
+
+.health-light i {
+  border-radius: 999px;
+  display: inline-block;
+  height: 10px;
+  width: 10px;
+}
+
+.health-healthy i {
+  background: var(--color-accent);
+  box-shadow: 0 0 0 4px rgba(6, 182, 212, 0.12);
+}
+
+.health-degraded i {
+  background: var(--color-hot);
+  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.12);
+}
+
+.health-critical i,
+.health-unknown i {
+  background: #ef4444;
+  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.12);
+}
+
+.mini-bar {
+  background: #edf1ec;
+  border-radius: 999px;
+  display: inline-block;
+  height: 8px;
+  margin-right: 8px;
+  overflow: hidden;
+  vertical-align: middle;
+  width: 64px;
+}
+
+.mini-bar i {
+  background: linear-gradient(90deg, var(--color-primary), var(--color-accent));
+  border-radius: inherit;
+  display: block;
+  height: 100%;
+}

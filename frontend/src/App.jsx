@@ -12,6 +12,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { createApiClient, readServerToken, writeServerToken } from './api/client.js';
+import { formatApiErrorForDisplay } from './api/errors.js';
 import { useAiSettings } from './hooks/useAiSettings.js';
 import { useCacheEntries } from './hooks/useCacheEntries.js';
 import { useLyricSettings } from './hooks/useLyricSettings.js';
@@ -63,7 +64,7 @@ function App() {
   const { aiSettings, setAiSettings, aiScoringPayload } = useAiSettings();
   const [serverToken, setServerToken] = useState(readServerToken);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(null);
   const t = dictionaries[language] || dictionaries.zh;
   const apiClient = useMemo(() => createApiClient(serverToken), [serverToken]);
   const {
@@ -130,7 +131,7 @@ function App() {
   const searchLyric = useCallback(async (event) => {
     event.preventDefault();
     setBusy(true);
-    setError('');
+    setError(null);
     setResult('');
     setSearchResults([]);
     setSearchWarnings([]);
@@ -141,7 +142,7 @@ function App() {
       setActiveView('fetch');
       await refreshMeta();
     } catch (err) {
-      setError(err.message);
+      setError(err);
     } finally {
       setBusy(false);
     }
@@ -149,7 +150,7 @@ function App() {
 
   const fetchAggregate = useCallback(async () => {
     setBusy(true);
-    setError('');
+    setError(null);
     setResult('');
     try {
       const data = await apiClient.postJson('/api/fetch', aggregatePayload);
@@ -157,7 +158,7 @@ function App() {
       setActiveView('fetch');
       await refreshMeta();
     } catch (err) {
-      setError(err.message);
+      setError(err);
     } finally {
       setBusy(false);
     }
@@ -182,7 +183,7 @@ function App() {
       return;
     }
     setResultDetailBusy(true);
-    setError('');
+    setError(null);
     try {
       const data = await apiClient.postJson('/api/fetch-result', {
         result: selectedResult,
@@ -200,7 +201,7 @@ function App() {
       await refreshMeta();
     } catch (err) {
       setResultDetailData(null);
-      setResultDetail(err.message);
+      setResultDetail(formatApiErrorForDisplay(err, t));
     } finally {
       setResultDetailBusy(false);
     }
@@ -282,6 +283,7 @@ function App() {
             closeResultDetail={closeResultDetail}
             fetchSelectedResult={fetchSelectedResult}
             refreshMeta={refreshMeta}
+            setActiveView={setActiveView}
           />
         )}
         {activeView === 'cache' && (

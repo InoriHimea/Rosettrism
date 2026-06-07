@@ -2,6 +2,7 @@ import { RefreshCw, Trash2 } from 'lucide-react';
 import { RecentRunsPanel } from './OverviewView.jsx';
 import { displaySource } from '../utils/lyricResults.js';
 import { formatTimestamp } from '../utils/format.js';
+import { formatApiErrorForDisplay } from '../api/errors.js';
 
 const upstreamType = 'upstream';
 const unifiedType = 'unified';
@@ -79,7 +80,7 @@ export function CacheView({
           {cacheDetailBusy ? (
             <span className="empty-state">{t.checking}</span>
           ) : cacheDetail?.error ? (
-            <pre className="error">{cacheDetail.error}</pre>
+            <pre className="error">{formatApiErrorForDisplay(cacheDetail.error, t)}</pre>
           ) : detailEntry ? (
             <CacheDetail
               t={t}

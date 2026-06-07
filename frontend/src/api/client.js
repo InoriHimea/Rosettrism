@@ -1,3 +1,4 @@
+import { ApiClientError } from './errors.js';
 const serverTokenStorageKey = 'rosettrism-server-token';
 
 export function readServerToken() {
@@ -51,7 +52,7 @@ export async function parseResponse(response) {
   const data = text && isJson ? parseJson(text) : text;
 
   if (!response.ok) {
-    throw new Error(formatApiError(data, response));
+    throw formatApiError(data, response);
   }
 
   if (text && !isJson) {
@@ -69,8 +70,19 @@ function parseJson(text) {
 }
 
 function formatApiError(data, response) {
+  const fallbackMessage = `${response.status} ${response.statusText}`.trim();
   if (data && typeof data === 'object') {
-    return data.error || data.message || JSON.stringify(data);
+    const message = data.message || data.error || JSON.stringify(data);
+    return new ApiClientError(message, {
+      code: data.code || 'internal_error',
+      details: data.details ?? null,
+      retryable: Boolean(data.retryable),
+      status: response.status,
+    });
   }
-  return data || `${response.status} ${response.statusText}`.trim();
+  return new ApiClientError(data || fallbackMessage, {
+    code: response.status === 401 ? 'auth_missing_or_invalid' : 'internal_error',
+    status: response.status,
+    retryable: response.status >= 500,
+  });
 }

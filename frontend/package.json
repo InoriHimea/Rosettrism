@@ -7,7 +7,8 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite --host 127.0.0.1",
-    "test": "playwright test tests/dashboard-smoke.spec.js"
+    "test": "playwright test tests/dashboard-smoke.spec.js",
+    "test:unit": "node --test src/api/__tests__/*.test.js"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.0",

@@ -92,10 +92,7 @@ pub enum Source {
 
 impl Source {
     pub fn is_experimental(self) -> bool {
-        matches!(
-            self,
-            Source::BrowserMxm | Source::OfflineDb | Source::SpotifyLyrics
-        )
+        self.capabilities().experimental
     }
 
     pub fn cli_name(self) -> &'static str {
@@ -129,6 +126,284 @@ impl Source {
             Source::Utaten => "utaten",
             Source::Utamap => "utamap",
         }
+    }
+
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Source::AppleMusic => "Apple Music",
+            Source::BrowserMxm => "Browser Musixmatch",
+            Source::JLyric => "J-Lyric",
+            Source::Joysound => "JOYSOUND",
+            Source::Kkbox => "KKBOX",
+            Source::LineMusic => "LINE MUSIC",
+            Source::Lrclib => "LRCLIB",
+            Source::Migu => "Migu Music",
+            Source::Musixmatch => "Musixmatch",
+            Source::Netease => "NetEase Cloud Music",
+            Source::OfflineDb => "Offline DB",
+            Source::PetitLyrics => "PetitLyrics",
+            Source::Qq => "QQ Music",
+            Source::RockLyric => "RockLyric",
+            Source::SpotifyLyrics => "Spotify Lyrics",
+            Source::TuneCore => "TuneCore",
+            Source::UtaNet => "Uta-Net",
+            Source::Utaten => "UtaTen",
+            Source::Animesongz => "AnimeSongZ",
+            Source::Awa => "AWA",
+            Source::Azlyrics => "AZLyrics",
+            Source::Genius => "Genius",
+            Source::JTotal => "J-Total Music",
+            Source::Kashinavi => "Kashinavi",
+            Source::Kugou => "Kugou",
+            Source::LyricalNonsense => "Lyrical Nonsense",
+            Source::Songtexte => "Songtexte",
+            Source::Utamap => "UtaMap",
+        }
+    }
+
+    pub fn capabilities(self) -> ProviderCapabilities {
+        let base = ProviderCapabilities::new().direct_id();
+        match self {
+            Source::AppleMusic => base
+                .word_timing()
+                .translation()
+                .romanized()
+                .ruby()
+                .requires_cookie(),
+            Source::BrowserMxm => ProviderCapabilities::new()
+                .word_timing()
+                .translation()
+                .requires_cookie()
+                .experimental(),
+            Source::Joysound => base.ruby(),
+            Source::Kugou => base.word_timing().translation(),
+            Source::Lrclib => base,
+            Source::Migu => base.translation(),
+            Source::Musixmatch => base.word_timing().translation().requires_cookie(),
+            Source::Netease => base.word_timing().translation().romanized(),
+            Source::OfflineDb => base
+                .word_timing()
+                .translation()
+                .romanized()
+                .ruby()
+                .experimental(),
+            Source::PetitLyrics => base,
+            Source::Qq => base.word_timing().translation().romanized(),
+            Source::SpotifyLyrics => base
+                .word_timing()
+                .translation()
+                .requires_cookie()
+                .experimental(),
+            Source::Utaten => base.ruby(),
+            Source::Awa | Source::Kkbox | Source::LineMusic => base.requires_cookie(),
+            _ => base,
+        }
+    }
+
+    pub fn auth_requirement(self) -> ProviderAuthRequirement {
+        match self {
+            Source::OfflineDb => ProviderAuthRequirement::LocalPath,
+            Source::SpotifyLyrics => ProviderAuthRequirement::RequiredToken,
+            Source::AppleMusic | Source::BrowserMxm | Source::Musixmatch => {
+                ProviderAuthRequirement::RequiredCookie
+            }
+            source if source.capabilities().requires_cookie => {
+                ProviderAuthRequirement::OptionalCookie
+            }
+            _ => ProviderAuthRequirement::None,
+        }
+    }
+
+    pub fn provider_config(self) -> ProviderConfig {
+        match self {
+            Source::Musixmatch | Source::SpotifyLyrics | Source::AppleMusic => ProviderConfig {
+                timeout_ms: 20_000,
+                retry: ProviderRetryPolicy {
+                    max_retries: 1,
+                    backoff_ms: 750,
+                },
+                rate_limit: ProviderRateLimit {
+                    requests: 20,
+                    per_seconds: 60,
+                },
+            },
+            Source::OfflineDb => ProviderConfig {
+                timeout_ms: 5_000,
+                retry: ProviderRetryPolicy {
+                    max_retries: 0,
+                    backoff_ms: 0,
+                },
+                rate_limit: ProviderRateLimit {
+                    requests: 1_000,
+                    per_seconds: 60,
+                },
+            },
+            Source::Netease | Source::Qq | Source::Kugou | Source::Migu => ProviderConfig {
+                timeout_ms: 15_000,
+                retry: ProviderRetryPolicy {
+                    max_retries: 2,
+                    backoff_ms: 500,
+                },
+                rate_limit: ProviderRateLimit {
+                    requests: 30,
+                    per_seconds: 60,
+                },
+            },
+            _ => ProviderConfig {
+                timeout_ms: 12_000,
+                retry: ProviderRetryPolicy {
+                    max_retries: 1,
+                    backoff_ms: 500,
+                },
+                rate_limit: ProviderRateLimit {
+                    requests: 15,
+                    per_seconds: 60,
+                },
+            },
+        }
+    }
+
+    pub fn decoder_output_format(self) -> Vec<InputFormat> {
+        match self {
+            Source::AppleMusic => vec![InputFormat::AppleMusic],
+            Source::Kugou => vec![InputFormat::Krc],
+            Source::Netease => vec![InputFormat::Yrc, InputFormat::Lrc],
+            Source::Qq => vec![InputFormat::Qrc],
+            Source::Lrclib | Source::Migu => vec![InputFormat::Lrc],
+            Source::OfflineDb => vec![InputFormat::Json, InputFormat::Lrc, InputFormat::Text],
+            _ => vec![InputFormat::Text, InputFormat::Lrc],
+        }
+    }
+
+    pub fn manifest(self) -> ProviderManifest {
+        ProviderManifest {
+            manifest_version: 1,
+            source: self,
+            name: self.cli_name().to_string(),
+            source_name: self.cli_name().to_string(),
+            display_name: self.display_name().to_string(),
+            capabilities: self.capabilities(),
+            auth: self.auth_requirement(),
+            decoder_output_format: self.decoder_output_format(),
+            config: self.provider_config(),
+        }
+    }
+}
+
+pub fn builtin_provider_registry() -> Vec<ProviderManifest> {
+    Source::value_variants()
+        .iter()
+        .map(|source| source.manifest())
+        .collect()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderCapabilities {
+    pub search: bool,
+    pub direct_id: bool,
+    pub word_timing: bool,
+    pub translation: bool,
+    pub romanized: bool,
+    pub ruby: bool,
+    pub requires_cookie: bool,
+    pub experimental: bool,
+}
+
+impl ProviderCapabilities {
+    pub const fn new() -> Self {
+        Self {
+            search: true,
+            direct_id: false,
+            word_timing: false,
+            translation: false,
+            romanized: false,
+            ruby: false,
+            requires_cookie: false,
+            experimental: false,
+        }
+    }
+
+    pub const fn direct_id(mut self) -> Self {
+        self.direct_id = true;
+        self
+    }
+    pub const fn word_timing(mut self) -> Self {
+        self.word_timing = true;
+        self
+    }
+    pub const fn translation(mut self) -> Self {
+        self.translation = true;
+        self
+    }
+    pub const fn romanized(mut self) -> Self {
+        self.romanized = true;
+        self
+    }
+    pub const fn ruby(mut self) -> Self {
+        self.ruby = true;
+        self
+    }
+    pub const fn requires_cookie(mut self) -> Self {
+        self.requires_cookie = true;
+        self
+    }
+    pub const fn experimental(mut self) -> Self {
+        self.experimental = true;
+        self
+    }
+}
+
+impl Default for ProviderCapabilities {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderAuthRequirement {
+    None,
+    OptionalCookie,
+    RequiredCookie,
+    RequiredToken,
+    LocalPath,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderRetryPolicy {
+    pub max_retries: u8,
+    pub backoff_ms: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderRateLimit {
+    pub requests: u32,
+    pub per_seconds: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderConfig {
+    pub timeout_ms: u64,
+    pub retry: ProviderRetryPolicy,
+    pub rate_limit: ProviderRateLimit,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderManifest {
+    pub manifest_version: u8,
+    pub source: Source,
+    pub name: String,
+    pub source_name: String,
+    pub display_name: String,
+    pub capabilities: ProviderCapabilities,
+    pub auth: ProviderAuthRequirement,
+    pub decoder_output_format: Vec<InputFormat>,
+    pub config: ProviderConfig,
+}
+
+impl ProviderManifest {
+    pub fn manifest_file_name() -> &'static str {
+        "rosettrism-provider.json"
     }
 }
 
@@ -251,6 +526,33 @@ fn format_duration(ms: u32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn metadata_registry_exposes_capabilities_and_plugin_config() {
+        let registry = builtin_provider_registry();
+        assert_eq!(registry.len(), Source::value_variants().len());
+
+        let netease = registry
+            .iter()
+            .find(|manifest| manifest.source == Source::Netease)
+            .expect("netease manifest");
+        assert_eq!(netease.source_name, "netease");
+        assert!(netease.capabilities.search);
+        assert!(netease.capabilities.word_timing);
+        assert!(netease.capabilities.translation);
+        assert!(netease.config.timeout_ms > 0);
+
+        let spotify = registry
+            .iter()
+            .find(|manifest| manifest.source == Source::SpotifyLyrics)
+            .expect("spotify manifest");
+        assert!(spotify.capabilities.experimental);
+        assert_eq!(spotify.auth, ProviderAuthRequirement::RequiredToken);
+        assert_eq!(
+            ProviderManifest::manifest_file_name(),
+            "rosettrism-provider.json"
+        );
+    }
 
     #[test]
     fn experimental_sources_are_gated_by_default() {

@@ -6,7 +6,7 @@ import { normalizeLyricPayload } from '../lyricPlayback.js';
 import { apiErrorAdvice, hasProviderWarning, normalizeApiError } from '../api/errors.js';
 import { displaySource, formatDurationMs, hasSingingAnnotations, isAggregateResult, isQqResult } from '../utils/lyricResults.js';
 
-const sourceOptions = ['', 'netease', 'qq', 'kugou', 'lrclib', 'migu', 'utaten', 'joysound', 'uta-net', 'lyrical-nonsense'];
+const fallbackSourceOptions = ['', 'netease', 'qq', 'kugou', 'lrclib', 'migu', 'utaten', 'joysound', 'uta-net', 'lyrical-nonsense'];
 
 export function FetchView({
   t,
@@ -14,6 +14,7 @@ export function FetchView({
   setBody,
   source,
   setSource,
+  providerSources = [],
   format,
   setFormat,
   busy,
@@ -35,6 +36,7 @@ export function FetchView({
   refreshMeta,
   setActiveView,
 }) {
+  const sourceOptions = useMemo(() => buildSourceOptions(providerSources, t), [providerSources, t]);
   const hasSearchInput = [body.query, body.title, body.artist, body.id].some((value) => String(value || '').trim());
   const canAggregate = !source && String(body.query || body.title || body.artist || '').trim();
 
@@ -89,8 +91,8 @@ export function FetchView({
               {t.source}
               <select value={source} onChange={(event) => setSource(event.target.value)}>
                 {sourceOptions.map((option) => (
-                  <option value={option} key={option || 'aggregate'}>
-                    {option || t.aggregate}
+                  <option value={option.value} key={option.value || 'aggregate'} title={option.description}>
+                    {option.label}
                   </option>
                 ))}
               </select>
@@ -418,3 +420,40 @@ function ResultDialog({ t, entry, detail, detailData, busy, lyricSettings, scrol
   );
 }
 
+
+function buildSourceOptions(providerSources, t) {
+  const aggregate = { value: '', label: t.aggregate, description: t.aggregate };
+  if (!Array.isArray(providerSources) || providerSources.length === 0) {
+    return [aggregate, ...fallbackSourceOptions.slice(1).map((value) => ({ value, label: value, description: value }))];
+  }
+
+  return [
+    aggregate,
+    ...providerSources
+      .filter((source) => source?.capabilities?.search !== false)
+      .map((source) => {
+        const caps = capabilityBadges(source.capabilities || {}, t);
+        const flags = [
+          source.capabilities?.experimental ? t.experimental : null,
+          source.capabilities?.requires_cookie ? t.requiresCookie : null,
+          source.auth === 'required_token' ? t.requiresToken : null,
+        ].filter(Boolean);
+        const suffix = [...caps, ...flags].join(' · ');
+        return {
+          value: source.source_name,
+          label: `${source.display_name || source.source_name}${suffix ? ` (${suffix})` : ''}`,
+          description: `${source.source_name}: ${suffix || t.noSpecialRequirements || 'standard provider'}`,
+        };
+      }),
+  ];
+}
+
+function capabilityBadges(capabilities, t) {
+  return [
+    capabilities.direct_id ? t.directId : null,
+    capabilities.word_timing ? t.wordTiming : null,
+    capabilities.translation ? t.translation : null,
+    capabilities.romanized ? t.romanized : null,
+    capabilities.ruby ? t.ruby : null,
+  ].filter(Boolean);
+}

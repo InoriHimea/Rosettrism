@@ -51,6 +51,7 @@ function App() {
   const [activeView, setActiveView] = useState('overview');
   const [body, setBody] = useState(defaultBody);
   const [source, setSource] = useState('');
+  const [providerSources, setProviderSources] = useState([]);
   const [format, setFormat] = useState('');
   const [result, setResult] = useState('');
   const [searchResults, setSearchResults] = useState([]);
@@ -83,6 +84,24 @@ function App() {
   useEffect(() => {
     refreshMeta();
   }, [refreshMeta]);
+
+  useEffect(() => {
+    let active = true;
+    apiClient.getJson('/api/sources')
+      .then((data) => {
+        if (active) {
+          setProviderSources(data.sources || []);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setProviderSources([]);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [apiClient]);
 
   useEffect(() => {
     localStorage.setItem('rosettrism-language', language);
@@ -264,6 +283,7 @@ function App() {
             setBody={setBody}
             source={source}
             setSource={setSource}
+            providerSources={providerSources}
             format={format}
             setFormat={setFormat}
             busy={busy}

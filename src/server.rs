@@ -6,13 +6,12 @@ use axum::http::{header, HeaderMap, HeaderValue, Response, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use clap::ValueEnum;
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::cache::{AiScoreQuery, UpstreamCache};
-use crate::provider::{SearchResult, Source};
+use crate::cache::UpstreamCache;
+use crate::provider::{builtin_provider_registry, SearchResult, Source};
 use crate::service::{
     source_from_cli_name, AggregateFetchRequest, AiScoringConfig, LyricNeed, MergeMode,
     ServiceContext, SourceSearchRequest, SourceSearchResult, SpecificFetchFormat,
@@ -123,7 +122,7 @@ async fn providers_health(
     let limit = query.limit.unwrap_or(20).clamp(1, 500);
     Ok(Json(json!({
         "sample_size": limit,
-        "providers": cache.provider_health(limit)?,
+        "providers": enrich_provider_health(cache.provider_health(limit)?),
     })))
 }
 
@@ -132,16 +131,10 @@ async fn sources(
     headers: HeaderMap,
 ) -> ApiResult<Json<serde_json::Value>> {
     authorize(&state, &headers)?;
-    let sources = Source::value_variants()
-        .iter()
-        .map(|source| {
-            json!({
-                "name": source.cli_name(),
-                "experimental": source.is_experimental()
-            })
-        })
-        .collect::<Vec<_>>();
-    Ok(Json(json!({ "sources": sources })))
+    Ok(Json(json!({
+        "manifest_file": crate::provider::ProviderManifest::manifest_file_name(),
+        "sources": builtin_provider_registry(),
+    })))
 }
 
 async fn fetch(
@@ -593,8 +586,38 @@ async fn stats(
         })?,
         "fetch_runs": cache.list_fetch_runs(20)?,
         "fetch_run_status_counts": cache.fetch_run_status_counts()?,
-        "provider_health": cache.provider_health(20)?
+        "provider_health": enrich_provider_health(cache.provider_health(20)?)
     })))
+}
+
+fn enrich_provider_health(
+    records: Vec<crate::cache::ProviderHealthRecord>,
+) -> Vec<serde_json::Value> {
+    records
+        .into_iter()
+        .map(|record| {
+            let mut value = serde_json::to_value(&record).unwrap_or_else(|_| {
+                json!({
+                    "source": record.source,
+                    "status": "unknown"
+                })
+            });
+            if let Some(object) = value.as_object_mut() {
+                if let Ok(source) = source_from_cli_name(&record.source) {
+                    let manifest = source.manifest();
+                    object.insert("capabilities".into(), json!(manifest.capabilities));
+                    object.insert("config".into(), json!(manifest.config));
+                    object.insert("auth".into(), json!(manifest.auth));
+                    object.insert(
+                        "experimental".into(),
+                        json!(manifest.capabilities.experimental),
+                    );
+                    object.insert("display_name".into(), json!(manifest.display_name));
+                }
+            }
+            value
+        })
+        .collect()
 }
 
 async fn index() -> impl IntoResponse {

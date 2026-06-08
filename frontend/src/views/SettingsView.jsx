@@ -1,6 +1,6 @@
 import { defaultLyricSettings, resolveLyricGradient } from '../lyricPlayback.js';
 
-export function SettingsView({ t, language, setLanguage, lyricSettings, setLyricSettings, aiSettings, setAiSettings, serverToken, setServerToken, payload }) {
+export function SettingsView({ t, language, setLanguage, lyricSettings, setLyricSettings, aiSettings, setAiSettings, serverToken, setServerToken, themeSettings, setThemeSettings, themeOptions, payload }) {
   const previewStyle = {
     '--lyric-solid-color': lyricSettings.solidColor,
     '--lyric-gradient': resolveLyricGradient(lyricSettings.colorPreset),
@@ -18,6 +18,27 @@ export function SettingsView({ t, language, setLanguage, lyricSettings, setLyric
             <option value="en">{t.english}</option>
           </select>
         </label>
+
+        <div className="settings-group theme-settings-group">
+          <strong>{t.theme}</strong>
+          <p className="hint">{t.themeHint}</p>
+          <div className="theme-preset-grid" role="radiogroup" aria-label={t.themePreset}>
+            {themeOptions.map((preset) => (
+              <label className={`theme-preset-card ${themeSettings.preset === preset.id ? 'theme-preset-card-active' : ''}`} key={preset.id}>
+                <input
+                  type="radio"
+                  name="theme-preset"
+                  value={preset.id}
+                  checked={themeSettings.preset === preset.id}
+                  onChange={(event) => setThemeSettings({ ...themeSettings, preset: event.target.value })}
+                />
+                <span className={`theme-swatch theme-swatch-${preset.id}`} aria-hidden="true" />
+                <strong>{t[preset.labelKey]}</strong>
+                <small>{t[preset.descriptionKey]}</small>
+              </label>
+            ))}
+          </div>
+        </div>
         <div className="settings-group">
           <strong>{t.serverAccess}</strong>
           <p className="hint">{t.serverTokenHint}</p>
@@ -87,6 +108,34 @@ export function SettingsView({ t, language, setLanguage, lyricSettings, setLyric
               <option value="vertical">{t.lyricRenderVertical}</option>
               <option value="karaoke">{t.lyricRenderKaraoke}</option>
             </select>
+          </label>
+
+          <label className="field-label">
+            {t.karaokeMotionPreset}
+            <select
+              value={lyricSettings.motionPreset || defaultLyricSettings.motionPreset}
+              onChange={(event) => setLyricSettings({ ...lyricSettings, motionPreset: event.target.value })}
+            >
+              <option value="cinematic">{t.motionCinematic}</option>
+              <option value="snappy">{t.motionSnappy}</option>
+              <option value="calm">{t.motionCalm}</option>
+            </select>
+          </label>
+          <label className="field-label settings-checkbox-row">
+            <input
+              type="checkbox"
+              checked={lyricSettings.ambientEffects !== false}
+              onChange={(event) => setLyricSettings({ ...lyricSettings, ambientEffects: event.target.checked })}
+            />
+            {t.lyricAmbientEffects}
+          </label>
+          <label className="field-label settings-checkbox-row">
+            <input
+              type="checkbox"
+              checked={Boolean(lyricSettings.lowDistraction)}
+              onChange={(event) => setLyricSettings({ ...lyricSettings, lowDistraction: event.target.checked })}
+            />
+            {t.lyricLowDistraction}
           </label>
           <label className="field-label settings-color-row">
             {t.lyricStageBackground}

@@ -1,4 +1,4 @@
-import { Activity, BarChart3, Database, RefreshCw, Server } from 'lucide-react';
+import { Activity, BarChart3, Database, Gauge, RefreshCw, Server, Sparkles } from 'lucide-react';
 import { formatTimestamp } from '../utils/format.js';
 
 export function OverviewView({ t, stats, cache, setActiveView }) {
@@ -10,16 +10,17 @@ export function OverviewView({ t, stats, cache, setActiveView }) {
   const operationRows = operationSummary(cache, t);
   const recentRows = cache.slice(0, 8);
   const providerHealth = (stats?.provider_health || []).slice(0, 8);
+  const fetchStatusRows = (stats?.fetch_run_status_counts || []).map((row) => ({ label: row.status, value: row.count }));
 
   return (
     <section className="dashboard-grid">
-      <article className="chart-panel health-panel">
+      <article className="chart-panel health-panel" data-testid="cache-freshness-ring">
         <div className="chart-title">
           <div>
-            <h2>{t.cacheHealth}</h2>
+            <h2>{t.cacheFreshnessRing}</h2>
             <p>{t.totalEntries}: {total}</p>
           </div>
-          <Database size={20} />
+          <Gauge size={20} />
         </div>
         <div className="donut-row">
           <div
@@ -87,7 +88,9 @@ export function OverviewView({ t, stats, cache, setActiveView }) {
         </div>
       </article>
 
-      <ProviderHealthPanel t={t} rows={providerHealth} />
+      <ProviderHealthCards t={t} rows={providerHealth} />
+
+      <AiScoreSparkline t={t} scores={stats?.ai_scores || []} />
 
       <RecentRunsPanel t={t} runs={stats?.fetch_runs || []} />
 
@@ -99,13 +102,123 @@ export function OverviewView({ t, stats, cache, setActiveView }) {
           </div>
           <Server size={20} />
         </div>
-        <BarList rows={(stats?.fetch_run_status_counts || []).map((row) => ({ label: row.status, value: row.count }))} empty={t.noData} />
+        <StatusDistributionChart rows={fetchStatusRows} empty={t.noData} />
       </article>
     </section>
   );
 }
 
 
+
+
+export function ProviderHealthCards({ t, rows }) {
+  return (
+    <article className="chart-panel wide-panel" data-testid="provider-health-cards">
+      <div className="chart-title">
+        <div>
+          <h2>{t.providerCards}</h2>
+          <p>{t.providerHealthHint}</p>
+        </div>
+        <Activity size={20} />
+      </div>
+      <div className="provider-card-grid">
+        {rows.length === 0 ? <span className="empty-state">{t.noData}</span> : null}
+        {rows.map((row) => {
+          const successPercent = Math.round((row.success_rate || 0) * 100);
+          const warningPercent = Math.round((row.warning_rate || 0) * 100);
+          const errorPercent = Math.round((row.error_rate || 0) * 100);
+          return (
+            <div className={`provider-card provider-card-${row.status || 'unknown'}`} key={row.source}>
+              <span className={`health-light health-${row.status || 'unknown'}`}><i />{row.status || 'unknown'}</span>
+              <strong title={row.source}>{row.source}</strong>
+              <div className="provider-card-meter" aria-label={`${t.successRate} ${successPercent}%`}>
+                <span style={{ width: `${Math.max(4, successPercent)}%` }} />
+              </div>
+              <small>{successPercent}% · {Math.round(row.average_duration_ms || 0)} ms · W/E {warningPercent}%/{errorPercent}%</small>
+            </div>
+          );
+        })}
+      </div>
+    </article>
+  );
+}
+
+export function AiScoreSparkline({ t, scores }) {
+  const points = scores.slice(0, 12).reverse().map((score, index) => ({
+    label: score.score_json?.model || `#${index + 1}`,
+    value: scoreValue(score.score_json),
+  }));
+  const width = 260;
+  const height = 96;
+  const path = sparklinePath(points.map((point) => point.value), width, height);
+  return (
+    <article className="chart-panel" data-testid="ai-score-sparkline">
+      <div className="chart-title">
+        <div>
+          <h2>{t.aiScoreSparkline}</h2>
+          <p>{points.length} {t.entries}</p>
+        </div>
+        <Sparkles size={20} />
+      </div>
+      {points.length === 0 ? <span className="empty-state">{t.noData}</span> : (
+        <div className="ai-sparkline-card">
+          <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={t.aiScoreSparkline}>
+            <path className="sparkline-area" d={`${path} L ${width} ${height} L 0 ${height} Z`} />
+            <path className="sparkline-line" d={path} />
+            {points.map((point, index) => {
+              const x = points.length === 1 ? width / 2 : (index / (points.length - 1)) * width;
+              const y = height - (Math.max(0, Math.min(100, point.value)) / 100) * (height - 18) - 9;
+              return <circle cx={x} cy={y} r="3.5" key={`${point.label}-${index}`} />;
+            })}
+          </svg>
+          <strong>{Math.round(points.at(-1)?.value || 0)}</strong>
+        </div>
+      )}
+    </article>
+  );
+}
+
+function StatusDistributionChart({ rows, empty }) {
+  const total = rows.reduce((sum, row) => sum + row.value, 0);
+  if (rows.length === 0 || total === 0) {
+    return <span className="empty-state">{empty}</span>;
+  }
+  let cursor = 0;
+  return (
+    <div className="status-distribution" data-testid="fetch-status-distribution">
+      <div className="status-stack" aria-label="Fetch status distribution">
+        {rows.map((row, index) => {
+          const width = (row.value / total) * 100;
+          const style = { left: `${cursor}%`, width: `${width}%` };
+          cursor += width;
+          return <span className={`status-slice status-slice-${index % 5}`} style={style} title={`${row.label}: ${row.value}`} key={row.label} />;
+        })}
+      </div>
+      <BarList rows={rows} empty={empty} />
+    </div>
+  );
+}
+
+function sparklinePath(values, width, height) {
+  if (values.length === 0) {
+    return '';
+  }
+  return values.map((value, index) => {
+    const x = values.length === 1 ? width / 2 : (index / (values.length - 1)) * width;
+    const y = height - (Math.max(0, Math.min(100, value)) / 100) * (height - 18) - 9;
+    return `${index === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
+  }).join(' ');
+}
+
+function scoreValue(score) {
+  const selected = score?.scores?.find((item) => item.index === score.best_index) || score?.scores?.[0];
+  const value = selected?.ai_score ?? selected?.heuristic_score ?? score?.score;
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return 0;
+  }
+  return number <= 10 ? number * 10 : number;
+}
 
 export function ProviderHealthPanel({ t, rows }) {
   return (

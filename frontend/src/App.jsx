@@ -17,6 +17,7 @@ import { useAiSettings } from './hooks/useAiSettings.js';
 import { useCacheEntries } from './hooks/useCacheEntries.js';
 import { useLyricSettings } from './hooks/useLyricSettings.js';
 import { useSidebarState } from './hooks/useSidebarState.js';
+import { useThemeSettings } from './hooks/useThemeSettings.js';
 import { dictionaries } from './i18n/dictionaries.js';
 import { CacheView } from './views/CacheView.jsx';
 import { FetchView } from './views/FetchView.jsx';
@@ -62,6 +63,7 @@ function App() {
   const [resultDetailScrollTick, setResultDetailScrollTick] = useState(0);
   const { lyricSettings, setLyricSettings } = useLyricSettings();
   const { aiSettings, setAiSettings, aiScoringPayload } = useAiSettings();
+  const { themeSettings, setThemeSettings, themeOptions } = useThemeSettings();
   const [serverToken, setServerToken] = useState(readServerToken);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -312,6 +314,9 @@ function App() {
             setAiSettings={setAiSettings}
             serverToken={serverToken}
             setServerToken={setServerToken}
+            themeSettings={themeSettings}
+            setThemeSettings={setThemeSettings}
+            themeOptions={themeOptions}
             payload={searchPayload}
           />
         )}

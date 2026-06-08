@@ -109,6 +109,10 @@ export function LyricPlaybackView({ lyric, settings, t }) {
     };
   }
 
+  const motionPreset = settings.motionPreset || 'cinematic';
+  const lowDistraction = Boolean(settings.lowDistraction);
+  const ambientEffects = settings.ambientEffects !== false;
+
   const style = {
     '--lyric-solid-color': settings.solidColor,
     '--lyric-gradient': resolveLyricGradient(settings.colorPreset),
@@ -139,7 +143,8 @@ export function LyricPlaybackView({ lyric, settings, t }) {
         </div>
       ) : null}
 
-      <div className={`lyric-stage lyric-stage-qq lyric-stage-${renderMode}`}>
+      <div className={`lyric-stage lyric-stage-qq lyric-stage-${renderMode} lyric-motion-${motionPreset}${lowDistraction ? ' lyric-low-distraction' : ''}${ambientEffects ? ' lyric-ambient-on' : ' lyric-ambient-off'}`} data-testid="karaoke-stage">
+        {ambientEffects ? <LyricAmbientEffects /> : null}
         {renderMode === 'karaoke' ? (
           <KaraokeStage
             flowLines={flowLines}
@@ -229,6 +234,20 @@ export function LyricPlaybackView({ lyric, settings, t }) {
         </label>
       </div>
     </section>
+  );
+}
+
+
+function LyricAmbientEffects() {
+  return (
+    <div className="lyric-ambient" aria-hidden="true">
+      <span className="lyric-ambient-glow lyric-ambient-glow-a" />
+      <span className="lyric-ambient-glow lyric-ambient-glow-b" />
+      <span className="lyric-particle lyric-particle-1" />
+      <span className="lyric-particle lyric-particle-2" />
+      <span className="lyric-particle lyric-particle-3" />
+      <span className="lyric-particle lyric-particle-4" />
+    </div>
   );
 }
 

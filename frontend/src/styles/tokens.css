@@ -13,6 +13,27 @@
   --color-secondary: rgba(30, 41, 59, 0.84);
   --color-accent: #22d3ee;
   --color-accent-neon: #45f3ff;
+
+  --color-accent-neon-strong: #67f8ff;
+  --color-accent-neon-soft: rgba(69, 243, 255, 0.18);
+  --color-accent-neon-glow: 0 0 18px rgba(69, 243, 255, 0.46), 0 0 42px rgba(244, 114, 182, 0.18);
+  --glass-panel-strong: linear-gradient(180deg, rgba(15, 23, 42, 0.94), rgba(15, 23, 42, 0.72));
+  --glass-panel-soft: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(148, 163, 184, 0.06));
+  --glass-border: rgba(255, 255, 255, 0.14);
+  --shadow-depth-low: 0 10px 26px rgba(2, 6, 23, 0.16);
+  --shadow-depth-medium: 0 18px 50px rgba(2, 6, 23, 0.24);
+  --shadow-depth-high: 0 30px 90px rgba(2, 6, 23, 0.36);
+  --motion-instant: 80ms;
+  --motion-standard: 280ms;
+  --motion-emphasis: 620ms;
+  --status-success: #34d399;
+  --status-success-soft: rgba(52, 211, 153, 0.14);
+  --status-warning: #fbbf24;
+  --status-warning-soft: rgba(251, 191, 36, 0.16);
+  --status-danger: #fb7185;
+  --status-danger-soft: rgba(251, 113, 133, 0.16);
+  --status-info: #38bdf8;
+  --status-info-soft: rgba(56, 189, 248, 0.14);
   --color-hot: #f472b6;
   --color-success: #34d399;
   --color-danger: #fb7185;
@@ -30,6 +51,46 @@
   color: var(--color-text);
   background: var(--color-bg);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+
+:root.theme-midnight {
+  --color-text: #e5edff;
+  --color-muted: #8ea3c8;
+  --color-bg: #030712;
+  --color-surface: rgba(9, 14, 28, 0.84);
+  --color-surface-soft: rgba(15, 23, 42, 0.68);
+  --color-border: rgba(99, 102, 241, 0.2);
+  --color-primary: #6366f1;
+  --color-primary-hover: #818cf8;
+  --color-accent: #38bdf8;
+  --color-accent-neon: #7dd3fc;
+  --gradient-cyber: linear-gradient(135deg, #6366f1 0%, #38bdf8 52%, #a78bfa 100%);
+  --gradient-orbital: radial-gradient(circle at 16% 12%, rgba(99, 102, 241, 0.24), transparent 30vw), radial-gradient(circle at 86% 10%, rgba(56, 189, 248, 0.14), transparent 26vw), linear-gradient(135deg, #030712 0%, #0f172a 58%, #111827 100%);
+  --glass-panel: linear-gradient(180deg, rgba(9, 14, 28, 0.9), rgba(15, 23, 42, 0.72));
+}
+
+:root.theme-minimal-light {
+  --color-text: #182235;
+  --color-muted: #627089;
+  --color-bg: #f7f9fc;
+  --color-surface: rgba(255, 255, 255, 0.86);
+  --color-surface-soft: rgba(246, 249, 252, 0.86);
+  --color-border: rgba(100, 116, 139, 0.2);
+  --color-border-soft: rgba(100, 116, 139, 0.12);
+  --color-primary: #2563eb;
+  --color-primary-hover: #1d4ed8;
+  --color-secondary: rgba(241, 245, 249, 0.94);
+  --color-accent: #0891b2;
+  --color-accent-neon: #06b6d4;
+  --color-hot: #db2777;
+  --gradient-cyber: linear-gradient(135deg, #2563eb 0%, #0891b2 58%, #db2777 100%);
+  --gradient-orbital: radial-gradient(circle at 18% 14%, rgba(37, 99, 235, 0.12), transparent 28vw), radial-gradient(circle at 82% 4%, rgba(8, 145, 178, 0.1), transparent 24vw), linear-gradient(135deg, #f8fafc 0%, #eef4ff 58%, #fff7ed 100%);
+  --glass-panel: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(248, 250, 252, 0.74));
+  --glass-panel-strong: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.86));
+  --glass-blur: blur(12px);
+  --shadow-glow: 0 18px 42px rgba(71, 85, 105, 0.12), 0 0 0 1px rgba(255, 255, 255, 0.72);
+  --shadow-depth-medium: 0 18px 42px rgba(71, 85, 105, 0.14);
 }
 
 body {

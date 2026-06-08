@@ -105,6 +105,41 @@ pub struct CacheStats {
     pub fetch_run_entries: i64,
     pub fresh_upstream_entries: i64,
     pub expired_upstream_entries: i64,
+    pub fresh_unified_entries: i64,
+    pub expired_unified_entries: i64,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct CachePruneOptions {
+    pub dry_run: bool,
+    pub keep_fetch_runs: usize,
+    pub keep_ai_scores: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CachePruneReport {
+    pub dry_run: bool,
+    pub expired_upstream_entries: i64,
+    pub expired_unified_entries: i64,
+    pub old_fetch_run_entries: i64,
+    pub old_ai_score_entries: i64,
+    pub total_entries: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CacheExportFormat {
+    Jsonl,
+    PrettyJson,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct CacheExportOptions {
+    pub format: CacheExportFormat,
+    pub upstream: bool,
+    pub unified: bool,
+    pub fetch_runs: bool,
+    pub ai_scores: bool,
+    pub limit: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -716,7 +751,13 @@ impl UpstreamCache {
             params![now],
             |row| row.get(0),
         )?;
+        let fresh_unified_entries = connection.query_row(
+            "SELECT count(*) FROM unified_cache WHERE expires_at > ?1",
+            params![now],
+            |row| row.get(0),
+        )?;
         let expired_upstream_entries = upstream_entries - fresh_upstream_entries;
+        let expired_unified_entries = unified_entries - fresh_unified_entries;
         Ok(CacheStats {
             upstream_entries,
             unified_entries,
@@ -724,7 +765,121 @@ impl UpstreamCache {
             fetch_run_entries,
             fresh_upstream_entries,
             expired_upstream_entries,
+            fresh_unified_entries,
+            expired_unified_entries,
         })
+    }
+
+    pub fn prune(&self, options: CachePruneOptions) -> Result<CachePruneReport> {
+        let now = now_unix();
+        let keep_fetch_runs = i64::try_from(options.keep_fetch_runs).unwrap_or(i64::MAX);
+        let keep_ai_scores = i64::try_from(options.keep_ai_scores).unwrap_or(i64::MAX);
+        let mut connection = self.lock()?;
+        let expired_upstream_entries = connection.query_row(
+            "SELECT count(*) FROM upstream_cache WHERE expires_at <= ?1",
+            params![now],
+            |row| row.get(0),
+        )?;
+        let expired_unified_entries = connection.query_row(
+            "SELECT count(*) FROM unified_cache WHERE expires_at <= ?1",
+            params![now],
+            |row| row.get(0),
+        )?;
+        let old_fetch_run_entries = connection.query_row(
+            "SELECT count(*) FROM fetch_runs WHERE id NOT IN (
+                SELECT id FROM fetch_runs ORDER BY started_at DESC, id DESC LIMIT ?1
+             )",
+            params![keep_fetch_runs],
+            |row| row.get(0),
+        )?;
+        let old_ai_score_entries = connection.query_row(
+            "SELECT count(*) FROM ai_scores WHERE id NOT IN (
+                SELECT id FROM ai_scores ORDER BY created_at DESC, id DESC LIMIT ?1
+             )",
+            params![keep_ai_scores],
+            |row| row.get(0),
+        )?;
+
+        let report = CachePruneReport {
+            dry_run: options.dry_run,
+            expired_upstream_entries,
+            expired_unified_entries,
+            old_fetch_run_entries,
+            old_ai_score_entries,
+            total_entries: expired_upstream_entries
+                + expired_unified_entries
+                + old_fetch_run_entries
+                + old_ai_score_entries,
+        };
+
+        if !options.dry_run {
+            let transaction = connection.transaction()?;
+            transaction.execute(
+                "DELETE FROM upstream_cache WHERE expires_at <= ?1",
+                params![now],
+            )?;
+            transaction.execute(
+                "DELETE FROM unified_cache WHERE expires_at <= ?1",
+                params![now],
+            )?;
+            transaction.execute(
+                "DELETE FROM fetch_runs WHERE id NOT IN (
+                    SELECT id FROM fetch_runs ORDER BY started_at DESC, id DESC LIMIT ?1
+                 )",
+                params![keep_fetch_runs],
+            )?;
+            transaction.execute(
+                "DELETE FROM ai_scores WHERE id NOT IN (
+                    SELECT id FROM ai_scores ORDER BY created_at DESC, id DESC LIMIT ?1
+                 )",
+                params![keep_ai_scores],
+            )?;
+            transaction.commit()?;
+        }
+
+        Ok(report)
+    }
+
+    pub fn vacuum(&self) -> Result<()> {
+        let connection = self.lock()?;
+        connection.execute_batch("VACUUM")?;
+        Ok(())
+    }
+
+    pub fn export(&self, options: CacheExportOptions) -> Result<Vec<u8>> {
+        let mut records = Vec::new();
+        if options.upstream {
+            for record in self.list(options.limit)? {
+                records.push(json!({ "section": "upstream", "record": record }));
+            }
+        }
+        if options.unified {
+            for record in self.list_unified(options.limit)? {
+                records.push(json!({ "section": "unified", "record": record }));
+            }
+        }
+        if options.fetch_runs {
+            for record in self.list_fetch_runs(options.limit)? {
+                records.push(json!({ "section": "fetch_runs", "record": record }));
+            }
+        }
+        if options.ai_scores {
+            for record in self.list_recent_ai_scores(options.limit)? {
+                records.push(json!({ "section": "ai_scores", "record": record }));
+            }
+        }
+
+        match options.format {
+            CacheExportFormat::Jsonl => {
+                let mut output = Vec::new();
+                for record in records {
+                    serde_json::to_writer(&mut output, &record)?;
+                    output.push(b'\n');
+                }
+                Ok(output)
+            }
+            CacheExportFormat::PrettyJson => Ok(serde_json::to_vec_pretty(&records)?),
+        }
     }
 
     fn migrate(&self) -> Result<()> {

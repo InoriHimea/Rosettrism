@@ -205,6 +205,60 @@ fetch-run 可观测性覆盖聚合 fetch、多来源 search、选中结果 fetch
 
 Provider health 来自带有具体 `source` 的近期 `fetch_runs`，不是实时探测。`GET /api/providers/health?limit=N` 与 `/api/stats.provider_health` 会汇总每个 provider 最近 N 次 run：成功率、平均耗时、warning/error 比例以及最后一条 warning 或 error。状态定义：近期成功率至少 80%、没有错误且 warning 未升高时为 `healthy`；出现 warning/error 或成功率低于 80% 时为 `degraded`；错误占比过高或成功率低于 50% 时为 `critical`。排查 degraded provider 时，请先查看最后错误、比较 cache hit/store 与上游请求，确认 rate limit 后再用 `--force` 重试，并检查 provider cookie 或地区可用性。
 
+缓存维护命令统一放在 `cache` 子命令组下：
+
+```bash
+rosettrism --db /var/lib/rosettrism/cache.sqlite cache stats
+rosettrism --db /var/lib/rosettrism/cache.sqlite cache runs --limit 100
+rosettrism --db /var/lib/rosettrism/cache.sqlite cache ai-scores --limit 100
+rosettrism --db /var/lib/rosettrism/cache.sqlite cache export --format jsonl --output /backup/rosettrism-cache.jsonl
+rosettrism --db /var/lib/rosettrism/cache.sqlite cache export --format pretty-json --upstream --unified
+rosettrism --db /var/lib/rosettrism/cache.sqlite cache prune --keep-fetch-runs 5000 --keep-ai-scores 5000
+rosettrism --db /var/lib/rosettrism/cache.sqlite cache prune --yes --keep-fetch-runs 5000 --keep-ai-scores 5000
+rosettrism --db /var/lib/rosettrism/cache.sqlite cache vacuum --yes
+```
+
+`cache prune` 会删除过期 upstream/unified cache，保留最近 N 条 `fetch_runs`，并保留最近 N 条 `ai_scores`。`cache prune` 与 `cache vacuum` 默认都是 dry-run；请先检查输出的数量，确认无误后再加 `--yes` 实际执行。`cache export` 默认输出 JSONL，也可通过 `--format pretty-json` 输出格式化 JSON；未指定 section flag 时会同时导出 upstream summary、unified cache summary、fetch runs 与 AI scores。
+
+Cron 示例：
+
+```cron
+15 3 * * * rosettrism --db /var/lib/rosettrism/cache.sqlite cache prune --yes --keep-fetch-runs 5000 --keep-ai-scores 5000 >>/var/log/rosettrism-cache.log 2>&1
+45 3 * * 0 rosettrism --db /var/lib/rosettrism/cache.sqlite cache vacuum --yes >>/var/log/rosettrism-cache.log 2>&1
+```
+
+Systemd timer 示例：
+
+```ini
+# /etc/systemd/system/rosettrism-cache-prune.service
+[Unit]
+Description=Prune Rosettrism cache
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/rosettrism --db /var/lib/rosettrism/cache.sqlite cache prune --yes --keep-fetch-runs 5000 --keep-ai-scores 5000
+
+# /etc/systemd/system/rosettrism-cache-prune.timer
+[Unit]
+Description=Daily Rosettrism cache prune
+
+[Timer]
+OnCalendar=03:15
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+Docker 示例：
+
+```bash
+docker run --rm \
+  -v rosettrism-data:/data \
+  ghcr.io/your-org/rosettrism:latest \
+  rosettrism --db /data/cache.sqlite cache prune --yes --keep-fetch-runs 5000 --keep-ai-scores 5000
+```
+
 ## 助唱标注
 
 从 QQ 音乐获取歌词时，Rosettrism 会在可用时请求助唱标注数据。标注会以时间信息标记声乐技巧。

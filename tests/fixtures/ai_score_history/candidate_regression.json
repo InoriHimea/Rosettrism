@@ -1,0 +1,45 @@
+{
+  "candidates": [
+    {
+      "index": 0,
+      "source": "lrclib",
+      "title": "Golden Song",
+      "artist": "Fixture Artist",
+      "line_count": 2,
+      "timed_line_count": 2,
+      "word_timing_count": 0,
+      "heuristic_score": 82.0,
+      "sample_lines": ["one", "two"]
+    },
+    {
+      "index": 1,
+      "source": "qq",
+      "title": "Golden Song",
+      "artist": "Fixture Artist",
+      "line_count": 2,
+      "timed_line_count": 2,
+      "word_timing_count": 4,
+      "heuristic_score": 98.0,
+      "sample_lines": ["one", "two"]
+    }
+  ],
+  "ai_response_v1": {
+    "best_index": 1,
+    "scores": [
+      { "index": 0, "score": 72.0, "reason": "timed but no word timing" },
+      { "index": 1, "score": 94.0, "reason": "word timing is richer" }
+    ]
+  },
+  "ai_response_v2": {
+    "best_index": 0,
+    "scores": [
+      { "index": 0, "score": 90.0, "reason": "cleaner text alignment" },
+      { "index": 1, "score": 81.0, "reason": "richer timing but noisier text" }
+    ]
+  },
+  "expected": {
+    "heuristic_best_index": 1,
+    "ai_best_index_v1": 1,
+    "ai_best_index_v2": 0
+  }
+}

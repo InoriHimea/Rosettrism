@@ -21,6 +21,8 @@ use crate::{Error, Result};
 
 const DEFAULT_TRANSLATION_LANG: &str = "zh-Hans";
 const DEFAULT_OPENAI_MODEL: &str = "gpt-4o-mini";
+const AI_PROMPT_VERSION: &str = "ai-score-prompt-v1";
+const AI_CANDIDATE_SUMMARY_VERSION: &str = "candidate-summary-v1";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
 #[serde(rename_all = "snake_case")]
@@ -146,6 +148,9 @@ pub struct AggregateFetchResponse {
 pub struct AiScoringResult {
     pub model: String,
     pub base_url: String,
+    pub prompt_version: String,
+    pub config_hash: String,
+    pub candidate_summary_version: String,
     pub candidate_summary_hash: String,
     pub best_index: usize,
     pub scores: Vec<AiCandidateScore>,
@@ -717,48 +722,40 @@ impl ServiceContext {
         }
 
         let summaries = candidate_summaries(candidates);
-        let summary_json = serde_json::to_string(&summaries)?;
-        let summary_hash = hash_json(summary_json.as_bytes());
+        score_ai_candidate_summaries(&summaries, &config).await
+    }
 
-        let request = json!({
-            "model": config.model,
-            "response_format": { "type": "json_object" },
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "You score synced lyric candidates. Return strict JSON only: {\"best_index\":number,\"scores\":[{\"index\":number,\"score\":number,\"reason\":string}]}"
-                },
-                {
-                    "role": "user",
-                    "content": summary_json
-                }
-            ]
-        });
-        let response = reqwest::Client::new()
-            .post(openai_chat_completions_url(&config.base_url)?)
-            .header(AUTHORIZATION, format!("Bearer {}", config.api_key))
-            .header(CONTENT_TYPE, "application/json")
-            .json(&request)
-            .send()
-            .await?;
-        let status = response.status();
-        let body = response.text().await?;
-        if !status.is_success() {
-            return Err(Error::Provider(format!(
-                "OpenAI compatible endpoint returned {status}: {body}"
-            )));
+    pub async fn replay_ai_score_for_unified_cache(
+        &self,
+        unified_cache_id: i64,
+        config: Option<&AiScoringConfig>,
+    ) -> Result<AiScoringResult> {
+        let Some(config) = resolve_ai_scoring_config(config) else {
+            return Err(Error::Service("AI scoring is not configured".into()));
+        };
+        let cache = self
+            .cache
+            .as_ref()
+            .ok_or_else(|| Error::Service("cache is not configured".into()))?;
+        let body = cache
+            .unified_body(unified_cache_id)?
+            .ok_or_else(|| Error::Service("unified cache entry not found".into()))?;
+        let response: AggregateFetchResponse = serde_json::from_slice(&body)?;
+        let unified = response
+            .results
+            .first()
+            .ok_or_else(|| Error::Service("unified cache entry has no candidates".into()))?;
+        let summaries = candidate_summaries_from_unified(unified);
+        if summaries.len() < 2 {
+            return Err(Error::Service(
+                "unified cache entry has fewer than two candidates".into(),
+            ));
         }
-        let value: serde_json::Value = serde_json::from_str(&body)?;
-        let content = value
-            .get("choices")
-            .and_then(|choices| choices.get(0))
-            .and_then(|choice| choice.get("message"))
-            .and_then(|message| message.get("content"))
-            .and_then(|content| content.as_str())
-            .ok_or_else(|| {
-                Error::Provider("OpenAI compatible response missing message content".into())
-            })?;
-        parse_ai_candidate_selection(content, &config, &summaries, summary_hash)
+        let score = score_ai_candidate_summaries(&summaries, &config)
+            .await?
+            .ok_or_else(|| Error::Service("AI scoring returned no selection".into()))?;
+        cache.put_ai_score(unified_cache_id, &serde_json::to_value(&score)?)?;
+        Ok(score)
     }
 
     pub async fn provider(
@@ -997,7 +994,7 @@ struct ResolvedAiScoringConfig {
     model: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct AiCandidateSummary {
     index: usize,
     source: String,
@@ -1066,6 +1063,57 @@ fn openai_chat_completions_url(base_url: &str) -> Result<String> {
     Ok(format!("{base}/chat/completions"))
 }
 
+async fn score_ai_candidate_summaries(
+    summaries: &[AiCandidateSummary],
+    config: &ResolvedAiScoringConfig,
+) -> Result<Option<AiScoringResult>> {
+    let summary_json = serde_json::to_string(summaries)?;
+    let summary_hash = hash_json(summary_json.as_bytes());
+    let request = json!({
+        "model": config.model,
+        "response_format": { "type": "json_object" },
+        "messages": [
+            {
+                "role": "system",
+                "content": ai_scoring_system_prompt()
+            },
+            {
+                "role": "user",
+                "content": summary_json
+            }
+        ]
+    });
+    let response = reqwest::Client::new()
+        .post(openai_chat_completions_url(&config.base_url)?)
+        .header(AUTHORIZATION, format!("Bearer {}", config.api_key))
+        .header(CONTENT_TYPE, "application/json")
+        .json(&request)
+        .send()
+        .await?;
+    let status = response.status();
+    let body = response.text().await?;
+    if !status.is_success() {
+        return Err(Error::Provider(format!(
+            "OpenAI compatible endpoint returned {status}: {body}"
+        )));
+    }
+    let value: serde_json::Value = serde_json::from_str(&body)?;
+    let content = value
+        .get("choices")
+        .and_then(|choices| choices.get(0))
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("content"))
+        .and_then(|content| content.as_str())
+        .ok_or_else(|| {
+            Error::Provider("OpenAI compatible response missing message content".into())
+        })?;
+    parse_ai_candidate_selection(content, config, summaries, summary_hash)
+}
+
+fn ai_scoring_system_prompt() -> &'static str {
+    "You score synced lyric candidates. Return strict JSON only: {\"best_index\":number,\"scores\":[{\"index\":number,\"score\":number,\"reason\":string}]}"
+}
+
 fn candidate_summaries(candidates: &[SourceCandidate]) -> Vec<AiCandidateSummary> {
     candidates
         .iter()
@@ -1091,6 +1139,54 @@ fn candidate_summaries(candidates: &[SourceCandidate]) -> Vec<AiCandidateSummary
                 .collect(),
         })
         .collect()
+}
+
+fn candidate_summaries_from_unified(unified: &UnifiedLyric) -> Vec<AiCandidateSummary> {
+    unified
+        .tracks
+        .iter()
+        .enumerate()
+        .map(|(index, track)| AiCandidateSummary {
+            index,
+            source: track.source.clone(),
+            title: track
+                .document
+                .meta
+                .title
+                .clone()
+                .unwrap_or_else(|| unified.meta.title.clone().unwrap_or_default()),
+            artist: track
+                .document
+                .meta
+                .artist
+                .clone()
+                .unwrap_or_else(|| unified.meta.artist.clone().unwrap_or_default()),
+            line_count: track.quality.line_count,
+            timed_line_count: track.quality.timed_line_count,
+            word_timing_count: track.quality.word_timing_count,
+            heuristic_score: track.quality.score,
+            sample_lines: track
+                .document
+                .lines
+                .iter()
+                .filter_map(|line| {
+                    let text = line.text.trim();
+                    (!text.is_empty()).then(|| text.chars().take(120).collect::<String>())
+                })
+                .take(18)
+                .collect(),
+        })
+        .collect()
+}
+
+fn ai_config_hash(config: &ResolvedAiScoringConfig) -> String {
+    let value = json!({
+        "base_url": config.base_url,
+        "model": config.model,
+        "prompt_version": AI_PROMPT_VERSION,
+        "candidate_summary_version": AI_CANDIDATE_SUMMARY_VERSION,
+    });
+    hash_json(serde_json::to_string(&value).unwrap_or_default().as_bytes())
 }
 
 fn parse_ai_candidate_selection(
@@ -1154,6 +1250,9 @@ fn parse_ai_candidate_selection(
     Ok(Some(AiScoringResult {
         model: config.model.clone(),
         base_url: config.base_url.clone(),
+        prompt_version: AI_PROMPT_VERSION.to_string(),
+        config_hash: ai_config_hash(config),
+        candidate_summary_version: AI_CANDIDATE_SUMMARY_VERSION.to_string(),
         candidate_summary_hash: summary_hash,
         best_index,
         scores,
@@ -1990,6 +2089,65 @@ mod tests {
     use super::*;
     use crate::model::LyricRubySpan;
     use serde_json::json;
+
+    #[test]
+    fn golden_ai_score_fixture_tracks_quality_changes() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/ai_score_history/candidate_regression.json"
+        ))
+        .unwrap();
+        let summaries: Vec<AiCandidateSummary> =
+            serde_json::from_value(fixture["candidates"].clone()).unwrap();
+        let expected = &fixture["expected"];
+        let heuristic_best_index = summaries
+            .iter()
+            .max_by(|left, right| {
+                left.heuristic_score
+                    .partial_cmp(&right.heuristic_score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|summary| summary.index)
+            .unwrap();
+        assert_eq!(
+            heuristic_best_index,
+            expected["heuristic_best_index"].as_u64().unwrap() as usize
+        );
+
+        let config = ResolvedAiScoringConfig {
+            base_url: "https://example.invalid/v1".into(),
+            api_key: "fixture-secret".into(),
+            model: "fixture-model".into(),
+        };
+        let summary_hash = hash_json(serde_json::to_string(&summaries).unwrap().as_bytes());
+        let v1 = parse_ai_candidate_selection(
+            &fixture["ai_response_v1"].to_string(),
+            &config,
+            &summaries,
+            summary_hash.clone(),
+        )
+        .unwrap()
+        .unwrap();
+        let v2 = parse_ai_candidate_selection(
+            &fixture["ai_response_v2"].to_string(),
+            &config,
+            &summaries,
+            summary_hash,
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(
+            v1.best_index,
+            expected["ai_best_index_v1"].as_u64().unwrap() as usize
+        );
+        assert_eq!(
+            v2.best_index,
+            expected["ai_best_index_v2"].as_u64().unwrap() as usize
+        );
+        assert_eq!(v1.prompt_version, AI_PROMPT_VERSION);
+        assert_eq!(v1.candidate_summary_version, AI_CANDIDATE_SUMMARY_VERSION);
+        assert_ne!(v1.best_index, v2.best_index);
+    }
 
     #[test]
     fn parses_ttl_units() {

@@ -205,6 +205,60 @@ Fetch-run observability covers aggregate fetches, multi-source searches, selecte
 
 Provider health is built from recent `fetch_runs` rows with a concrete `source`, not from live probes. `GET /api/providers/health?limit=N` and `/api/stats.provider_health` summarize the latest N runs per provider: success rate, average duration, warning/error ratios, and the last warning or error message. Status definitions are: `healthy` when recent success is at least 80% and there are no errors or elevated warnings, `degraded` when warnings/errors appear or success drops below 80%, and `critical` when errors dominate or success falls below 50%. If a provider is degraded, inspect the last error, compare cache hit/store events against upstream calls, retry with `--force` only after checking rate limits, and verify provider cookies or regional availability.
 
+Cache maintenance commands are grouped under `cache`:
+
+```bash
+rosettrism --db /var/lib/rosettrism/cache.sqlite cache stats
+rosettrism --db /var/lib/rosettrism/cache.sqlite cache runs --limit 100
+rosettrism --db /var/lib/rosettrism/cache.sqlite cache ai-scores --limit 100
+rosettrism --db /var/lib/rosettrism/cache.sqlite cache export --format jsonl --output /backup/rosettrism-cache.jsonl
+rosettrism --db /var/lib/rosettrism/cache.sqlite cache export --format pretty-json --upstream --unified
+rosettrism --db /var/lib/rosettrism/cache.sqlite cache prune --keep-fetch-runs 5000 --keep-ai-scores 5000
+rosettrism --db /var/lib/rosettrism/cache.sqlite cache prune --yes --keep-fetch-runs 5000 --keep-ai-scores 5000
+rosettrism --db /var/lib/rosettrism/cache.sqlite cache vacuum --yes
+```
+
+`cache prune` removes expired upstream/unified cache rows, retains the most recent N `fetch_runs`, and retains the most recent N `ai_scores`. `cache prune` and `cache vacuum` are dry-run by default; add `--yes` only after reviewing the reported counts. `cache export` emits JSONL by default and can emit pretty JSON with `--format pretty-json`; when no section flags are supplied it exports upstream summaries, unified summaries, fetch runs, and AI scores.
+
+Cron example:
+
+```cron
+15 3 * * * rosettrism --db /var/lib/rosettrism/cache.sqlite cache prune --yes --keep-fetch-runs 5000 --keep-ai-scores 5000 >>/var/log/rosettrism-cache.log 2>&1
+45 3 * * 0 rosettrism --db /var/lib/rosettrism/cache.sqlite cache vacuum --yes >>/var/log/rosettrism-cache.log 2>&1
+```
+
+Systemd timer example:
+
+```ini
+# /etc/systemd/system/rosettrism-cache-prune.service
+[Unit]
+Description=Prune Rosettrism cache
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/rosettrism --db /var/lib/rosettrism/cache.sqlite cache prune --yes --keep-fetch-runs 5000 --keep-ai-scores 5000
+
+# /etc/systemd/system/rosettrism-cache-prune.timer
+[Unit]
+Description=Daily Rosettrism cache prune
+
+[Timer]
+OnCalendar=03:15
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+Docker example:
+
+```bash
+docker run --rm \
+  -v rosettrism-data:/data \
+  ghcr.io/your-org/rosettrism:latest \
+  rosettrism --db /data/cache.sqlite cache prune --yes --keep-fetch-runs 5000 --keep-ai-scores 5000
+```
+
 ## Singing annotations
 
 When fetching QQ Music lyrics, Rosettrism requests singing annotation data when available. These annotations mark vocal techniques with timing information.

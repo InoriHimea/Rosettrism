@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -105,6 +105,41 @@ pub struct CacheStats {
     pub fetch_run_entries: i64,
     pub fresh_upstream_entries: i64,
     pub expired_upstream_entries: i64,
+    pub fresh_unified_entries: i64,
+    pub expired_unified_entries: i64,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct CachePruneOptions {
+    pub dry_run: bool,
+    pub keep_fetch_runs: usize,
+    pub keep_ai_scores: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CachePruneReport {
+    pub dry_run: bool,
+    pub expired_upstream_entries: i64,
+    pub expired_unified_entries: i64,
+    pub old_fetch_run_entries: i64,
+    pub old_ai_score_entries: i64,
+    pub total_entries: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CacheExportFormat {
+    Jsonl,
+    PrettyJson,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct CacheExportOptions {
+    pub format: CacheExportFormat,
+    pub upstream: bool,
+    pub unified: bool,
+    pub fetch_runs: bool,
+    pub ai_scores: bool,
+    pub limit: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -169,6 +204,16 @@ pub struct AiScoreRecord {
     pub unified_cache_id: i64,
     pub score_json: serde_json::Value,
     pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct AiScoreQuery {
+    pub query_hash: Option<String>,
+    pub model: Option<String>,
+    pub prompt_version: Option<String>,
+    pub created_at_start: Option<i64>,
+    pub created_at_end: Option<i64>,
+    pub limit: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -386,11 +431,22 @@ impl UpstreamCache {
         score_json: &serde_json::Value,
     ) -> Result<i64> {
         let now = now_unix();
-        let score_json = serde_json::to_string(score_json)?;
+        let sanitized_score = sanitize_ai_score_json(score_json)?;
+        let score_json = serde_json::to_string(&sanitized_score)?;
+        let query_hash = sanitized_score
+            .get("candidate_summary_hash")
+            .and_then(serde_json::Value::as_str);
+        let model = sanitized_score
+            .get("model")
+            .and_then(serde_json::Value::as_str);
+        let prompt_version = sanitized_score
+            .get("prompt_version")
+            .and_then(serde_json::Value::as_str);
         let connection = self.lock()?;
         connection.execute(
-            "INSERT INTO ai_scores (unified_cache_id, score_json, created_at) VALUES (?1, ?2, ?3)",
-            params![unified_cache_id, score_json, now],
+            "INSERT INTO ai_scores (unified_cache_id, score_json, query_hash, model, prompt_version, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![unified_cache_id, score_json, query_hash, model, prompt_version, now],
         )?;
         Ok(connection.last_insert_rowid())
     }
@@ -409,15 +465,44 @@ impl UpstreamCache {
     }
 
     pub fn list_recent_ai_scores(&self, limit: usize) -> Result<Vec<AiScoreRecord>> {
-        let limit = i64::try_from(limit).unwrap_or(20).clamp(1, 100);
+        self.query_ai_scores(AiScoreQuery {
+            limit,
+            ..AiScoreQuery::default()
+        })
+    }
+
+    pub fn query_ai_scores(&self, query: AiScoreQuery) -> Result<Vec<AiScoreRecord>> {
+        let limit = i64::try_from(query.limit).unwrap_or(20).clamp(1, 100);
+        let mut sql = String::from(
+            "SELECT id, unified_cache_id, score_json, created_at FROM ai_scores WHERE 1 = 1",
+        );
+        let mut values: Vec<rusqlite::types::Value> = Vec::new();
+        if let Some(query_hash) = query.query_hash {
+            sql.push_str(" AND query_hash = ?");
+            values.push(query_hash.into());
+        }
+        if let Some(model) = query.model {
+            sql.push_str(" AND model = ?");
+            values.push(model.into());
+        }
+        if let Some(prompt_version) = query.prompt_version {
+            sql.push_str(" AND prompt_version = ?");
+            values.push(prompt_version.into());
+        }
+        if let Some(start) = query.created_at_start {
+            sql.push_str(" AND created_at >= ?");
+            values.push(start.into());
+        }
+        if let Some(end) = query.created_at_end {
+            sql.push_str(" AND created_at <= ?");
+            values.push(end.into());
+        }
+        sql.push_str(" ORDER BY created_at DESC, id DESC LIMIT ?");
+        values.push(limit.into());
+
         let connection = self.lock()?;
-        let mut statement = connection.prepare(
-            "SELECT id, unified_cache_id, score_json, created_at
-             FROM ai_scores
-             ORDER BY created_at DESC, id DESC
-             LIMIT ?1",
-        )?;
-        let rows = statement.query_map(params![limit], ai_score_from_row)?;
+        let mut statement = connection.prepare(&sql)?;
+        let rows = statement.query_map(params_from_iter(values), ai_score_from_row)?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
             .map_err(Error::from)
     }
@@ -536,6 +621,18 @@ impl UpstreamCache {
             })
         })?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Error::from)
+    }
+
+    pub fn unified_body(&self, id: i64) -> Result<Option<Vec<u8>>> {
+        let connection = self.lock()?;
+        connection
+            .query_row(
+                "SELECT body FROM unified_cache WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()
             .map_err(Error::from)
     }
 
@@ -716,7 +813,13 @@ impl UpstreamCache {
             params![now],
             |row| row.get(0),
         )?;
+        let fresh_unified_entries = connection.query_row(
+            "SELECT count(*) FROM unified_cache WHERE expires_at > ?1",
+            params![now],
+            |row| row.get(0),
+        )?;
         let expired_upstream_entries = upstream_entries - fresh_upstream_entries;
+        let expired_unified_entries = unified_entries - fresh_unified_entries;
         Ok(CacheStats {
             upstream_entries,
             unified_entries,
@@ -724,7 +827,121 @@ impl UpstreamCache {
             fetch_run_entries,
             fresh_upstream_entries,
             expired_upstream_entries,
+            fresh_unified_entries,
+            expired_unified_entries,
         })
+    }
+
+    pub fn prune(&self, options: CachePruneOptions) -> Result<CachePruneReport> {
+        let now = now_unix();
+        let keep_fetch_runs = i64::try_from(options.keep_fetch_runs).unwrap_or(i64::MAX);
+        let keep_ai_scores = i64::try_from(options.keep_ai_scores).unwrap_or(i64::MAX);
+        let mut connection = self.lock()?;
+        let expired_upstream_entries = connection.query_row(
+            "SELECT count(*) FROM upstream_cache WHERE expires_at <= ?1",
+            params![now],
+            |row| row.get(0),
+        )?;
+        let expired_unified_entries = connection.query_row(
+            "SELECT count(*) FROM unified_cache WHERE expires_at <= ?1",
+            params![now],
+            |row| row.get(0),
+        )?;
+        let old_fetch_run_entries = connection.query_row(
+            "SELECT count(*) FROM fetch_runs WHERE id NOT IN (
+                SELECT id FROM fetch_runs ORDER BY started_at DESC, id DESC LIMIT ?1
+             )",
+            params![keep_fetch_runs],
+            |row| row.get(0),
+        )?;
+        let old_ai_score_entries = connection.query_row(
+            "SELECT count(*) FROM ai_scores WHERE id NOT IN (
+                SELECT id FROM ai_scores ORDER BY created_at DESC, id DESC LIMIT ?1
+             )",
+            params![keep_ai_scores],
+            |row| row.get(0),
+        )?;
+
+        let report = CachePruneReport {
+            dry_run: options.dry_run,
+            expired_upstream_entries,
+            expired_unified_entries,
+            old_fetch_run_entries,
+            old_ai_score_entries,
+            total_entries: expired_upstream_entries
+                + expired_unified_entries
+                + old_fetch_run_entries
+                + old_ai_score_entries,
+        };
+
+        if !options.dry_run {
+            let transaction = connection.transaction()?;
+            transaction.execute(
+                "DELETE FROM upstream_cache WHERE expires_at <= ?1",
+                params![now],
+            )?;
+            transaction.execute(
+                "DELETE FROM unified_cache WHERE expires_at <= ?1",
+                params![now],
+            )?;
+            transaction.execute(
+                "DELETE FROM fetch_runs WHERE id NOT IN (
+                    SELECT id FROM fetch_runs ORDER BY started_at DESC, id DESC LIMIT ?1
+                 )",
+                params![keep_fetch_runs],
+            )?;
+            transaction.execute(
+                "DELETE FROM ai_scores WHERE id NOT IN (
+                    SELECT id FROM ai_scores ORDER BY created_at DESC, id DESC LIMIT ?1
+                 )",
+                params![keep_ai_scores],
+            )?;
+            transaction.commit()?;
+        }
+
+        Ok(report)
+    }
+
+    pub fn vacuum(&self) -> Result<()> {
+        let connection = self.lock()?;
+        connection.execute_batch("VACUUM")?;
+        Ok(())
+    }
+
+    pub fn export(&self, options: CacheExportOptions) -> Result<Vec<u8>> {
+        let mut records = Vec::new();
+        if options.upstream {
+            for record in self.list(options.limit)? {
+                records.push(json!({ "section": "upstream", "record": record }));
+            }
+        }
+        if options.unified {
+            for record in self.list_unified(options.limit)? {
+                records.push(json!({ "section": "unified", "record": record }));
+            }
+        }
+        if options.fetch_runs {
+            for record in self.list_fetch_runs(options.limit)? {
+                records.push(json!({ "section": "fetch_runs", "record": record }));
+            }
+        }
+        if options.ai_scores {
+            for record in self.list_recent_ai_scores(options.limit)? {
+                records.push(json!({ "section": "ai_scores", "record": record }));
+            }
+        }
+
+        match options.format {
+            CacheExportFormat::Jsonl => {
+                let mut output = Vec::new();
+                for record in records {
+                    serde_json::to_writer(&mut output, &record)?;
+                    output.push(b'\n');
+                }
+                Ok(output)
+            }
+            CacheExportFormat::PrettyJson => Ok(serde_json::to_vec_pretty(&records)?),
+        }
     }
 
     fn migrate(&self) -> Result<()> {
@@ -790,15 +1007,21 @@ impl UpstreamCache {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 unified_cache_id INTEGER NOT NULL,
                 score_json TEXT NOT NULL,
+                query_hash TEXT,
+                model TEXT,
+                prompt_version TEXT,
                 created_at INTEGER NOT NULL,
                 FOREIGN KEY(unified_cache_id) REFERENCES unified_cache(id) ON DELETE CASCADE
             );
 
             CREATE INDEX IF NOT EXISTS ai_scores_unified_cache_id_idx
                 ON ai_scores(unified_cache_id);
+            CREATE INDEX IF NOT EXISTS ai_scores_query_idx
+                ON ai_scores(query_hash, model, prompt_version, created_at);
             "#,
         )?;
         ensure_fetch_run_columns(&connection)?;
+        ensure_ai_score_columns(&connection)?;
         Ok(())
     }
 
@@ -957,6 +1180,74 @@ fn ensure_fetch_run_columns(connection: &Connection) -> Result<()> {
         [],
     )?;
     Ok(())
+}
+
+fn ensure_ai_score_columns(connection: &Connection) -> Result<()> {
+    let mut statement = connection.prepare("PRAGMA table_info(ai_scores)")?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
+    let columns = rows.collect::<std::result::Result<std::collections::HashSet<_>, _>>()?;
+    let migrations = [
+        (
+            "query_hash",
+            "ALTER TABLE ai_scores ADD COLUMN query_hash TEXT",
+        ),
+        ("model", "ALTER TABLE ai_scores ADD COLUMN model TEXT"),
+        (
+            "prompt_version",
+            "ALTER TABLE ai_scores ADD COLUMN prompt_version TEXT",
+        ),
+    ];
+    for (column, sql) in migrations {
+        if !columns.contains(column) {
+            connection.execute(sql, [])?;
+        }
+    }
+    connection.execute(
+        "UPDATE ai_scores
+         SET query_hash = json_extract(score_json, '$.candidate_summary_hash'),
+             model = json_extract(score_json, '$.model'),
+             prompt_version = json_extract(score_json, '$.prompt_version')
+         WHERE query_hash IS NULL OR model IS NULL OR prompt_version IS NULL",
+        [],
+    )?;
+    Ok(())
+}
+
+fn sanitize_ai_score_json(score_json: &serde_json::Value) -> Result<serde_json::Value> {
+    const MAX_AI_SCORE_JSON_BYTES: usize = 64 * 1024;
+    let mut sanitized = score_json.clone();
+    redact_secret_fields(&mut sanitized);
+    let size = serde_json::to_vec(&sanitized)?.len();
+    if size > MAX_AI_SCORE_JSON_BYTES {
+        return Err(Error::Storage(format!(
+            "AI score payload exceeds {MAX_AI_SCORE_JSON_BYTES} bytes after redaction"
+        )));
+    }
+    Ok(sanitized)
+}
+
+fn redact_secret_fields(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, child) in map.iter_mut() {
+                let normalized = key.to_ascii_lowercase().replace(['-', '_'], "");
+                if matches!(
+                    normalized.as_str(),
+                    "apikey" | "authorization" | "accesstoken" | "bearertoken" | "token"
+                ) {
+                    *child = json!("[REDACTED]");
+                } else {
+                    redact_secret_fields(child);
+                }
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                redact_secret_fields(item);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn provider_health_from_runs(source: String, runs: &[FetchRunRecord]) -> ProviderHealthRecord {
@@ -1238,7 +1529,9 @@ mod tests {
         let score = json!({
             "model": "gpt-4o-mini",
             "base_url": "https://api.openai.com/v1",
+            "prompt_version": "ai-score-prompt-v1",
             "candidate_summary_hash": "abc123",
+            "request_payload": { "api_key": "secret-key", "messages": ["safe"] },
             "best_index": 0,
             "scores": [{"index": 0, "source": "qq", "heuristic_score": 90.0, "ai_score": 95.0, "reason": "best timing"}],
             "reason": "best timing",
@@ -1251,6 +1544,25 @@ mod tests {
         assert_eq!(scores.len(), 1);
         assert_eq!(scores[0].unified_cache_id, unified_id);
         assert_eq!(scores[0].score_json["candidate_summary_hash"], "abc123");
+        assert_eq!(
+            scores[0].score_json["request_payload"]["api_key"],
+            "[REDACTED]"
+        );
+        assert!(!serde_json::to_string(&scores[0].score_json)
+            .unwrap()
+            .contains("secret-key"));
+
+        let queried = cache
+            .query_ai_scores(AiScoreQuery {
+                query_hash: Some("abc123".into()),
+                model: Some("gpt-4o-mini".into()),
+                prompt_version: Some("ai-score-prompt-v1".into()),
+                created_at_start: Some(0),
+                created_at_end: Some(now_unix() + 60),
+                limit: 10,
+            })
+            .unwrap();
+        assert_eq!(queried.len(), 1);
         assert_eq!(cache.stats().unwrap().ai_score_entries, 1);
 
         drop(cache);

@@ -76,6 +76,7 @@ fn app(state: AppState) -> Router {
         .route("/api/search", post(search))
         .route("/api/fetch", post(fetch))
         .route("/api/fetch-result", post(fetch_result))
+        .route("/api/ai/replay", post(ai_replay))
         .route("/api/cache", get(cache_list))
         .route("/api/cache/:id", get(cache_detail).delete(cache_delete))
         .route("/api/cache/:id/revalidate", post(cache_revalidate))
@@ -416,6 +417,29 @@ async fn fetch_result(
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct AiReplayRequest {
+    unified_cache_id: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ai_scoring: Option<AiScoringConfig>,
+}
+
+async fn ai_replay(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<AiReplayRequest>,
+) -> ApiResult<Json<serde_json::Value>> {
+    authorize(&state, &headers)?;
+    let score = state
+        .context
+        .replay_ai_score_for_unified_cache(request.unified_cache_id, request.ai_scoring.as_ref())
+        .await?;
+    Ok(Json(json!({
+        "unified_cache_id": request.unified_cache_id,
+        "ai_score": score
+    })))
+}
+
 async fn cache_list(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -534,15 +558,32 @@ async fn fetch_runs(
     })))
 }
 
+#[derive(Debug, Deserialize)]
+struct StatsQuery {
+    query_hash: Option<String>,
+    model: Option<String>,
+    prompt_version: Option<String>,
+    created_at_start: Option<i64>,
+    created_at_end: Option<i64>,
+}
+
 async fn stats(
     State(state): State<AppState>,
     headers: HeaderMap,
+    Query(query): Query<StatsQuery>,
 ) -> ApiResult<Json<serde_json::Value>> {
     authorize(&state, &headers)?;
     let cache = require_cache(&state)?;
     Ok(Json(json!({
         "cache": cache.stats()?,
-        "ai_scores": cache.list_recent_ai_scores(20)?,
+        "ai_scores": cache.query_ai_scores(AiScoreQuery {
+            query_hash: query.query_hash,
+            model: query.model,
+            prompt_version: query.prompt_version,
+            created_at_start: query.created_at_start,
+            created_at_end: query.created_at_end,
+            limit: 20,
+        })?,
         "fetch_runs": cache.list_fetch_runs(20)?,
         "fetch_run_status_counts": cache.fetch_run_status_counts()?,
         "provider_health": enrich_provider_health(cache.provider_health(20)?)

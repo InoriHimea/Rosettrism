@@ -1186,3 +1186,114 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.lyric-ambient {
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  position: absolute;
+  z-index: 0;
+}
+
+.lyric-ambient-glow,
+.lyric-particle {
+  position: absolute;
+}
+
+.lyric-ambient-glow {
+  border-radius: 999px;
+  filter: blur(22px);
+  opacity: 0.48;
+}
+
+.lyric-ambient-glow-a {
+  background: rgba(69, 243, 255, 0.34);
+  height: 150px;
+  left: 8%;
+  top: 12%;
+  width: 150px;
+}
+
+.lyric-ambient-glow-b {
+  background: rgba(244, 114, 182, 0.24);
+  bottom: 8%;
+  height: 190px;
+  right: 10%;
+  width: 190px;
+}
+
+.lyric-particle {
+  animation: lyric-particle-drift 7s ease-in-out infinite;
+  background: rgba(255, 255, 255, 0.72);
+  border-radius: 999px;
+  box-shadow: 0 0 18px rgba(69, 243, 255, 0.34);
+  height: 5px;
+  width: 5px;
+}
+
+.lyric-particle-1 { left: 18%; top: 26%; }
+.lyric-particle-2 { animation-delay: 1.4s; left: 74%; top: 22%; }
+.lyric-particle-3 { animation-delay: 2.8s; left: 62%; top: 68%; }
+.lyric-particle-4 { animation-delay: 4.2s; left: 30%; top: 76%; }
+
+@keyframes lyric-particle-drift {
+  0%, 100% { opacity: 0.22; transform: translate3d(0, 0, 0) scale(0.86); }
+  50% { opacity: 0.78; transform: translate3d(16px, -18px, 0) scale(1.28); }
+}
+
+.lyric-stage > .lyric-lines,
+.lyric-stage > .lyric-karaoke-lines,
+.lyric-current-strip {
+  position: relative;
+  z-index: 2;
+}
+
+.lyric-motion-snappy .lyric-line {
+  transition-duration: 150ms;
+}
+
+.lyric-motion-snappy .lyric-line-active {
+  transform: translateX(10px) translateY(-1px) scale(1.025);
+}
+
+.lyric-motion-calm .lyric-line {
+  transition-duration: 480ms;
+}
+
+.lyric-motion-calm .lyric-line-active {
+  transform: translateX(3px) translateY(0) scale(1.015);
+}
+
+.lyric-low-distraction .lyric-ambient,
+.lyric-ambient-off .lyric-ambient {
+  display: none;
+}
+
+.lyric-low-distraction.lyric-stage-qq {
+  box-shadow: inset 0 20px 60px rgba(255, 255, 255, 0.22), 0 14px 34px rgba(117, 77, 17, 0.08);
+}
+
+.lyric-low-distraction .lyric-line-past,
+.lyric-low-distraction .lyric-line-future {
+  filter: none;
+  opacity: 0.72;
+}
+
+.lyric-low-distraction .lyric-current-strip {
+  opacity: 0.72;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lyric-particle,
+  .lyric-dots-flashing .lyric-gap-dot,
+  .lyric-dots-exiting .lyric-gap-dot:not(.lyric-gap-dot-hidden) {
+    animation: none !important;
+  }
+
+  .lyric-stage *,
+  .lyric-stage *::before,
+  .lyric-stage *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

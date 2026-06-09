@@ -10,7 +10,7 @@ use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::cache::UpstreamCache;
+use crate::cache::{AiScoreQuery, UpstreamCache};
 use crate::provider::{builtin_provider_registry, SearchResult, Source};
 use crate::service::{
     source_from_cli_name, AggregateFetchRequest, AiScoringConfig, LyricNeed, MergeMode,

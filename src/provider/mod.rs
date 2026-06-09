@@ -17,6 +17,8 @@ pub mod netease;
 pub mod offline_db;
 pub mod petit_lyrics;
 pub mod qq;
+pub mod runtime;
+pub use runtime::{ProviderRequestPolicy, ProviderRuntime};
 pub mod spotify_lyrics;
 pub mod utaten;
 pub mod web_sources;
@@ -388,6 +390,17 @@ pub struct ProviderConfig {
     pub rate_limit: ProviderRateLimit,
 }
 
+pub fn apply_client_timeout(
+    builder: reqwest::ClientBuilder,
+    timeout_ms: u64,
+) -> reqwest::ClientBuilder {
+    if timeout_ms == 0 {
+        builder
+    } else {
+        builder.timeout(std::time::Duration::from_millis(timeout_ms))
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderManifest {
     pub manifest_version: u8,
@@ -468,8 +481,13 @@ pub fn provider_for_with_options(
         )));
     }
 
+    let provider_config = source.provider_config();
+
     match source {
-        Source::AppleMusic => Ok(Box::new(apple_music::AppleMusicProvider::new(cookie)?)),
+        Source::AppleMusic => Ok(Box::new(apple_music::AppleMusicProvider::new(
+            cookie,
+            provider_config.timeout_ms,
+        )?)),
         Source::Animesongz
         | Source::Awa
         | Source::Azlyrics
@@ -484,21 +502,39 @@ pub fn provider_for_with_options(
         | Source::Songtexte
         | Source::TuneCore
         | Source::UtaNet
-        | Source::Utamap => web_sources::provider_for(source, cookie),
+        | Source::Utamap => web_sources::provider_for(source, cookie, provider_config.timeout_ms),
         Source::BrowserMxm => Ok(Box::new(experimental::UnsupportedExperimentalProvider::new(
             source,
             "BrowserMxm",
             "browser network capture is listed for research only and is not automated in the core CLI",
         ))),
         Source::Joysound => Ok(Box::new(joysound::JoysoundProvider::new(cookie)?)),
-        Source::Kugou => Ok(Box::new(kugou::KugouProvider::new(cookie)?)),
-        Source::Lrclib => Ok(Box::new(lrclib::LrclibProvider::new(cookie)?)),
-        Source::Migu => Ok(Box::new(migu::MiguProvider::new(cookie)?)),
-        Source::Musixmatch => Ok(Box::new(musixmatch::MusixmatchProvider::new(cookie)?)),
-        Source::Netease => Ok(Box::new(netease::NeteaseProvider::new(cookie)?)),
+        Source::Kugou => Ok(Box::new(kugou::KugouProvider::new(
+            cookie,
+            provider_config.timeout_ms,
+        )?)),
+        Source::Lrclib => Ok(Box::new(lrclib::LrclibProvider::new(
+            cookie,
+            provider_config.timeout_ms,
+        )?)),
+        Source::Migu => Ok(Box::new(migu::MiguProvider::new(
+            cookie,
+            provider_config.timeout_ms,
+        )?)),
+        Source::Musixmatch => Ok(Box::new(musixmatch::MusixmatchProvider::new(
+            cookie,
+            provider_config.timeout_ms,
+        )?)),
+        Source::Netease => Ok(Box::new(netease::NeteaseProvider::new(
+            cookie,
+            provider_config.timeout_ms,
+        )?)),
         Source::OfflineDb => Ok(Box::new(offline_db::OfflineDbProvider::new(cookie)?)),
         Source::PetitLyrics => Ok(Box::new(petit_lyrics::PetitLyricsProvider::new(cookie)?)),
-        Source::Qq => Ok(Box::new(qq::QqProvider::new(cookie)?)),
+        Source::Qq => Ok(Box::new(qq::QqProvider::new(
+            cookie,
+            provider_config.timeout_ms,
+        )?)),
         Source::SpotifyLyrics => Ok(Box::new(spotify_lyrics::SpotifyLyricsProvider::new(
             cookie,
         )?)),

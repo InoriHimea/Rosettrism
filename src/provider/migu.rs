@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use async_trait::async_trait;
 use regex::Regex;
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, COOKIE, REFERER, USER_AGENT};
@@ -20,11 +18,12 @@ pub struct MiguProvider {
 }
 
 impl MiguProvider {
-    pub fn new(cookie: Option<String>) -> Result<Self> {
+    pub fn new(cookie: Option<String>, timeout_ms: u64) -> Result<Self> {
         Self::with_endpoints(
             cookie,
             "https://m.music.migu.cn/migu/remoting/scr_search_tag",
             "https://music.migu.cn/v3/api/music/audioPlayer/getLyric",
+            timeout_ms,
         )
     }
 
@@ -32,6 +31,7 @@ impl MiguProvider {
         cookie: Option<String>,
         search_url: impl Into<String>,
         lyric_url: impl Into<String>,
+        timeout_ms: u64,
     ) -> Result<Self> {
         let mut headers = HeaderMap::new();
         headers.insert(USER_AGENT, HeaderValue::from_static(USER_AGENT_VALUE));
@@ -53,10 +53,11 @@ impl MiguProvider {
             }
         }
 
-        let client = reqwest::Client::builder()
-            .default_headers(headers)
-            .timeout(Duration::from_secs(12))
-            .build()?;
+        let client = crate::provider::apply_client_timeout(
+            reqwest::Client::builder().default_headers(headers),
+            timeout_ms,
+        )
+        .build()?;
 
         Ok(Self {
             client,
@@ -254,6 +255,7 @@ mod tests {
             None,
             format!("{}/migu/remoting/scr_search_tag", server.uri()),
             format!("{}/v3/api/music/audioPlayer/getLyric", server.uri()),
+            12_000,
         )
         .unwrap()
     }

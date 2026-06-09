@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use async_trait::async_trait;
 use base64::Engine;
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, COOKIE, REFERER, USER_AGENT};
@@ -80,7 +78,7 @@ impl KugouLyricSearchEndpoint {
 }
 
 impl KugouProvider {
-    pub fn new(cookie: Option<String>) -> Result<Self> {
+    pub fn new(cookie: Option<String>, timeout_ms: u64) -> Result<Self> {
         Self::with_endpoint_sets(
             cookie,
             vec![
@@ -126,6 +124,7 @@ impl KugouProvider {
                 "http://lyrics2.kugou.com/download".to_string(),
                 "https://lyrics2.kugou.com/download".to_string(),
             ],
+            timeout_ms,
         )
     }
 
@@ -135,6 +134,7 @@ impl KugouProvider {
         song_search_url: impl Into<String>,
         lyric_search_url: impl Into<String>,
         download_url: impl Into<String>,
+        timeout_ms: u64,
     ) -> Result<Self> {
         Self::with_endpoint_sets(
             cookie,
@@ -148,6 +148,7 @@ impl KugouProvider {
                 "yes",
             )],
             vec![download_url.into()],
+            timeout_ms,
         )
     }
 
@@ -156,6 +157,7 @@ impl KugouProvider {
         song_search_endpoints: Vec<KugouSongSearchEndpoint>,
         lyric_search_endpoints: Vec<KugouLyricSearchEndpoint>,
         download_urls: Vec<String>,
+        timeout_ms: u64,
     ) -> Result<Self> {
         let mut headers = HeaderMap::new();
         headers.insert(USER_AGENT, HeaderValue::from_static(USER_AGENT_VALUE));
@@ -174,10 +176,11 @@ impl KugouProvider {
             }
         }
 
-        let client = reqwest::Client::builder()
-            .default_headers(headers)
-            .timeout(Duration::from_secs(12))
-            .build()?;
+        let client = crate::provider::apply_client_timeout(
+            reqwest::Client::builder().default_headers(headers),
+            timeout_ms,
+        )
+        .build()?;
 
         Ok(Self {
             client,
@@ -1216,6 +1219,7 @@ mod tests {
             format!("{}/song", server.uri()),
             format!("{}/lyric", server.uri()),
             format!("{}/download", server.uri()),
+            12_000,
         )
         .unwrap();
 
@@ -1286,6 +1290,7 @@ mod tests {
                 "yes",
             )],
             vec![format!("{}/download", server.uri())],
+            12_000,
         )
         .unwrap();
 
@@ -1353,6 +1358,7 @@ mod tests {
                 ),
             ],
             vec![format!("{}/download", server.uri())],
+            12_000,
         )
         .unwrap();
 
@@ -1399,6 +1405,7 @@ mod tests {
                 format!("{}/download-bad", server.uri()),
                 format!("{}/download-ok", server.uri()),
             ],
+            12_000,
         )
         .unwrap();
 
@@ -1452,6 +1459,7 @@ mod tests {
             Vec::new(),
             Vec::new(),
             vec![format!("{}/download", server.uri())],
+            12_000,
         )
         .unwrap();
 

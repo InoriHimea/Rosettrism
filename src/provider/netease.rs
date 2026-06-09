@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, COOKIE, REFERER, USER_AGENT};
 use serde::de::DeserializeOwned;
@@ -19,7 +17,7 @@ pub struct NeteaseProvider {
 }
 
 impl NeteaseProvider {
-    pub fn new(cookie: Option<String>) -> Result<Self> {
+    pub fn new(cookie: Option<String>, timeout_ms: u64) -> Result<Self> {
         Self::with_urls(
             cookie,
             vec![
@@ -32,6 +30,7 @@ impl NeteaseProvider {
                 "http://music.163.com/api/song/lyric/v1".to_string(),
                 "http://music.163.com/api/song/lyric".to_string(),
             ],
+            timeout_ms,
         )
     }
 
@@ -40,14 +39,21 @@ impl NeteaseProvider {
         cookie: Option<String>,
         search_url: impl Into<String>,
         lyric_url: impl Into<String>,
+        timeout_ms: u64,
     ) -> Result<Self> {
-        Self::with_urls(cookie, vec![search_url.into()], vec![lyric_url.into()])
+        Self::with_urls(
+            cookie,
+            vec![search_url.into()],
+            vec![lyric_url.into()],
+            timeout_ms,
+        )
     }
 
     fn with_urls(
         cookie: Option<String>,
         search_urls: Vec<String>,
         lyric_urls: Vec<String>,
+        timeout_ms: u64,
     ) -> Result<Self> {
         let mut headers = HeaderMap::new();
         headers.insert(USER_AGENT, HeaderValue::from_static(USER_AGENT_VALUE));
@@ -66,10 +72,11 @@ impl NeteaseProvider {
             }
         }
 
-        let client = reqwest::Client::builder()
-            .default_headers(headers)
-            .timeout(Duration::from_secs(12))
-            .build()?;
+        let client = crate::provider::apply_client_timeout(
+            reqwest::Client::builder().default_headers(headers),
+            timeout_ms,
+        )
+        .build()?;
 
         Ok(Self {
             client,
@@ -455,6 +462,7 @@ mod tests {
             Some("nt=1".into()),
             format!("{}/search", server.uri()),
             format!("{}/lyric", server.uri()),
+            12_000,
         )
         .unwrap();
 
@@ -490,6 +498,7 @@ mod tests {
             None,
             format!("{}/search", server.uri()),
             format!("{}/lyric", server.uri()),
+            12_000,
         )
         .unwrap();
         let result = SearchResult {

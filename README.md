@@ -174,8 +174,8 @@ Dashboard token behavior:
 Available endpoints:
 
 - `GET /api/health`
-- `GET /api/sources`
-- `GET /api/providers/health?limit=20`
+- `GET /api/sources` — returns the builtin provider manifest registry, including each source's timeout/retry/rate-limit config. Those manifest values are enforced by the provider runtime before any upstream request is made.
+- `GET /api/providers/health?limit=20` — summarizes recent `fetch_runs` per provider. It reflects runtime-enforced provider behavior and is not a live probe.
 - `POST /api/fetch`
 - `GET /api/cache`
 - `GET /api/cache/:id`
@@ -203,7 +203,7 @@ The cache stores upstream raw operations, derived unified responses, fetch-run r
 
 Fetch-run observability covers aggregate fetches, multi-source searches, selected result fetches, and aggregate member fetches. The dashboard Overview/Cache views and `/api/runs` expose statuses such as `provider_warning`, `ai_skipped`, `no_lyrics_found`, `cache_hit`, and `cache_store`. Each run stores `started_at`, optional `finished_at`, `duration_ms`, `provider_count`, `candidate_count`, and `cache_event`; `created_at` is retained as the insert timestamp for older clients.
 
-Provider health is built from recent `fetch_runs` rows with a concrete `source`, not from live probes. `GET /api/providers/health?limit=N` and `/api/stats.provider_health` summarize the latest N runs per provider: success rate, average duration, warning/error ratios, and the last warning or error message. Status definitions are: `healthy` when recent success is at least 80% and there are no errors or elevated warnings, `degraded` when warnings/errors appear or success drops below 80%, and `critical` when errors dominate or success falls below 50%. If a provider is degraded, inspect the last error, compare cache hit/store events against upstream calls, retry with `--force` only after checking rate limits, and verify provider cookies or regional availability.
+Provider health is built from recent `fetch_runs` rows with a concrete `source`, not from live probes. `GET /api/providers/health?limit=N` and `/api/stats.provider_health` summarize the latest N runs per provider: success rate, average duration, warning/error ratios, and the last warning or error message. The provider runtime now enforces each source's manifest timeout, retry, backoff, and rate-limit settings before upstream calls. Status definitions are: `healthy` when recent success is at least 80% and there are no errors or elevated warnings, `degraded` when warnings/errors appear or success drops below 80%, and `critical` when errors dominate or success falls below 50%. If a provider is degraded, inspect the last error, compare cache hit/store events against upstream calls, retry with `--force` only after checking rate limits, and verify provider cookies or regional availability.
 
 Cache maintenance commands are grouped under `cache`:
 

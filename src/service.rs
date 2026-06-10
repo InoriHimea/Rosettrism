@@ -203,6 +203,12 @@ pub struct ServiceContext {
     pub offline_db: Option<PathBuf>,
     pub default_ttl: Duration,
     pub force_refresh: bool,
+    #[cfg(test)]
+    pub(crate) provider_factory: Option<
+        std::sync::Arc<
+            dyn Fn(Source, Duration, bool) -> Result<Box<dyn LyricProvider>> + Send + Sync,
+        >,
+    >,
 }
 
 impl Default for ServiceContext {
@@ -214,6 +220,8 @@ impl Default for ServiceContext {
             offline_db: None,
             default_ttl: default_ttl(),
             force_refresh: false,
+            #[cfg(test)]
+            provider_factory: None,
         }
     }
 }
@@ -453,6 +461,7 @@ impl ServiceContext {
         top: usize,
         ttl: Option<Duration>,
         force: bool,
+        enrich: bool,
     ) -> Result<SpecificFetchResult> {
         let ttl = ttl.unwrap_or(self.default_ttl);
         let provider = self
@@ -478,8 +487,22 @@ impl ServiceContext {
                     })
                 }
                 SpecificFetchFormat::Json => {
-                    self.fetch_enriched_source_result(source, result, fetched, ttl, force)
-                        .await
+                    if enrich {
+                        self.fetch_enriched_source_result(source, result, fetched, ttl, force)
+                            .await
+                    } else {
+                        let input_format = fetched.input_format;
+                        let annotations = fetched.annotations.clone();
+                        let document = decode_fetched(fetched)?;
+                        Ok(SpecificFetchResult::Json {
+                            source,
+                            result,
+                            input_format,
+                            document,
+                            annotations,
+                            unified: None,
+                        })
+                    }
                 }
             };
         }
@@ -567,11 +590,12 @@ impl ServiceContext {
         format: SpecificFetchFormat,
         ttl: Option<Duration>,
         force: bool,
+        enrich: bool,
     ) -> Result<SpecificFetchResult> {
         let query = fetch_run_query_for_result(&result);
         let run_id = self.start_fetch_run(&query, Some(result.source), "fetch_source_result")?;
         let fetch_result = self
-            .fetch_source_result_inner(result, format, ttl, force)
+            .fetch_source_result_inner(result, format, ttl, force, enrich)
             .await;
         self.finish_fetch_run_from_result(run_id, &fetch_result)?;
         fetch_result
@@ -583,6 +607,7 @@ impl ServiceContext {
         format: SpecificFetchFormat,
         ttl: Option<Duration>,
         force: bool,
+        enrich: bool,
     ) -> Result<SpecificFetchResult> {
         let ttl = ttl.unwrap_or(self.default_ttl);
         let source = result.source;
@@ -600,8 +625,22 @@ impl ServiceContext {
                 })
             }
             SpecificFetchFormat::Json => {
-                self.fetch_enriched_source_result(source, result, fetched, ttl, force)
-                    .await
+                if enrich {
+                    self.fetch_enriched_source_result(source, result, fetched, ttl, force)
+                        .await
+                } else {
+                    let input_format = fetched.input_format;
+                    let annotations = fetched.annotations.clone();
+                    let document = decode_fetched(fetched)?;
+                    Ok(SpecificFetchResult::Json {
+                        source,
+                        result,
+                        input_format,
+                        document,
+                        annotations,
+                        unified: None,
+                    })
+                }
             }
         }
     }
@@ -765,6 +804,10 @@ impl ServiceContext {
         ttl: Duration,
         force: bool,
     ) -> Result<Box<dyn LyricProvider>> {
+        #[cfg(test)]
+        if let Some(factory) = &self.provider_factory {
+            return factory(source, ttl, force);
+        }
         let credential =
             credential_for_source(source, self.cookie.as_deref(), self.offline_db.as_ref()).await?;
         let inner = provider_for_with_options(source, credential, self.provider_options)?;
@@ -2278,6 +2321,7 @@ mod tests {
                 2,
                 Some(Duration::from_secs(60)),
                 false,
+                false,
             )
             .await
             .unwrap();
@@ -2324,6 +2368,7 @@ mod tests {
                 second,
                 SpecificFetchFormat::Raw,
                 Some(Duration::from_secs(60)),
+                false,
                 false,
             )
             .await

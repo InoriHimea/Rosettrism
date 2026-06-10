@@ -367,8 +367,11 @@ function ResultDialog({ t, entry, detail, detailData, busy, lyricSettings, scrol
           <button className="button-secondary" type="button" onClick={() => fetchSelectedResult('raw')} disabled={busy || aggregate}>
             {t.fetchRaw}
           </button>
-          <button className="button-primary" type="button" onClick={() => fetchSelectedResult('json')} disabled={busy}>
+          <button className="button-primary" type="button" onClick={() => fetchSelectedResult('json', false)} disabled={busy}>
             {t.fetchJson}
+          </button>
+          <button className="button-primary" type="button" onClick={() => fetchSelectedResult('json', true)} disabled={busy}>
+            {t.fetchEnrichedJson}
           </button>
         </div>
         <dl className="detail-grid">

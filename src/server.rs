@@ -169,7 +169,15 @@ async fn fetch(
         })?;
         let result = state
             .context
-            .fetch_source_specific(source, &request.query, format, top.unwrap_or(1), ttl, force)
+            .fetch_source_specific(
+                source,
+                &request.query,
+                format,
+                top.unwrap_or(1),
+                ttl,
+                force,
+                request.enrich,
+            )
             .await?;
         return match result {
             SpecificFetchResult::Raw { raw, .. } => Ok(response_with_body(
@@ -365,7 +373,7 @@ async fn fetch_result(
     }
     let result = state
         .context
-        .fetch_source_result(request.result, request.format, ttl, force)
+        .fetch_source_result(request.result, request.format, ttl, force, request.enrich)
         .await?;
     match result {
         SpecificFetchResult::Raw {
@@ -726,6 +734,8 @@ struct ApiFetchRequest {
     sources: Option<Vec<String>>,
     #[serde(default)]
     force: Option<bool>,
+    #[serde(default)]
+    enrich: bool,
     #[serde(default)]
     ttl_seconds: Option<u64>,
     #[serde(default)]
@@ -1225,6 +1235,8 @@ struct ApiFetchResultRequest {
     #[serde(default)]
     force: Option<bool>,
     #[serde(default)]
+    enrich: bool,
+    #[serde(default)]
     ttl_seconds: Option<u64>,
     #[serde(default)]
     ai_scoring: Option<AiScoringConfig>,
@@ -1377,14 +1389,19 @@ fn error_details(value: &Error) -> Value {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+    use async_trait::async_trait;
     use axum::body::to_bytes;
     use axum::http::{Method, Request};
     use tower::ServiceExt;
 
     use super::*;
     use crate::cache::CachePut;
+    use crate::decoder::InputFormat;
+    use crate::model::{LyricDocument, LyricLine, LyricMeta};
+    use crate::provider::{FetchedLyric, LyricProvider};
 
     #[test]
     fn api_error_maps_common_codes() {
@@ -1469,6 +1486,55 @@ mod tests {
         assert_eq!(cache_status, StatusCode::OK);
         assert_eq!(detail["entry"]["id"], cache_id);
         assert!(detail["unified_entry"].is_null());
+    }
+
+    #[tokio::test]
+    async fn fetch_result_enrich_false_uses_only_current_provider() {
+        let (app, calls) = test_app_with_tracking_provider();
+        let (status, body) = post_json(
+            app,
+            "/api/fetch-result",
+            json!({
+                "result": result(Source::Qq, "Base Song", "Artist", None, "base-1"),
+                "format": "json",
+                "enrich": false,
+            }),
+            None,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.get("unified").is_none());
+
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.as_slice(), &["qq:fetch:base-1"]);
+    }
+
+    #[tokio::test]
+    async fn fetch_result_enrich_true_keeps_cross_source_enrichment() {
+        let (app, calls) = test_app_with_tracking_provider();
+        let (status, body) = post_json(
+            app,
+            "/api/fetch-result",
+            json!({
+                "result": result(Source::Qq, "Base Song", "Artist", None, "base-1"),
+                "format": "json",
+                "enrich": true,
+            }),
+            None,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(body["unified"].is_object());
+        assert!(body["unified"]["meta"]["source"]
+            .as_str()
+            .is_some_and(|value| value.starts_with("enriched(")));
+
+        let calls = calls.lock().unwrap();
+        assert!(calls.iter().any(|entry| entry != "qq:fetch:base-1"));
+        assert!(calls.iter().any(|entry| entry.starts_with("qq:fetch:")));
+        assert!(calls.iter().any(|entry| entry.contains(":search:")));
     }
 
     #[tokio::test]
@@ -1820,6 +1886,29 @@ mod tests {
         (status, value)
     }
 
+    async fn post_json(
+        app: Router,
+        uri: &str,
+        body: serde_json::Value,
+        header: Option<(&str, &str)>,
+    ) -> (StatusCode, serde_json::Value) {
+        let mut request = Request::builder()
+            .method(Method::POST)
+            .uri(uri)
+            .header(axum::http::header::CONTENT_TYPE, "application/json");
+        if let Some((name, value)) = header {
+            request = request.header(name, value);
+        }
+        let response = app
+            .oneshot(request.body(Body::from(body.to_string())).unwrap())
+            .await
+            .unwrap();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let value = serde_json::from_slice(&body).unwrap();
+        (status, value)
+    }
+
     fn test_app(cache: UpstreamCache, server_token: Option<&str>) -> Router {
         app(AppState {
             context: ServiceContext {
@@ -1828,6 +1917,27 @@ mod tests {
             },
             server_token: server_token.map(str::to_string),
         })
+    }
+
+    fn test_app_with_tracking_provider() -> (Router, Arc<Mutex<Vec<String>>>) {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let provider_calls = calls.clone();
+        let context = ServiceContext {
+            provider_factory: Some(Arc::new(move |source, _ttl, _force| {
+                Ok(Box::new(TrackingProvider {
+                    source,
+                    calls: provider_calls.clone(),
+                }) as Box<dyn LyricProvider>)
+            })),
+            ..ServiceContext::default()
+        };
+        (
+            app(AppState {
+                context,
+                server_token: None,
+            }),
+            calls,
+        )
     }
 
     fn test_cache(name: &str) -> UpstreamCache {
@@ -1857,6 +1967,61 @@ mod tests {
             album: album.map(ToOwned::to_owned),
             duration_ms: Some(240_000),
             extra: json!({ "id": id }),
+        }
+    }
+
+    #[derive(Clone)]
+    struct TrackingProvider {
+        source: Source,
+        calls: Arc<Mutex<Vec<String>>>,
+    }
+
+    #[async_trait]
+    impl LyricProvider for TrackingProvider {
+        async fn search(&self, query: &str) -> Result<Vec<SearchResult>> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("{}:search:{query}", self.source.cli_name()));
+            Ok(vec![SearchResult {
+                source: self.source,
+                id: format!("{}-candidate", self.source.cli_name()),
+                title: format!("{} title", self.source.display_name()),
+                artist: "Artist".into(),
+                album: None,
+                duration_ms: Some(180_000),
+                extra: json!({ "source": self.source.cli_name() }),
+            }])
+        }
+
+        async fn fetch(&self, result: &SearchResult) -> Result<FetchedLyric> {
+            self.calls.lock().unwrap().push(format!(
+                "{}:fetch:{}",
+                self.source.cli_name(),
+                result.id
+            ));
+            Ok(FetchedLyric {
+                input_format: InputFormat::Lrc,
+                raw: b"[00:00.00]Tracked\n".to_vec(),
+                document: Some(LyricDocument {
+                    meta: LyricMeta {
+                        title: Some(format!("{} title", self.source.display_name())),
+                        artist: Some("Artist".into()),
+                        ..Default::default()
+                    },
+                    lines: vec![LyricLine {
+                        start_ms: 0,
+                        duration_ms: None,
+                        text: format!("{} lyric", self.source.cli_name()),
+                        words: Vec::new(),
+                        ruby: Vec::new(),
+                        translation: None,
+                        reading: None,
+                        romanized: None,
+                    }],
+                }),
+                annotations: Vec::new(),
+            })
         }
     }
 }

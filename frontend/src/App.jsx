@@ -199,7 +199,7 @@ function App() {
     setResultDetailBusy(false);
   }
 
-  async function fetchSelectedResult(requestedFormat) {
+  async function fetchSelectedResult(requestedFormat, enrich = false) {
     if (!selectedResult) {
       return;
     }
@@ -209,6 +209,7 @@ function App() {
       const data = await apiClient.postJson('/api/fetch-result', {
         result: selectedResult,
         format: requestedFormat,
+        enrich,
         ttl_seconds: body.ttl_seconds,
         force: Boolean(body.force),
         ...(aiScoringPayload ? { ai_scoring: aiScoringPayload } : {}),

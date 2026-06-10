@@ -174,8 +174,8 @@ Dashboard token 行为：
 可用端点：
 
 - `GET /api/health`
-- `GET /api/sources`
-- `GET /api/providers/health?limit=20`
+- `GET /api/sources` — 返回内置 provider manifest 注册表，其中包含每个 source 的 timeout/retry/rate-limit 配置。这些 manifest 值会在 provider runtime 中被强制执行，然后才会发起任何上游请求。
+- `GET /api/providers/health?limit=20` — 汇总近期 `fetch_runs` 中的 provider 表现。它反映的是 runtime 强制执行后的行为，不是实时探测。
 - `POST /api/fetch`
 - `GET /api/cache`
 - `GET /api/cache/:id`
@@ -203,7 +203,7 @@ Dashboard token 行为：
 
 fetch-run 可观测性覆盖聚合 fetch、多来源 search、选中结果 fetch 与聚合成员 fetch。Dashboard Overview/Cache 页面与 `/api/runs` 会展示 `provider_warning`、`ai_skipped`、`no_lyrics_found`、`cache_hit`、`cache_store` 等状态。每条 run 会记录 `started_at`、可选 `finished_at`、`duration_ms`、`provider_count`、`candidate_count` 与 `cache_event`；`created_at` 保留为插入时间，方便旧客户端兼容。
 
-Provider health 来自带有具体 `source` 的近期 `fetch_runs`，不是实时探测。`GET /api/providers/health?limit=N` 与 `/api/stats.provider_health` 会汇总每个 provider 最近 N 次 run：成功率、平均耗时、warning/error 比例以及最后一条 warning 或 error。状态定义：近期成功率至少 80%、没有错误且 warning 未升高时为 `healthy`；出现 warning/error 或成功率低于 80% 时为 `degraded`；错误占比过高或成功率低于 50% 时为 `critical`。排查 degraded provider 时，请先查看最后错误、比较 cache hit/store 与上游请求，确认 rate limit 后再用 `--force` 重试，并检查 provider cookie 或地区可用性。
+Provider health 来自带有具体 `source` 的近期 `fetch_runs`，不是实时探测。`GET /api/providers/health?limit=N` 与 `/api/stats.provider_health` 会汇总每个 provider 最近 N 次 run：成功率、平均耗时、warning/error 比例以及最后一条 warning 或 error。provider runtime 现在会在上游请求前强制执行每个 source 的 manifest timeout、retry、backoff 和 rate-limit 配置。状态定义：近期成功率至少 80%、没有错误且 warning 未升高时为 `healthy`；出现 warning/error 或成功率低于 80% 时为 `degraded`；错误占比过高或成功率低于 50% 时为 `critical`。排查 degraded provider 时，请先查看最后错误、比较 cache hit/store 与上游请求，确认 rate limit 后再用 `--force` 重试，并检查 provider cookie 或地区可用性。
 
 缓存维护命令统一放在 `cache` 子命令组下：
 

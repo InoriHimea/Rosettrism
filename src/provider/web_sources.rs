@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use async_trait::async_trait;
 use encoding_rs::SHIFT_JIS;
 use regex::Regex;
@@ -43,14 +41,19 @@ const COMMON_ARTIST_SELECTORS: &[&str] = &[
     "[itemprop='byArtist']",
 ];
 
-pub fn provider_for(source: Source, cookie: Option<String>) -> Result<Box<dyn LyricProvider>> {
+pub fn provider_for(
+    source: Source,
+    cookie: Option<String>,
+    timeout_ms: u64,
+) -> Result<Box<dyn LyricProvider>> {
     if source == Source::LineMusic {
-        return Ok(Box::new(LineMusicProvider::new(cookie)?));
+        return Ok(Box::new(LineMusicProvider::new(cookie, timeout_ms)?));
     }
 
     Ok(Box::new(PublicWebProvider::new(
         cookie,
         config_for(source)?,
+        timeout_ms,
     )?))
 }
 
@@ -101,8 +104,8 @@ struct PublicWebProvider {
 }
 
 impl PublicWebProvider {
-    fn new(cookie: Option<String>, config: WebSourceConfig) -> Result<Self> {
-        let client = web_client(cookie)?;
+    fn new(cookie: Option<String>, config: WebSourceConfig, timeout_ms: u64) -> Result<Self> {
+        let client = web_client(cookie, timeout_ms)?;
         Ok(Self { client, config })
     }
 
@@ -197,13 +200,17 @@ struct LineMusicProvider {
 }
 
 impl LineMusicProvider {
-    pub fn new(cookie: Option<String>) -> Result<Self> {
-        Self::with_base_url(cookie, "https://music.line.me")
+    pub fn new(cookie: Option<String>, timeout_ms: u64) -> Result<Self> {
+        Self::with_base_url(cookie, "https://music.line.me", timeout_ms)
     }
 
-    fn with_base_url(cookie: Option<String>, base_url: impl Into<String>) -> Result<Self> {
+    fn with_base_url(
+        cookie: Option<String>,
+        base_url: impl Into<String>,
+        timeout_ms: u64,
+    ) -> Result<Self> {
         Ok(Self {
-            client: web_client(cookie)?,
+            client: web_client(cookie, timeout_ms)?,
             base_url: trim_trailing_slash(base_url.into()),
         })
     }
@@ -764,7 +771,7 @@ fn json_find_string(value: &Value, keys: &[&str]) -> Option<String> {
     }
 }
 
-fn web_client(cookie: Option<String>) -> Result<reqwest::Client> {
+fn web_client(cookie: Option<String>, timeout_ms: u64) -> Result<reqwest::Client> {
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, HeaderValue::from_static(USER_AGENT_VALUE));
     headers.insert(
@@ -781,11 +788,13 @@ fn web_client(cookie: Option<String>) -> Result<reqwest::Client> {
         }
     }
 
-    Ok(reqwest::Client::builder()
-        .default_headers(headers)
-        .cookie_store(true)
-        .timeout(Duration::from_secs(12))
-        .build()?)
+    Ok(crate::provider::apply_client_timeout(
+        reqwest::Client::builder()
+            .default_headers(headers)
+            .cookie_store(true),
+        timeout_ms,
+    )
+    .build()?)
 }
 
 fn is_http_url(value: &str) -> bool {
@@ -859,7 +868,7 @@ mod tests {
     use super::*;
 
     fn provider(config: WebSourceConfig) -> PublicWebProvider {
-        PublicWebProvider::new(None, config).unwrap()
+        PublicWebProvider::new(None, config, 12_000).unwrap()
     }
 
     #[tokio::test]
@@ -1071,7 +1080,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let provider = LineMusicProvider::with_base_url(None, server.uri()).unwrap();
+        let provider = LineMusicProvider::with_base_url(None, server.uri(), 12_000).unwrap();
         let results = provider
             .search("https://music.line.me/webapp/track/track-1")
             .await

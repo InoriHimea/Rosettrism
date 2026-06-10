@@ -1,7 +1,3 @@
-use std::collections::HashSet;
-use std::sync::Mutex;
-use std::time::Duration;
-
 use async_trait::async_trait;
 use base64::Engine;
 use regex::Regex;
@@ -11,6 +7,8 @@ use reqwest::header::{
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use std::collections::HashSet;
+use std::sync::Mutex;
 
 use crate::decoder::InputFormat;
 use crate::provider::{FetchedLyric, LyricProvider, SearchResult, Source};
@@ -31,7 +29,7 @@ pub struct AppleMusicProvider {
 }
 
 impl AppleMusicProvider {
-    pub fn new(cookie: Option<String>) -> Result<Self> {
+    pub fn new(cookie: Option<String>, timeout_ms: u64) -> Result<Self> {
         let storefront = env_var_any(&[
             "ROSETTRISM_APPLE_MUSIC_STOREFRONT",
             "LRC_DECODE_APPLE_MUSIC_STOREFRONT",
@@ -56,6 +54,7 @@ impl AppleMusicProvider {
             "https://music.apple.com/us/browse",
             "https://amp-api.music.apple.com",
             developer_token,
+            timeout_ms,
         )
     }
 
@@ -66,6 +65,7 @@ impl AppleMusicProvider {
         web_url: impl Into<String>,
         api_base_url: impl Into<String>,
         developer_token: Option<String>,
+        timeout_ms: u64,
     ) -> Result<Self> {
         let mut headers = HeaderMap::new();
         headers.insert(USER_AGENT, HeaderValue::from_static(USER_AGENT_VALUE));
@@ -110,10 +110,11 @@ impl AppleMusicProvider {
             }
         }
 
-        let client = reqwest::Client::builder()
-            .default_headers(headers)
-            .timeout(Duration::from_secs(12))
-            .build()?;
+        let client = crate::provider::apply_client_timeout(
+            reqwest::Client::builder().default_headers(headers),
+            timeout_ms,
+        )
+        .build()?;
 
         Ok(Self {
             client,
@@ -849,6 +850,7 @@ mod tests {
             format!("{}/browse", server.uri()),
             server.uri(),
             None,
+            12_000,
         )
         .unwrap();
 
@@ -887,6 +889,7 @@ mod tests {
             format!("{}/browse", server.uri()),
             server.uri(),
             Some(TOKEN.into()),
+            12_000,
         )
         .unwrap();
 
@@ -941,6 +944,7 @@ mod tests {
             format!("{}/browse", server.uri()),
             server.uri(),
             Some(TOKEN.into()),
+            12_000,
         )
         .unwrap();
         let result = SearchResult {
@@ -984,6 +988,7 @@ mod tests {
             format!("{}/browse", server.uri()),
             server.uri(),
             Some(TOKEN.into()),
+            12_000,
         )
         .unwrap();
         let result = SearchResult {

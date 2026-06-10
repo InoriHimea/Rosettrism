@@ -15,7 +15,8 @@ use crate::model::{
     LyricTrackQuality, UnifiedLyric, UnifiedLyricMode, UnifiedLyricScore,
 };
 use crate::provider::{
-    provider_for_with_options, FetchedLyric, LyricProvider, ProviderOptions, SearchResult, Source,
+    provider_for_with_options, FetchedLyric, LyricProvider, ProviderOptions, ProviderRequestPolicy,
+    ProviderRuntime, SearchResult, Source,
 };
 use crate::{Error, Result};
 
@@ -767,16 +768,21 @@ impl ServiceContext {
         let credential =
             credential_for_source(source, self.cookie.as_deref(), self.offline_db.as_ref()).await?;
         let inner = provider_for_with_options(source, credential, self.provider_options)?;
+        let runtime = Box::new(ProviderRuntime::new(
+            source,
+            inner,
+            ProviderRequestPolicy::from(source.provider_config()),
+        ));
         if let Some(cache) = &self.cache {
             Ok(Box::new(CachedProvider::new(
                 source,
-                inner,
+                runtime,
                 cache.clone(),
                 ttl,
                 force,
             )))
         } else {
-            Ok(inner)
+            Ok(runtime)
         }
     }
 

@@ -36,7 +36,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
 thiserror = "1.0"
-tokio = { version = "1.40", features = ["fs", "macros", "net", "rt-multi-thread", "signal"] }
+tokio = { version = "1.40", features = ["fs", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 
 [dev-dependencies]
 assert_cmd = "2.0"

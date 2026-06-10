@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -375,9 +375,25 @@ impl UpstreamCache {
     }
 
     pub fn delete(&self, id: i64) -> Result<bool> {
-        let connection = self.lock()?;
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction()?;
+        let cache_key = transaction
+            .query_row(
+                "SELECT cache_key FROM upstream_cache WHERE id = ?1",
+                params![id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        let Some(cache_key) = cache_key else {
+            transaction.commit()?;
+            return Ok(false);
+        };
         let changed =
-            connection.execute("DELETE FROM upstream_cache WHERE id = ?1", params![id])?;
+            transaction.execute("DELETE FROM upstream_cache WHERE id = ?1", params![id])?;
+        if changed > 0 {
+            delete_unified_dependents(&transaction, &cache_key)?;
+        }
+        transaction.commit()?;
         Ok(changed > 0)
     }
 
@@ -469,6 +485,31 @@ impl UpstreamCache {
             .lock()
             .map_err(|err| Error::Storage(format!("cache mutex poisoned: {err}")))
     }
+}
+
+fn delete_unified_dependents(transaction: &Transaction<'_>, dependency_key: &str) -> Result<usize> {
+    let dependents = {
+        let mut statement =
+            transaction.prepare("SELECT id, dependencies_json FROM unified_cache")?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()?
+    };
+
+    let mut deleted = 0;
+    for (id, dependencies_json) in dependents {
+        let dependencies =
+            serde_json::from_str::<Vec<String>>(&dependencies_json).unwrap_or_else(|_| Vec::new());
+        if dependencies
+            .iter()
+            .any(|dependency| dependency == dependency_key)
+        {
+            deleted +=
+                transaction.execute("DELETE FROM unified_cache WHERE id = ?1", params![id])?;
+        }
+    }
+    Ok(deleted)
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -669,6 +710,49 @@ mod tests {
         assert_eq!(detail.query.as_deref(), Some("Song Artist"));
         assert_eq!(detail.item_id.as_deref(), Some("abc-123"));
         assert!(detail.body_text_preview.contains("Song"));
+
+        drop(cache);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn deleting_upstream_entry_invalidates_dependent_unified_cache() {
+        let path = std::env::temp_dir().join(format!(
+            "rosettrism-cache-dependency-{}-{}.sqlite",
+            now_unix(),
+            std::process::id()
+        ));
+        let cache = UpstreamCache::open(&path).unwrap();
+        cache
+            .put(CachePut {
+                key: "upstream-key",
+                source: Source::Lrclib,
+                operation: "fetch",
+                status_code: 200,
+                body: b"[00:01.00]Hi\n",
+                metadata: &json!({ "item_id": "abc" }),
+                ttl: Duration::from_secs(60),
+            })
+            .unwrap();
+        cache
+            .put_unified(
+                "unified-key",
+                br#"{"results":[],"warnings":[]}"#,
+                &["upstream-key".to_string()],
+                Duration::from_secs(60),
+            )
+            .unwrap();
+
+        let entry = cache
+            .list(10)
+            .unwrap()
+            .into_iter()
+            .find(|entry| entry.cache_key == "upstream-key")
+            .unwrap();
+        assert!(cache.get_unified_fresh("unified-key").unwrap().is_some());
+        assert!(cache.delete(entry.id).unwrap());
+        assert!(cache.get_unified_fresh("unified-key").unwrap().is_none());
+        assert!(!cache.delete(entry.id).unwrap());
 
         drop(cache);
         let _ = std::fs::remove_file(path);

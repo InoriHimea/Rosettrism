@@ -75,16 +75,17 @@ pub fn parse(raw: &str) -> Vec<Annotation> {
             let text_char = ch;
             i += 1;
 
-            if i < chars.len() {
-                if let Some(ann_type) = symbol_to_type(chars[i]) {
-                    annotations.push(Annotation {
-                        annotation_type: ann_type,
-                        start_ms,
-                        duration_ms: 0,
-                        text: text_char.to_string(),
-                    });
-                    i += 1; // consume the symbol
-                }
+            while i < chars.len() {
+                let Some(ann_type) = symbol_to_type(chars[i]) else {
+                    break;
+                };
+                annotations.push(Annotation {
+                    annotation_type: ann_type,
+                    start_ms,
+                    duration_ms: 0,
+                    text: text_char.to_string(),
+                });
+                i += 1; // consume the symbol
             }
         }
     }
@@ -158,7 +159,7 @@ pub fn parse_qrc(raw: &str) -> Vec<Annotation> {
         let chars: Vec<char> = body.chars().collect();
         let mut char_idx = 0;
         let mut byte_pos = 0;
-        let mut pending_annotation: Option<AnnotationType> = None;
+        let mut pending_annotations: Vec<AnnotationType> = Vec::new();
 
         while char_idx < chars.len() {
             let ch = chars[char_idx];
@@ -182,24 +183,26 @@ pub fn parse_qrc(raw: &str) -> Vec<Annotation> {
 
             // Check if this is an annotation symbol
             if let Some(ann_type) = symbol_to_type(ch) {
-                pending_annotation = Some(ann_type);
+                pending_annotations.push(ann_type);
                 char_idx += 1;
                 continue;
             }
 
             // This is a text character
-            if let Some(ann_type) = pending_annotation.take() {
+            if !pending_annotations.is_empty() {
                 // Find the timing for this character
                 // Look for the word timing that follows this character
                 let (start_ms, duration_ms) = qrc_character_timing(&word_timings, ch_byte_start)
                     .unwrap_or((line_start_ms, 0));
 
-                annotations.push(Annotation {
-                    annotation_type: ann_type,
-                    start_ms,
-                    duration_ms,
-                    text: ch.to_string(),
-                });
+                for ann_type in pending_annotations.drain(..) {
+                    annotations.push(Annotation {
+                        annotation_type: ann_type,
+                        start_ms,
+                        duration_ms,
+                        text: ch.to_string(),
+                    });
+                }
             }
 
             char_idx += 1;
@@ -412,6 +415,36 @@ mod tests {
         assert_eq!(result[2].start_ms, 18137);
         assert_eq!(result[2].duration_ms, 346);
         assert_eq!(result[2].text, "天");
+    }
+
+    #[test]
+    fn parse_adjacent_suffix_annotations_keep_same_character_markers() {
+        let input = "[00:01.00]横^`刀";
+        let result = parse(input);
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].annotation_type, AnnotationType::Breath);
+        assert_eq!(result[0].start_ms, 1000);
+        assert_eq!(result[0].text, "横");
+        assert_eq!(result[1].annotation_type, AnnotationType::Stress);
+        assert_eq!(result[1].start_ms, 1000);
+        assert_eq!(result[1].text, "横");
+    }
+
+    #[test]
+    fn parse_qrc_adjacent_prefix_annotations_keep_same_character_markers() {
+        let input = "[1000,1000]^`横(1000,300)";
+        let result = parse_qrc(input);
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].annotation_type, AnnotationType::Breath);
+        assert_eq!(result[0].start_ms, 1000);
+        assert_eq!(result[0].duration_ms, 300);
+        assert_eq!(result[0].text, "横");
+        assert_eq!(result[1].annotation_type, AnnotationType::Stress);
+        assert_eq!(result[1].start_ms, 1000);
+        assert_eq!(result[1].duration_ms, 300);
+        assert_eq!(result[1].text, "横");
     }
 
     #[test]

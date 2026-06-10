@@ -86,7 +86,7 @@ impl LyricProvider for CachedProvider {
     }
 
     async fn fetch(&self, result: &SearchResult) -> Result<FetchedLyric> {
-        let key = UpstreamCache::cache_key(self.source, "fetch", &FetchKey::from(result))?;
+        let key = fetch_cache_key(self.source, result)?;
         if !self.force_refresh {
             if let Some(hit) = self.cache.get_fresh(&key)? {
                 let fetched = cached_fetch_hit(hit.body, hit.metadata)?;
@@ -130,6 +130,10 @@ impl LyricProvider for CachedProvider {
             }
         }
     }
+}
+
+pub fn fetch_cache_key(source: Source, result: &SearchResult) -> Result<String> {
+    UpstreamCache::cache_key(source, "fetch", &FetchKey::from(result))
 }
 
 #[derive(Serialize)]

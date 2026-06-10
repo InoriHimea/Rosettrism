@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::cache::{default_ttl, UpstreamCache};
-use crate::cached_provider::CachedProvider;
+use crate::cached_provider::{fetch_cache_key, CachedProvider};
 use crate::decoder::{decode_bytes, decode_raw_bytes, InputFormat};
 use crate::model::{
     Annotation, InlineLyricLine, LyricDocument, LyricLine, LyricMeta, LyricTrack, LyricTrackKind,
@@ -20,6 +20,7 @@ use crate::{Error, Result};
 
 const DEFAULT_TRANSLATION_LANG: &str = "zh-Hans";
 const DEFAULT_OPENAI_MODEL: &str = "gpt-4o-mini";
+const AI_SCORING_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
 #[serde(rename_all = "snake_case")]
@@ -260,7 +261,7 @@ impl ServiceContext {
             .iter()
             .take(request.top)
             .map(|candidate| build_unified(candidate, &candidates, request.merge_mode))
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>>>()?;
 
         let mut response = AggregateFetchResponse {
             mode: request.merge_mode,
@@ -534,7 +535,7 @@ impl ServiceContext {
             Err(err) => warnings.push(format!("AI lyric selection skipped: {err}")),
         }
 
-        let mut unified = build_unified(&candidates[0], &candidates, merge_mode);
+        let mut unified = build_unified(&candidates[0], &candidates, merge_mode)?;
         unified.meta.source = Some(format!(
             "aggregate({})",
             unique_source_names(&candidates).join("+")
@@ -569,7 +570,10 @@ impl ServiceContext {
                 }
             ]
         });
-        let response = reqwest::Client::new()
+        let client = reqwest::Client::builder()
+            .timeout(AI_SCORING_TIMEOUT)
+            .build()?;
+        let response = client
             .post(openai_chat_completions_url(&config.base_url)?)
             .header(AUTHORIZATION, format!("Bearer {}", config.api_key))
             .header(CONTENT_TYPE, "application/json")
@@ -580,7 +584,8 @@ impl ServiceContext {
         let body = response.text().await?;
         if !status.is_success() {
             return Err(Error::Provider(format!(
-                "OpenAI compatible endpoint returned {status}: {body}"
+                "OpenAI compatible endpoint returned {status}: {}",
+                text_preview(&body, 1_000)
             )));
         }
         let value: serde_json::Value = serde_json::from_str(&body)?;
@@ -631,7 +636,6 @@ impl ServiceContext {
             Error::Provider(format!("{} returned no candidates", source.cli_name()))
         })?;
         let fetched = provider.fetch(&result).await?;
-        let input_format = fetched.input_format;
         let annotations = fetched.annotations.clone();
         let document = decode_fetched(fetched)?;
         if document.lines.is_empty() {
@@ -646,7 +650,6 @@ impl ServiceContext {
         Ok(SourceCandidate {
             source,
             result,
-            input_format,
             document,
             quality,
             annotations,
@@ -668,7 +671,6 @@ impl ServiceContext {
         let base_candidate = SourceCandidate {
             source,
             result: result.clone(),
-            input_format,
             quality: quality_for_document(&document, source),
             document: document.clone(),
             annotations: annotations.clone(),
@@ -708,7 +710,7 @@ impl ServiceContext {
                 )),
             }
         }
-        let mut unified = build_unified(&candidates[0], &candidates, MergeMode::Inline);
+        let mut unified = build_unified(&candidates[0], &candidates, MergeMode::Inline)?;
         unified.meta.source = Some(format!(
             "enriched({})",
             unique_source_names(&candidates).join("+")
@@ -736,7 +738,6 @@ impl ServiceContext {
             .provider(source, ttl, force || self.force_refresh)
             .await?;
         let fetched = provider.fetch(&result).await?;
-        let input_format = fetched.input_format;
         let annotations = fetched.annotations.clone();
         let document = decode_fetched(fetched)?;
         if document.lines.is_empty() {
@@ -751,7 +752,6 @@ impl ServiceContext {
         Ok(SourceCandidate {
             source,
             result,
-            input_format,
             document,
             quality,
             annotations,
@@ -819,7 +819,6 @@ where
 struct SourceCandidate {
     source: Source,
     result: SearchResult,
-    input_format: crate::decoder::InputFormat,
     document: LyricDocument,
     quality: LyricTrackQuality,
     annotations: Vec<Annotation>,
@@ -908,6 +907,15 @@ fn openai_chat_completions_url(base_url: &str) -> Result<String> {
     Ok(format!("{base}/chat/completions"))
 }
 
+fn text_preview(value: &str, max_chars: usize) -> String {
+    if value.chars().count() <= max_chars {
+        return value.to_string();
+    }
+    let mut preview = value.chars().take(max_chars).collect::<String>();
+    preview.push_str("...");
+    preview
+}
+
 fn candidate_summaries(candidates: &[SourceCandidate]) -> Vec<AiCandidateSummary> {
     candidates
         .iter()
@@ -983,7 +991,7 @@ fn build_unified(
     base: &SourceCandidate,
     candidates: &[SourceCandidate],
     merge_mode: MergeMode,
-) -> UnifiedLyric {
+) -> Result<UnifiedLyric> {
     let mut tracks = Vec::new();
     tracks.push(track_from_candidate(
         base,
@@ -1033,15 +1041,8 @@ fn build_unified(
         .collect::<Vec<_>>();
     let cache_refs = candidates
         .iter()
-        .map(|candidate| {
-            format!(
-                "{}:{}:{}",
-                candidate.source.cli_name(),
-                candidate.result.id,
-                candidate.input_format_name()
-            )
-        })
-        .collect::<Vec<_>>();
+        .map(|candidate| fetch_cache_key(candidate.source, &candidate.result))
+        .collect::<Result<Vec<_>>>()?;
     let inline_lines = if merge_mode == MergeMode::Inline {
         build_inline_lines(base, &tracks)
     } else {
@@ -1070,7 +1071,7 @@ fn build_unified(
         base.annotations.clone()
     };
 
-    UnifiedLyric {
+    Ok(UnifiedLyric {
         meta: merged_meta(base),
         mode: merge_mode.into(),
         tracks,
@@ -1080,7 +1081,7 @@ fn build_unified(
         cache_refs,
         warnings: Vec::new(),
         annotations,
-    }
+    })
 }
 
 fn unique_source_names(candidates: &[SourceCandidate]) -> Vec<String> {
@@ -1092,21 +1093,6 @@ fn unique_source_names(candidates: &[SourceCandidate]) -> Vec<String> {
         }
     }
     names
-}
-
-impl SourceCandidate {
-    fn input_format_name(&self) -> &'static str {
-        match self.input_format {
-            crate::decoder::InputFormat::Auto => "auto",
-            crate::decoder::InputFormat::AppleMusic => "apple-music",
-            crate::decoder::InputFormat::Json => "json",
-            crate::decoder::InputFormat::Krc => "krc",
-            crate::decoder::InputFormat::Qrc => "qrc",
-            crate::decoder::InputFormat::Text => "text",
-            crate::decoder::InputFormat::Yrc => "yrc",
-            crate::decoder::InputFormat::Lrc => "lrc",
-        }
-    }
 }
 
 fn track_from_candidate(
@@ -1618,7 +1604,6 @@ mod tests {
                 duration_ms: None,
                 extra: json!({}),
             },
-            input_format: crate::decoder::InputFormat::Lrc,
             document: LyricDocument {
                 meta: LyricMeta::default(),
                 lines: vec![LyricLine {
@@ -1663,9 +1648,41 @@ mod tests {
             ..base.clone()
         };
 
-        let unified = build_unified(&base, &[base.clone(), ruby], MergeMode::Inline);
+        let unified = build_unified(&base, &[base.clone(), ruby], MergeMode::Inline).unwrap();
         assert_eq!(unified.inline_lines[0].text, "歌");
         assert_eq!(unified.inline_lines[0].ruby[0].reading, "うた");
+    }
+
+    #[test]
+    fn unified_cache_refs_use_fetch_cache_keys() {
+        let candidate = SourceCandidate {
+            source: Source::Lrclib,
+            result: SearchResult {
+                source: Source::Lrclib,
+                id: "1".into(),
+                title: "Song".into(),
+                artist: "Artist".into(),
+                album: None,
+                duration_ms: None,
+                extra: json!({ "lrclib_id": 1 }),
+            },
+            document: LyricDocument {
+                lines: vec![LyricLine {
+                    start_ms: 1_000,
+                    text: "Hi".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            quality: LyricTrackQuality::default(),
+            annotations: Vec::new(),
+        };
+        let expected = fetch_cache_key(Source::Lrclib, &candidate.result).unwrap();
+
+        let unified = build_unified(&candidate, &[candidate.clone()], MergeMode::Tracks).unwrap();
+
+        assert_eq!(unified.cache_refs, vec![expected]);
+        assert_ne!(unified.cache_refs[0], "lrclib:1:lrc");
     }
 
     #[test]

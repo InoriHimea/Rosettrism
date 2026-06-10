@@ -1,6 +1,8 @@
 import { chromium } from '@playwright/test';
 import { dirname, resolve } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { normalizeLyricPayload } from './src/lyricPlayback.js';
 
 const BASE = 'http://127.0.0.1:5181';
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -19,8 +21,33 @@ const unified = {
   meta: { title: '超长标题测试别怕我伤心雨一直下海阔天空', artist: 'Beyond' },
   inline_lines: [
     { start_ms: 0, duration_ms: 800, text: '超长标题测试别怕我伤心雨一直下海阔天空 - Beyond', words: [] },
-    { start_ms: 1000, duration_ms: 1000, text: '作词：黄家驹', words: [] },
-    { start_ms: 2000, duration_ms: 1000, text: '作曲：黄家驹', words: [] },
+    {
+      start_ms: 1000,
+      duration_ms: 1000,
+      text: '作词：黄家驹',
+      words: [
+        { text: '作词', offset_ms: 0, duration_ms: 260 },
+        { text: '黄家驹', offset_ms: 360, duration_ms: 420 },
+      ],
+    },
+    {
+      start_ms: 2000,
+      duration_ms: 1000,
+      text: '作曲：黄家驹',
+      words: [
+        { text: '作曲', offset_ms: 0, duration_ms: 260 },
+        { text: '黄家驹', offset_ms: 360, duration_ms: 420 },
+      ],
+    },
+    {
+      start_ms: 3000,
+      duration_ms: 1000,
+      text: '编曲：钟兴民',
+      words: [
+        { text: '编曲', offset_ms: 0, duration_ms: 260 },
+        { text: '钟兴民', offset_ms: 360, duration_ms: 420 },
+      ],
+    },
     {
       start_ms: 7200,
       duration_ms: 4200,
@@ -34,6 +61,18 @@ const unified = {
       ],
     },
     { start_ms: 10500, duration_ms: 1200, text: '短句', words: [{ text: '短句', offset_ms: 0, duration_ms: 900 }] },
+    {
+      start_ms: 12600,
+      duration_ms: 2200,
+      text: 'a b xy mn',
+      words: [
+        { text: 'a', offset_ms: 0, duration_ms: 650 },
+        { text: 'b', offset_ms: 650, duration_ms: 650 },
+        { text: 'xy', offset_ms: 1300, duration_ms: 650 },
+        { text: 'm', offset_ms: 1650, duration_ms: 260 },
+        { text: 'n', offset_ms: 1910, duration_ms: 260 },
+      ],
+    },
     { start_ms: 20000, duration_ms: 1600, text: 'next', words: [{ text: 'next', offset_ms: 0, duration_ms: 1000 }] },
   ],
 };
@@ -41,6 +80,12 @@ const singingAnnotations = [
   { annotation_type: 'breath', start_ms: 7350, duration_ms: 300, text: '换气' },
   { annotation_type: 'stress', start_ms: 8050, duration_ms: 400, text: '阔' },
   { annotation_type: 'long_tone', start_ms: 8700, duration_ms: 600, text: '天' },
+  { annotation_type: 'breath', start_ms: 13050, duration_ms: 260, text: '换气' },
+  { annotation_type: 'breath', start_ms: 13900, duration_ms: 260, text: 'x' },
+  { annotation_type: 'stress', start_ms: 13900, duration_ms: 260, text: 'x' },
+  { annotation_type: 'breath', start_ms: 14250, duration_ms: 180, text: 'm' },
+  { annotation_type: 'stress', start_ms: 14250, duration_ms: 180, text: 'm' },
+  { annotation_type: 'stress', start_ms: 14510, duration_ms: 180, text: 'n' },
 ];
 const MOCK_FETCH_RESULT_WITH_ANNOTATIONS = {
   unified,
@@ -63,6 +108,8 @@ const MOCK_FETCH_RESULT_WITHOUT_ANNOTATIONS = {
     extra: { artist_alias: 'Beyond' },
   },
 };
+
+const dragonKnightReal = normalizeLyricPayload(JSON.parse(readFileSync(resolve(SCRIPT_DIR, 'dragon-knight-real.json'), 'utf8')));
 
 let fetchResultCount = 0;
 const browser = await chromium.launch({ headless: false });
@@ -99,6 +146,39 @@ function compactBox(box) {
   return box && { x: Math.round(box.x), y: Math.round(box.y), w: Math.round(box.width), h: Math.round(box.height) };
 }
 
+function overlappingBoxes(boxes) {
+  for (let left = 0; left < boxes.length; left += 1) {
+    for (let right = left + 1; right < boxes.length; right += 1) {
+      const a = boxes[left];
+      const b = boxes[right];
+      const separated = a.x + a.w <= b.x + 2
+        || b.x + b.w <= a.x + 2
+        || a.y + a.h <= b.y + 2
+        || b.y + b.h <= a.y + 2;
+      if (!separated) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+const dragonKnightPrevLine = dragonKnightReal.lines.find((line) => line.text === '咆哮声不自觉');
+const dragonKnightHengLine = dragonKnightReal.lines.find((line) => line.text === '横越过了几条街');
+const dragonKnightPrevBreath = dragonKnightPrevLine?.words.flatMap((word) => word.annotations || []).find((annotation) => annotation.type === 'breath' && annotation.text === '横');
+const dragonKnightHengBreath = dragonKnightHengLine?.words.find((word) => word.text === '横')?.annotations.find((annotation) => annotation.type === 'breath' && annotation.text === '横');
+requirePass(dragonKnightHengBreath && !dragonKnightPrevBreath, 'DRAGON_KNIGHT_HENG_BREATH_ANCHORED_TO_WRONG_LINE', {
+  prev: dragonKnightPrevLine?.words.map((word) => ({ text: word.text, annotations: word.annotations })),
+  heng: dragonKnightHengLine?.words.map((word) => ({ text: word.text, annotations: word.annotations })),
+});
+const dragonKnightChargeLine = dragonKnightReal.lines.find((line) => line.text === '我坚决 冲破这一场浩劫');
+const dragonKnightWoBreath = dragonKnightChargeLine?.words.find((word) => word.text === '我')?.annotations.find((annotation) => annotation.type === 'breath');
+const dragonKnightChongBreath = dragonKnightChargeLine?.words.find((word) => word.text === '冲')?.annotations.find((annotation) => annotation.type === 'breath');
+const dragonKnightJueStress = dragonKnightChargeLine?.words.find((word) => word.text === '决')?.annotations.find((annotation) => annotation.type === 'stress');
+requirePass(dragonKnightWoBreath && !dragonKnightWoBreath.suppressLabel && dragonKnightChongBreath && !dragonKnightChongBreath.suppressLabel && dragonKnightJueStress, 'DRAGON_KNIGHT_SINGLE_STRESS_BREATH_LABEL_PRIORITY_WRONG', {
+  charge: dragonKnightChargeLine?.words.map((word) => ({ text: word.text, annotations: word.annotations })),
+});
+
 await page.goto(BASE);
 await page.locator('nav button').nth(1).click();
 await page.locator('.primary-search input').first().fill('海阔天空');
@@ -132,64 +212,91 @@ async function activeTextSample(ms) {
   return page.evaluate(() => ({
     active: [...document.querySelectorAll('.lyric-line-active')].map((node) => ({ text: node.textContent.trim(), className: node.className })),
     countdownRows: [...document.querySelectorAll('.lyric-line-countdown')].map((node) => ({ text: node.textContent.trim(), className: node.className })),
-    countdownCount: document.querySelectorAll('.lyric-line-countdown .lyric-gap-dot:not(.lyric-gap-dot-hidden)').length,
+    karaokeItems: [...document.querySelectorAll('.lyric-karaoke-lines .lyric-karaoke-line')].map((node) => ({ text: node.textContent.trim(), className: node.className })),
+    directKaraokeItems: [...document.querySelectorAll('.lyric-karaoke-lines > .lyric-karaoke-line')].map((node) => ({ text: node.textContent.trim(), className: node.className })),
+    metaPanels: [...document.querySelectorAll('.lyric-karaoke-meta-panel')].map((node) => ({ text: node.textContent.trim(), className: node.className })),
+    countdownCount: document.querySelectorAll('.lyric-line-countdown .lyric-gap-dot-active').length,
+    poppingCount: document.querySelectorAll('.lyric-line-countdown .lyric-gap-dot-popping').length,
+    goneCount: document.querySelectorAll('.lyric-line-countdown .lyric-gap-dot-gone').length,
     exitingCount: document.querySelectorAll('.lyric-line-countdown.lyric-dots-exiting').length,
+    dotBackgrounds: [...document.querySelectorAll('.lyric-line-countdown .lyric-gap-dot-active, .lyric-line-countdown .lyric-gap-dot-popping')].map((dot) => getComputedStyle(dot).backgroundImage),
+    dotAnimations: [...document.querySelectorAll('.lyric-line-countdown .lyric-gap-dot-popping')].map((dot) => getComputedStyle(dot).animationName),
+    ringAnimations: [...document.querySelectorAll('.lyric-line-countdown .lyric-gap-dot-popping')].map((dot) => getComputedStyle(dot, '::before').animationName),
+    fragmentAnimations: [...document.querySelectorAll('.lyric-line-countdown .lyric-gap-dot-popping')].map((dot) => getComputedStyle(dot, '::after').animationName),
   }));
 }
 
 async function activeMetaSample(ms) {
   await seek(ms);
-  const activeCount = await page.locator('.lyric-line-active').count();
+  const activeCount = await page.locator('.lyric-karaoke-meta-panel').count();
   if (!activeCount) {
     const debug = await page.evaluate(() => ({
       time: document.querySelector('.result-dialog .lyric-time')?.textContent?.trim() || null,
       lineCount: document.querySelectorAll('.lyric-line').length,
       lines: [...document.querySelectorAll('.lyric-line')].slice(0, 8).map((node) => ({ text: node.textContent.trim(), className: node.className })),
+      metaPanels: [...document.querySelectorAll('.lyric-karaoke-meta-panel')].map((node) => ({ text: node.textContent.trim(), className: node.className })),
       dialog: Boolean(document.querySelector('.result-dialog')),
     }));
     throw new Error(`NO_ACTIVE ${JSON.stringify(debug)}`);
   }
-  return page.locator('.lyric-line-active').first().evaluate((node, ms) => {
+  return page.locator('.lyric-karaoke-meta-panel').first().evaluate((node, ms) => {
     const rect = node.getBoundingClientRect();
-    const before = getComputedStyle(node, '::before');
+    const textNode = node.querySelector('.lyric-karaoke-meta-line');
     return {
       ms,
-      text: node.textContent.trim(),
-      className: node.className,
+      text: textNode?.textContent?.trim() || node.textContent.trim(),
+      className: textNode?.className || '',
+      panelClassName: node.className,
       height: Math.round(rect.height),
       scrollWidth: node.scrollWidth,
       clientWidth: node.clientWidth,
-      whiteSpace: getComputedStyle(node).whiteSpace,
-      beforeWidth: before.width,
-      beforeContent: before.content,
+      whiteSpace: textNode ? getComputedStyle(textNode).whiteSpace : getComputedStyle(node).whiteSpace,
+      directKaraokeItems: document.querySelectorAll('.lyric-karaoke-lines > .lyric-karaoke-line').length,
     };
   }, ms);
 }
 
 const metaSamples = [];
-for (const ms of [200, 2200, 4200]) {
+for (const ms of [200, 1700, 3200, 4700]) {
   metaSamples.push(await activeMetaSample(ms));
 }
 for (const sample of metaSamples) {
+  requirePass(sample.panelClassName.includes('lyric-karaoke-meta-panel'), 'META_PANEL_CLASS_MISSING', sample);
+  requirePass(!sample.className.includes('lyric-karaoke-line'), 'META_SHOULD_NOT_JOIN_KARAOKE_LANES', sample);
+  requirePass(sample.directKaraokeItems === 0, 'META_SHOULD_NOT_RENDER_IN_DUAL_LANES', sample);
   requirePass(sample.whiteSpace === 'nowrap', 'META_LINE_WRAPPED', sample);
-  requirePass(sample.beforeWidth !== 'auto' && sample.beforeWidth !== '0px', 'META_HIGHLIGHT_BAR_MISSING', sample);
-  requirePass(sample.height <= 72, 'META_LINE_TOO_TALL', sample);
+  requirePass(sample.height <= 42, 'META_LINE_TOO_TALL', sample);
 }
-const titleOccurrences = await page.locator('.lyric-line-meta').evaluateAll((nodes) => nodes
-  .map((node) => node.textContent.trim())
-  .filter((text) => text.includes('超长标题测试别怕我伤心雨一直下海阔天空')).length);
-requirePass(titleOccurrences === 1, 'TITLE_RENDERED_MORE_THAN_ONCE', { titleOccurrences });
+requirePass(metaSamples.some((sample) => sample.text.includes('作词')), 'META_LYRICIST_LINE_MISSING', { metaSamples });
+requirePass(metaSamples.some((sample) => sample.text.includes('作曲')), 'META_COMPOSER_LINE_MISSING', { metaSamples });
+requirePass(metaSamples.some((sample) => sample.text.includes('编曲')), 'META_ARRANGER_LINE_MISSING', { metaSamples });
+requirePass(metaSamples.every((sample) => !sample.text.includes('海 阔 天 空')), 'BODY_SHOULD_NOT_RENDER_DURING_METADATA', { metaSamples });
+const titleOccurrences = metaSamples
+  .map((sample) => sample.text)
+  .filter((text) => text.includes(MOCK_SEARCH.results[0].title)).length;
+requirePass(titleOccurrences === 1, 'TITLE_RENDERED_MORE_THAN_ONCE', { titleOccurrences, metaSamples });
 
 const introCountdownSample = await activeTextSample(200);
-requirePass(introCountdownSample.countdownCount === 3, 'INTRO_COUNTDOWN_NOT_VISIBLE_WITH_TITLE', introCountdownSample);
+requirePass(introCountdownSample.countdownCount === 0, 'INTRO_COUNTDOWN_SHOULD_NOT_APPEAR_DURING_METADATA', introCountdownSample);
+requirePass(introCountdownSample.metaPanels.length === 1 && introCountdownSample.directKaraokeItems.length === 0, 'METADATA_SHOULD_STAY_ABOVE_KARAOKE_LANES', introCountdownSample);
 const countdownSample = await activeTextSample(6200);
 requirePass(countdownSample.countdownCount === 1, 'COUNTDOWN_AFTER_META_WRONG', countdownSample);
+requirePass(countdownSample.countdownRows[0]?.className.includes('lyric-karaoke-lane-top') && countdownSample.countdownRows[0]?.className.includes('lyric-karaoke-line-left'), 'INTRO_COUNTDOWN_SHOULD_FOLLOW_TARGET_LANE', countdownSample);
+requirePass(countdownSample.dotBackgrounds.some((background) => background.includes('47, 158, 132') || background.includes('242, 211, 111')), 'COUNTDOWN_BUBBLE_COLOR_NOT_REFRESHED', countdownSample);
 const shortGapSample = await activeTextSample(10200);
 requirePass(shortGapSample.countdownCount === 0, 'SHORT_GAP_SHOULD_NOT_SHOW_COUNTDOWN', shortGapSample);
 const interludeSample = await activeTextSample(17000);
-requirePass(interludeSample.countdownCount === 3, 'INTERLUDE_COUNTDOWN_MISSING', interludeSample);
+requirePass(interludeSample.countdownCount === 3 && interludeSample.poppingCount === 0, 'INTERLUDE_COUNTDOWN_MISSING', interludeSample);
+requirePass(interludeSample.karaokeItems.length <= 2 && interludeSample.countdownRows[0]?.className.includes('lyric-karaoke-lane-bottom') && interludeSample.countdownRows[0]?.className.includes('lyric-karaoke-line-right'), 'COUNTDOWN_SHOULD_FOLLOW_TARGET_KARAOKE_LANE', interludeSample);
+const twoDotSample = await activeTextSample(18000);
+requirePass(twoDotSample.countdownCount === 2 && twoDotSample.poppingCount === 1 && twoDotSample.goneCount === 0, 'COUNTDOWN_THIRD_DOT_SHOULD_POP_ALONE', twoDotSample);
+const oneDotSample = await activeTextSample(19000);
+requirePass(oneDotSample.countdownCount === 1 && oneDotSample.poppingCount === 1 && oneDotSample.goneCount === 1, 'COUNTDOWN_SECOND_DOT_SHOULD_POP_ALONE', oneDotSample);
 const bubbleSample = await activeTextSample(20040);
-requirePass(bubbleSample.countdownCount === 1 && bubbleSample.exitingCount === 1, 'COUNTDOWN_BUBBLE_OUT_MISSING', bubbleSample);
+requirePass(bubbleSample.countdownCount === 0 && bubbleSample.poppingCount === 1 && bubbleSample.goneCount === 2 && bubbleSample.exitingCount === 1, 'COUNTDOWN_FINAL_DOT_SHOULD_POP_ALONE', bubbleSample);
+requirePass(bubbleSample.dotAnimations.length === 1 && bubbleSample.dotAnimations[0].includes('lyric-dot-pop-core'), 'COUNTDOWN_BUBBLE_CORE_POP_MISSING', bubbleSample);
+requirePass(bubbleSample.ringAnimations.length === 1 && bubbleSample.ringAnimations[0].includes('lyric-dot-pop-ring'), 'COUNTDOWN_BUBBLE_RING_POP_MISSING', bubbleSample);
+requirePass(bubbleSample.fragmentAnimations.length === 1 && bubbleSample.fragmentAnimations[0].includes('lyric-dot-pop-fragments'), 'COUNTDOWN_BUBBLE_FRAGMENT_POP_MISSING', bubbleSample);
 
 await seek(8200);
 const annotationCounts = await page.evaluate(() => ({
@@ -216,34 +323,90 @@ const longToneGlyph = compactBox(await page.locator('.lyric-line-active .annotat
 const longToneLabel = compactBox(await page.locator('.lyric-line-active .annotation-long-tone .lyric-annotation-label').first().boundingBox());
 const breathGlyph = compactBox(await page.locator('.lyric-line-active .annotation-breath .annotation-glyph-text').first().boundingBox());
 const breathLabel = compactBox(await page.locator('.lyric-line-active .annotation-breath .lyric-annotation-label').first().boundingBox());
+const labelBoxes = await page.locator('.lyric-line-active .lyric-annotation-label').evaluateAll((nodes) => nodes.map((node) => {
+  const rect = node.getBoundingClientRect();
+  return { text: node.textContent.trim(), x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) };
+}));
 const stressWord = wordBoxes.find((word) => word.text.includes('阔'));
 const longToneWord = wordBoxes.find((word) => word.text.includes('天'));
 const breathWord = wordBoxes.find((word) => word.text.includes('海'));
-const stressSample = { word: stressWord, glyph: stressGlyph, label: stressLabel };
-const longToneSample = { word: longToneWord, glyph: longToneGlyph, label: longToneLabel };
-const breathSample = { word: breathWord, glyph: breathGlyph, label: breathLabel };
+const stressSample = { word: stressWord, glyph: stressGlyph, label: stressLabel, labelBoxes };
+const longToneSample = { word: longToneWord, glyph: longToneGlyph, label: longToneLabel, labelBoxes };
+const breathSample = { word: breathWord, glyph: breathGlyph, label: breathLabel, labelBoxes };
+const labelTopSpread = Math.max(...labelBoxes.map((box) => box.y)) - Math.min(...labelBoxes.map((box) => box.y));
+requirePass(labelBoxes.length >= 3, 'INLINE_ANNOTATION_LABELS_MISSING', { labelBoxes });
+requirePass(!overlappingBoxes(labelBoxes), 'INLINE_ANNOTATION_LABELS_OVERLAPPED', { labelBoxes });
+requirePass(labelTopSpread <= 5, 'INLINE_ANNOTATION_LABELS_NOT_ALIGNED', { labelBoxes, labelTopSpread });
 requirePass(stressWord && stressGlyph && stressLabel, 'STRESS_BOUNDS_MISSING', stressSample);
 requirePass(longToneWord && longToneGlyph && longToneLabel, 'LONG_TONE_BOUNDS_MISSING', longToneSample);
 requirePass(breathWord && breathGlyph && breathLabel, 'BREATH_BOUNDS_MISSING', breathSample);
-requirePass(stressGlyph.y + stressGlyph.h / 2 >= stressWord.y + stressWord.h * 0.60, 'STRESS_DOT_NOT_BELOW_TEXT', stressSample);
-requirePass(stressGlyph.y - stressWord.y <= stressWord.h * 0.80, 'STRESS_DOT_TOO_FAR_BELOW_TEXT', stressSample);
+requirePass(stressGlyph.y + stressGlyph.h / 2 >= stressWord.y + stressWord.h * 0.70, 'STRESS_DOT_NOT_BELOW_TEXT', stressSample);
+requirePass(stressGlyph.y - stressWord.y <= stressWord.h * 1.18, 'STRESS_DOT_TOO_FAR_BELOW_TEXT', stressSample);
 requirePass(longToneGlyph.y + longToneGlyph.h / 2 >= longToneWord.y + longToneWord.h * 0.60, 'LONG_TONE_UNDERSCORE_NOT_BELOW_TEXT', longToneSample);
 requirePass(longToneGlyph.y - longToneWord.y <= longToneWord.h * 0.80, 'LONG_TONE_UNDERSCORE_TOO_FAR_BELOW_TEXT', longToneSample);
-requirePass(stressLabel.y + stressLabel.h <= stressWord.y + 4, 'STRESS_LABEL_NOT_ABOVE_TEXT', stressSample);
+requirePass(stressLabel.y + stressLabel.h <= stressWord.y - 4, 'STRESS_LABEL_NOT_ABOVE_TEXT', stressSample);
 requirePass(longToneLabel.y + longToneLabel.h <= longToneWord.y + 4, 'LONG_TONE_LABEL_NOT_ABOVE_TEXT', longToneSample);
 requirePass(breathLabel.y + breathLabel.h <= breathWord.y + 6, 'BREATH_LABEL_NOT_ABOVE_TEXT', breathSample);
 requirePass(Math.abs((stressGlyph.x + stressGlyph.w / 2) - (stressWord.x + stressWord.w / 2)) <= 8, 'STRESS_DOT_NOT_CENTERED', stressSample);
 requirePass(Math.abs((longToneGlyph.x + longToneGlyph.w / 2) - (longToneWord.x + longToneWord.w / 2)) <= 10, 'LONG_TONE_UNDERSCORE_NOT_CENTERED', longToneSample);
+
+await seek(13950);
+const multiMarkerSample = await page.evaluate(() => {
+  const box = (node) => {
+    if (!node) return null;
+    const rect = node.getBoundingClientRect();
+    return { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) };
+  };
+  const words = [...document.querySelectorAll('.lyric-line-active .lyric-word')].map((node) => {
+    const breathGlyph = node.querySelector('.annotation-breath .annotation-glyph-text');
+    const stressGlyph = node.querySelector('.annotation-stress .annotation-glyph-text');
+    return {
+      text: node.querySelector('.lyric-progress-base')?.textContent?.trim() || '',
+      box: box(node),
+      breath: node.querySelectorAll('.annotation-breath').length,
+      stress: node.querySelectorAll('.annotation-stress').length,
+      labels: [...node.querySelectorAll('.lyric-annotation-label')].map((label) => label.textContent.trim()),
+      breathGlyph: box(breathGlyph),
+      stressGlyph: box(stressGlyph),
+    };
+  });
+  const labels = [...document.querySelectorAll('.lyric-line-active .lyric-annotation-label')].map((label) => ({
+    text: label.textContent.trim(),
+    ...box(label),
+  }));
+  return { words, labels };
+});
+const markerAWord = multiMarkerSample.words.find((word) => word.text === 'a');
+const markerBWord = multiMarkerSample.words.find((word) => word.text === 'b');
+const markerXyWord = multiMarkerSample.words.find((word) => word.text === 'xy');
+const markerMWord = multiMarkerSample.words.find((word) => word.text === 'm');
+const markerNWord = multiMarkerSample.words.find((word) => word.text === 'n');
+requirePass(markerAWord && markerBWord && markerXyWord && markerMWord && markerNWord, 'MULTI_MARKER_WORDS_MISSING', multiMarkerSample);
+requirePass(markerAWord?.breath === 0 && markerBWord?.breath === 1, 'BREATH_FALLBACK_ANCHORED_TO_WRONG_WORD', multiMarkerSample);
+requirePass(markerXyWord?.breath === 1 && markerXyWord?.stress === 1, 'SAME_CHARACTER_MARKERS_NOT_RENDERED_TOGETHER', multiMarkerSample);
+requirePass(markerXyWord.labels.length === 1, 'SAME_CHARACTER_LABELS_NOT_DEDUPED', multiMarkerSample);
+requirePass(markerXyWord.labels[0] === '换气', 'SINGLE_STRESS_NEAR_BREATH_SHOULD_KEEP_BREATH_LABEL', multiMarkerSample);
+requirePass(markerMWord?.breath === 1 && markerMWord?.stress === 1 && markerNWord?.stress === 1, 'REPEATED_STRESS_MARKERS_MISSING', multiMarkerSample);
+requirePass(markerMWord.labels.length === 1 && markerMWord.labels[0] === '重音', 'REPEATED_STRESS_CLUSTER_SHOULD_SUPPRESS_BREATH_LABEL', multiMarkerSample);
+requirePass(!overlappingBoxes(multiMarkerSample.labels), 'MULTI_MARKER_LABELS_OVERLAPPED', multiMarkerSample);
+requirePass(markerBWord.breathGlyph && markerXyWord.breathGlyph && markerXyWord.stressGlyph, 'MULTI_MARKER_GLYPH_BOUNDS_MISSING', multiMarkerSample);
+requirePass(markerBWord.breathGlyph.x + markerBWord.breathGlyph.w / 2 <= markerBWord.box.x + markerBWord.box.w * 0.35, 'BREATH_FALLBACK_NOT_LEADING_TARGET_WORD', multiMarkerSample);
+requirePass(markerXyWord.breathGlyph.x + markerXyWord.breathGlyph.w / 2 <= markerXyWord.box.x + markerXyWord.box.w * 0.30, 'SAME_CHARACTER_BREATH_NOT_LEADING_TARGET_CHAR', multiMarkerSample);
+requirePass(markerXyWord.stressGlyph.x + markerXyWord.stressGlyph.w / 2 >= markerXyWord.box.x && markerXyWord.stressGlyph.x + markerXyWord.stressGlyph.w / 2 <= markerXyWord.box.x + markerXyWord.box.w * 0.48, 'SAME_CHARACTER_STRESS_NOT_ON_TARGET_CHAR', multiMarkerSample);
+requirePass(markerXyWord.stressGlyph.y + markerXyWord.stressGlyph.h / 2 >= markerXyWord.box.y + markerXyWord.box.h * 0.60, 'SAME_CHARACTER_STRESS_DOT_NOT_BELOW_TEXT', multiMarkerSample);
 
 console.log('META_SAMPLES:', JSON.stringify(metaSamples));
 console.log('INTRO_COUNTDOWN:', JSON.stringify(introCountdownSample));
 console.log('COUNTDOWN_AFTER_META:', JSON.stringify(countdownSample));
 console.log('SHORT_GAP_SAMPLE:', JSON.stringify(shortGapSample));
 console.log('INTERLUDE_COUNTDOWN:', JSON.stringify(interludeSample));
+console.log('TWO_DOT_COUNTDOWN:', JSON.stringify(twoDotSample));
+console.log('ONE_DOT_COUNTDOWN:', JSON.stringify(oneDotSample));
 console.log('BUBBLE_SAMPLE:', JSON.stringify(bubbleSample));
 console.log('ANNOTATION_COUNTS_AFTER_REPEAT_FETCH:', JSON.stringify(annotationCounts));
 console.log('STRESS_SAMPLE:', JSON.stringify(stressSample));
 console.log('LONG_TONE_SAMPLE:', JSON.stringify(longToneSample));
 console.log('BREATH_SAMPLE:', JSON.stringify(breathSample));
+console.log('MULTI_MARKER_SAMPLE:', JSON.stringify(multiMarkerSample));
 await page.screenshot({ path: resolve(SCRIPT_DIR, 'playwright-artifacts/verify-meta-stress.png'), fullPage: false });
 await browser.close();

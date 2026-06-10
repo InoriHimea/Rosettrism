@@ -151,6 +151,9 @@ const dictionaries = {
     aiApiKey: 'API Key',
     aiModel: '模型名',
     aiApiKeyHint: '留空时后端使用 ROSETTRISM_OPENAI_API_KEY。',
+    serverToken: '服务 Token',
+    serverTokenHint: '远程仪表盘 API 鉴权使用；也可以通过 ?token=... 带入。',
+    authFailed: '服务 Token 缺失或无效。',
     collapseSidebar: '收起菜单',
     expandSidebar: '展开菜单',
     qualityPending: 'AI 评分入口已预留；配置模型后可接入重新评分。',
@@ -290,6 +293,9 @@ const dictionaries = {
     aiApiKey: 'API key',
     aiModel: 'Model',
     aiApiKeyHint: 'Leave empty to use ROSETTRISM_OPENAI_API_KEY on the server.',
+    serverToken: 'Server token',
+    serverTokenHint: 'Used for remote dashboard API requests; ?token=... also works.',
+    authFailed: 'Server token is missing or invalid.',
     collapseSidebar: 'Collapse menu',
     expandSidebar: 'Expand menu',
     qualityPending: 'AI scoring is ready to be wired once a model is configured.',
@@ -328,12 +334,43 @@ const defaultAiSettings = {
   model: '',
 };
 
+const SERVER_TOKEN_STORAGE_KEY = 'rosettrism-server-token';
+const SERVER_TOKEN_QUERY_KEYS = ['token', 'rosettrism_token', 'server_token'];
+
 function readAiSettings() {
   try {
     const stored = JSON.parse(localStorage.getItem('rosettrism-ai-settings') || 'null');
-    return { ...defaultAiSettings, ...(stored || {}) };
+    const { apiKey: _apiKey, ...storedWithoutSecret } = stored || {};
+    return { ...defaultAiSettings, ...storedWithoutSecret };
   } catch {
     return defaultAiSettings;
+  }
+}
+
+function persistAiSettings(settings) {
+  const { apiKey: _apiKey, ...settingsWithoutSecret } = settings;
+  localStorage.setItem('rosettrism-ai-settings', JSON.stringify(settingsWithoutSecret));
+}
+
+function readServerToken() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const key = SERVER_TOKEN_QUERY_KEYS.find((name) => params.get(name)?.trim());
+    if (key) {
+      const token = params.get(key).trim();
+      SERVER_TOKEN_QUERY_KEYS.forEach((name) => params.delete(name));
+      sessionStorage.setItem(SERVER_TOKEN_STORAGE_KEY, token);
+      const query = params.toString();
+      window.history.replaceState(
+        null,
+        '',
+        `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`,
+      );
+      return token;
+    }
+    return sessionStorage.getItem(SERVER_TOKEN_STORAGE_KEY) || '';
+  } catch {
+    return '';
   }
 }
 
@@ -357,6 +394,7 @@ function App() {
   const [resultDetailScrollTick, setResultDetailScrollTick] = useState(0);
   const [lyricSettings, setLyricSettings] = useState(readLyricSettings);
   const [aiSettings, setAiSettings] = useState(readAiSettings);
+  const [serverToken, setServerToken] = useState(readServerToken);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [selectedCacheEntry, setSelectedCacheEntry] = useState(null);
@@ -381,8 +419,16 @@ function App() {
   }, [lyricSettings]);
 
   useEffect(() => {
-    localStorage.setItem('rosettrism-ai-settings', JSON.stringify(aiSettings));
+    persistAiSettings(aiSettings);
   }, [aiSettings]);
+
+  useEffect(() => {
+    if (serverToken.trim()) {
+      sessionStorage.setItem(SERVER_TOKEN_STORAGE_KEY, serverToken.trim());
+    } else {
+      sessionStorage.removeItem(SERVER_TOKEN_STORAGE_KEY);
+    }
+  }, [serverToken]);
 
   const aiScoringPayload = useMemo(() => buildAiScoringPayload(aiSettings), [aiSettings]);
 
@@ -422,14 +468,25 @@ function App() {
     return Object.fromEntries(Object.entries(next).filter(([, value]) => value !== undefined && value !== ''));
   }, [body, source]);
 
+  function apiFetch(url, options = {}) {
+    const headers = { ...(options.headers || {}) };
+    if (serverToken.trim()) {
+      headers.authorization = `Bearer ${serverToken.trim()}`;
+    }
+    return fetch(url, { ...options, headers });
+  }
+
   async function refreshMeta() {
     try {
       const [healthRes, statsRes, cacheRes] = await Promise.all([
-        fetch('/api/health'),
-        fetch('/api/stats'),
-        fetch('/api/cache'),
+        apiFetch('/api/health'),
+        apiFetch('/api/stats'),
+        apiFetch('/api/cache'),
       ]);
       if (!healthRes.ok || !statsRes.ok || !cacheRes.ok) {
+        if ([healthRes, statsRes, cacheRes].some((response) => response.status === 401)) {
+          setError(t.authFailed);
+        }
         return;
       }
       const [healthData, statsData, cacheData] = await Promise.all([
@@ -459,8 +516,12 @@ function App() {
     setResult('');
     setSearchResults([]);
     setSearchWarnings([]);
+    setSelectedResult(null);
+    setResultDetail('');
+    setResultDetailData(null);
+    setResultDetailBusy(false);
     try {
-      const response = await fetch('/api/search', {
+      const response = await apiFetch('/api/search', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(searchPayload),
@@ -486,7 +547,7 @@ function App() {
     setError('');
     setResult('');
     try {
-      const response = await fetch('/api/fetch', {
+      const response = await apiFetch('/api/fetch', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(aggregatePayload),
@@ -526,7 +587,7 @@ function App() {
     setResultDetailBusy(true);
     setError('');
     try {
-      const response = await fetch('/api/fetch-result', {
+      const response = await apiFetch('/api/fetch-result', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -560,12 +621,20 @@ function App() {
     if (!window.confirm(t.deleteConfirm)) {
       return;
     }
-    await fetch(`/api/cache/${id}`, { method: 'DELETE' });
-    if (selectedCacheEntry?.id === id) {
-      setSelectedCacheEntry(null);
-      setCacheDetail(null);
+    setError('');
+    try {
+      const response = await apiFetch(`/api/cache/${id}`, { method: 'DELETE' });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      if (selectedCacheEntry?.id === id) {
+        setSelectedCacheEntry(null);
+        setCacheDetail(null);
+      }
+      await refreshMeta();
+    } catch (err) {
+      setError(err.message);
     }
-    await refreshMeta();
   }
 
   async function selectCacheEntry(entry) {
@@ -573,7 +642,7 @@ function App() {
     setCacheDetail(null);
     setCacheDetailBusy(true);
     try {
-      const response = await fetch(`/api/cache/${entry.id}`);
+      const response = await apiFetch(`/api/cache/${entry.id}`);
       if (!response.ok) {
         throw new Error(await response.text());
       }
@@ -686,6 +755,8 @@ function App() {
             setLyricSettings={setLyricSettings}
             aiSettings={aiSettings}
             setAiSettings={setAiSettings}
+            serverToken={serverToken}
+            setServerToken={setServerToken}
             payload={searchPayload}
           />
         )}
@@ -1612,7 +1683,18 @@ function InspectorView({ t, result }) {
   );
 }
 
-function SettingsView({ t, language, setLanguage, lyricSettings, setLyricSettings, aiSettings, setAiSettings, payload }) {
+function SettingsView({
+  t,
+  language,
+  setLanguage,
+  lyricSettings,
+  setLyricSettings,
+  aiSettings,
+  setAiSettings,
+  serverToken,
+  setServerToken,
+  payload,
+}) {
   const previewStyle = {
     '--lyric-solid-color': lyricSettings.solidColor,
     '--lyric-gradient': resolveLyricGradient(lyricSettings.colorPreset),
@@ -1629,6 +1711,16 @@ function SettingsView({ t, language, setLanguage, lyricSettings, setLyricSetting
             <option value="zh">{t.chinese}</option>
             <option value="en">{t.english}</option>
           </select>
+        </label>
+        <label className="field-label">
+          {t.serverToken}
+          <input
+            type="password"
+            value={serverToken}
+            autoComplete="off"
+            onChange={(event) => setServerToken(event.target.value)}
+          />
+          <span>{t.serverTokenHint}</span>
         </label>
         <div className="settings-group">
           <strong>{t.aiScoring}</strong>

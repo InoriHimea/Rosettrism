@@ -464,16 +464,35 @@ async fn asset(Path(path): Path<String>) -> impl IntoResponse {
 }
 
 fn asset_response(path: &str) -> axum::response::Response {
-    let asset = DashboardAssets::get(path).or_else(|| DashboardAssets::get("index.html"));
-    let Some(asset) = asset else {
-        return (
-            StatusCode::NOT_FOUND,
-            "dashboard assets were not embedded; run npm build in frontend",
-        )
+    if let Some(asset) = DashboardAssets::get(path) {
+        let mime = mime_guess::from_path(path).first_or_text_plain();
+        return response_with_body(StatusCode::OK, mime.as_ref(), asset.data.into_owned())
             .into_response();
-    };
-    let mime = mime_guess::from_path(path).first_or_text_plain();
-    response_with_body(StatusCode::OK, mime.as_ref(), asset.data.into_owned()).into_response()
+    }
+
+    if should_fallback_to_index(path) {
+        if let Some(asset) = DashboardAssets::get("index.html") {
+            return response_with_body(StatusCode::OK, "text/html", asset.data.into_owned())
+                .into_response();
+        }
+    }
+
+    (
+        StatusCode::NOT_FOUND,
+        "dashboard asset was not found; run npm build in frontend",
+    )
+        .into_response()
+}
+
+fn should_fallback_to_index(path: &str) -> bool {
+    let path = path.trim_start_matches('/');
+    if path.is_empty() || path == "index.html" {
+        return true;
+    }
+    if path.starts_with("assets/") || path.contains('.') {
+        return false;
+    }
+    true
 }
 
 fn response_with_body(
@@ -783,26 +802,110 @@ fn title_field_matches(value: &str, filter: &str) -> bool {
 
 fn keyword_matches(result: &SearchResult, query: &str) -> bool {
     let haystack = normalized_text(
-        &[
-            result.title.as_str(),
-            result.artist.as_str(),
-            result.album.as_deref().unwrap_or_default(),
-            result.id.as_str(),
-        ]
-        .join(" "),
+        &keyword_haystack_values(result)
+            .into_iter()
+            .filter(|value| !value.is_empty())
+            .collect::<Vec<_>>()
+            .join(" "),
     );
-    let terms = query
+    let term_groups = query
         .split_whitespace()
-        .map(normalized_text)
-        .filter(|term| !term.is_empty())
+        .map(keyword_term_alternatives)
+        .filter(|terms| !terms.is_empty())
         .collect::<Vec<_>>();
 
-    !terms.is_empty()
-        && terms.iter().all(|term| {
-            haystack.contains(term)
-                || (term.chars().count() <= 3
-                    && haystack.contains(&term.chars().rev().collect::<String>()))
+    !term_groups.is_empty()
+        && term_groups.iter().all(|terms| {
+            terms.iter().any(|term| {
+                haystack.contains(term)
+                    || (term.chars().count() <= 3
+                        && haystack.contains(&term.chars().rev().collect::<String>()))
+            })
         })
+}
+
+fn keyword_haystack_values(result: &SearchResult) -> Vec<String> {
+    let mut values = vec![
+        result.title.clone(),
+        result.artist.clone(),
+        result.album.clone().unwrap_or_default(),
+        result.id.clone(),
+    ];
+    collect_extra_keyword_values(&result.extra, &mut values);
+    values
+}
+
+fn collect_extra_keyword_values(extra: &Value, values: &mut Vec<String>) {
+    const DIRECT_KEYS: &[&str] = &[
+        "url",
+        "songmid",
+        "songid",
+        "song_id",
+        "lyrics_id",
+        "lrclib_id",
+        "spotify_track_id",
+        "album_audio_id",
+        "hash",
+    ];
+    let Value::Object(object) = extra else {
+        return;
+    };
+    for key in DIRECT_KEYS {
+        if let Some(value) = object.get(*key) {
+            match value {
+                Value::String(value) => values.push(value.clone()),
+                Value::Number(value) => values.push(value.to_string()),
+                _ => {}
+            }
+        }
+    }
+}
+
+fn keyword_term_alternatives(term: &str) -> Vec<String> {
+    let trimmed = term.trim();
+    let mut alternatives = Vec::new();
+    push_normalized_keyword(&mut alternatives, trimmed);
+    if let Some(id) = trimmed.strip_prefix("id:") {
+        push_normalized_keyword(&mut alternatives, id);
+    }
+    if let Some(id) = direct_query_tail_id(trimmed) {
+        push_normalized_keyword(&mut alternatives, &id);
+    }
+    alternatives
+}
+
+fn push_normalized_keyword(alternatives: &mut Vec<String>, value: &str) {
+    let normalized = normalized_text(value);
+    if !normalized.is_empty() && !alternatives.contains(&normalized) {
+        alternatives.push(normalized);
+    }
+}
+
+fn direct_query_tail_id(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if !trimmed.contains("://") && !trimmed.starts_with("spotify:") {
+        return None;
+    }
+
+    if let Some((_, query)) = trimmed.split_once('?') {
+        for part in query.split('&') {
+            let (key, value) = part.split_once('=').unwrap_or((part, ""));
+            if matches!(key, "i" | "id" | "track" | "track_id" | "surl") && !value.is_empty() {
+                return Some(value.to_string());
+            }
+        }
+    }
+
+    let without_fragment = trimmed.split('#').next().unwrap_or(trimmed);
+    let without_query = without_fragment
+        .split('?')
+        .next()
+        .unwrap_or(without_fragment);
+    without_query
+        .trim_end_matches('/')
+        .rsplit(['/', ':'])
+        .find(|part| !part.trim().is_empty())
+        .map(ToOwned::to_owned)
 }
 
 fn common_char_ratio(value: &str, filter: &str) -> f32 {
@@ -1133,6 +1236,21 @@ mod tests {
     }
 
     #[test]
+    fn dashboard_fallback_is_limited_to_spa_routes() {
+        assert!(should_fallback_to_index(""));
+        assert!(should_fallback_to_index("fetch"));
+        assert!(should_fallback_to_index("cache/123"));
+        assert!(!should_fallback_to_index("assets/missing.js"));
+        assert!(!should_fallback_to_index("favicon.ico"));
+    }
+
+    #[test]
+    fn missing_dashboard_asset_returns_not_found() {
+        let response = asset_response("assets/definitely-missing.js");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[test]
     fn field_search_filters_only_requested_fields() {
         let original = result(Source::Qq, "海阔天空", "BEYOND", Some("乐与怒"), "mid-1");
         let japanese = result(
@@ -1186,6 +1304,60 @@ mod tests {
         assert!(!result_matches_intent(
             &album_match,
             &SearchIntent::Id("海阔".into())
+        ));
+    }
+
+    #[test]
+    fn keyword_search_keeps_direct_url_and_id_results() {
+        let utaten = SearchResult {
+            source: Source::Utaten,
+            id: "ya17060751".into(),
+            title: "UtaTen ya17060751".into(),
+            artist: String::new(),
+            album: None,
+            duration_ms: None,
+            extra: json!({
+                "lyrics_id": "ya17060751",
+                "url": "https://utaten.com/lyric/ya17060751/"
+            }),
+        };
+        assert!(result_matches_intent(
+            &utaten,
+            &SearchIntent::Keyword("https://utaten.com/lyric/ya17060751/".into())
+        ));
+
+        let spotify = SearchResult {
+            source: Source::SpotifyLyrics,
+            id: "ABCDEFGHIJKLMNOPQRSTUV".into(),
+            title: "Spotify track ABCDEFGHIJKLMNOPQRSTUV".into(),
+            artist: String::new(),
+            album: None,
+            duration_ms: None,
+            extra: json!({
+                "spotify_track_id": "ABCDEFGHIJKLMNOPQRSTUV"
+            }),
+        };
+        assert!(result_matches_intent(
+            &spotify,
+            &SearchIntent::Keyword(
+                "https://open.spotify.com/track/ABCDEFGHIJKLMNOPQRSTUV?si=abc".into()
+            )
+        ));
+
+        let web_source = SearchResult {
+            source: Source::UtaNet,
+            id: "abc123".into(),
+            title: "Uta-Net abc123".into(),
+            artist: String::new(),
+            album: None,
+            duration_ms: None,
+            extra: json!({
+                "url": "https://example.test/showkasi.php?surl=abc123"
+            }),
+        };
+        assert!(result_matches_intent(
+            &web_source,
+            &SearchIntent::Keyword("id:abc123".into())
         ));
     }
 

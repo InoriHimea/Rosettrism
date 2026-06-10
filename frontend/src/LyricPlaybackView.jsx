@@ -22,10 +22,11 @@ export function LyricPlaybackView({ lyric, settings, t }) {
     ? ''
     : formatArtistLabel(lyric.artist, lyric.artistAlias);
   const metaLines = lyric.lines.filter((line) => line.isMeta);
-  const staticMetaLines = lyric.lines.filter((line) => line.isMeta && !hasUsableLineTime(line));
   const bodyLines = lyric.lines.filter((line) => !line.isMeta);
-  const introMetaLines = buildIntroMetaLines(metaLines);
-  const flowLines = [...introMetaLines, ...bodyLines].sort((a, b) => a.startMs - b.startMs);
+  const firstBodyStartMs = bodyLines[0]?.startMs || 0;
+  const introMetaLines = buildIntroMetaLines(metaLines, firstBodyStartMs);
+  const introMetaEndMs = introMetaLines.length ? Math.max(...introMetaLines.map((line) => line.endMs || 0)) : 0;
+  const flowLines = [...introMetaLines, ...bodyLines];
   const hasTranslations = bodyLines.some((line) => hasLineTranslation(line));
   const candidateBodyIndex = findActiveLineIndex(bodyLines, currentMs);
   const candidateBodyLine = candidateBodyIndex >= 0 ? bodyLines[candidateBodyIndex] : null;
@@ -41,19 +42,18 @@ export function LyricPlaybackView({ lyric, settings, t }) {
   const nextBodyLine = nextBodyIndex >= 0 ? bodyLines[nextBodyIndex] : null;
   const nextFlowIndex = flowLines.findIndex((line) => line.startMs > currentMs);
   const nextFlowLine = nextFlowIndex >= 0 ? flowLines[nextFlowIndex] : null;
-  const countdown = lyricCountdown(bodyLines, currentMs);
+  const countdown = lyricCountdown(bodyLines, currentMs, { introMetaEndMs });
   const showCountdown = countdown.visible;
-  const countdownBodyIndex = countdown.targetLineId
-    ? bodyLines.findIndex((line) => line.id === countdown.targetLineId)
-    : -1;
   const visibleFlowLine = activeFlowLine || nextFlowLine || flowLines[flowLines.length - 1];
   const visibleBodyLine = activeBodyLine || nextBodyLine || bodyLines[bodyLines.length - 1];
-  const currentStripText = activeFlowLine?.text || visibleBodyLine?.text;
+  const currentStripText = showCountdown ? '•••' : activeFlowLine?.text || visibleBodyLine?.text;
   const focusFlowIndex = activeFlowIndex >= 0 ? activeFlowIndex : nextFlowIndex >= 0 ? nextFlowIndex : flowLines.length - 1;
+  const focusBodyIndex = activeBodyIndex >= 0 ? activeBodyIndex : nextBodyIndex >= 0 ? nextBodyIndex : bodyLines.length - 1;
   const initialFlowLine = flowLines[0];
+  const countdownTargetId = showCountdown && countdown.targetLineId ? `countdown-${countdown.targetLineId}` : null;
   const scrollTargetId = currentMs <= 0
     ? initialFlowLine?.id
-    : (activeFlowLine ? activeFlowLine.id : visibleFlowLine?.id);
+    : (countdownTargetId || (activeFlowLine ? activeFlowLine.id : visibleFlowLine?.id));
 
   useEffect(() => {
     if (!isPlaying) {
@@ -76,6 +76,12 @@ export function LyricPlaybackView({ lyric, settings, t }) {
 
   useLayoutEffect(() => {
     const container = linesRef.current;
+    if (renderMode === 'karaoke') {
+      if (container) {
+        container.scrollTop = 0;
+      }
+      return;
+    }
     const node = scrollTargetId ? lineRefs.current.get(scrollTargetId) : null;
     if (!container || !node) {
       return;
@@ -142,10 +148,13 @@ export function LyricPlaybackView({ lyric, settings, t }) {
       <div className={`lyric-stage lyric-stage-qq lyric-stage-${renderMode}`}>
         {renderMode === 'karaoke' ? (
           <KaraokeStage
-            flowLines={flowLines}
+            bodyLines={bodyLines}
             currentMs={currentMs}
-            activeFlowLine={activeFlowLine}
-            focusFlowIndex={focusFlowIndex}
+            activeBodyLine={activeBodyLine}
+            activeMetaLine={activeMetaLine}
+            activeMetaIndex={activeMetaIndex}
+            introMetaLines={introMetaLines}
+            focusBodyIndex={focusBodyIndex}
             showCountdown={showCountdown}
             countdown={countdown}
             translationMode={translationMode}
@@ -232,32 +241,49 @@ export function LyricPlaybackView({ lyric, settings, t }) {
   );
 }
 
-function CountdownRow({ countdown, refCallback }) {
+function CountdownRow({ countdown, refCallback, laneClass = '' }) {
   return (
     <div
-      className={`lyric-line lyric-line-countdown lyric-line-distance-0${countdown.flashing ? ' lyric-dots-flashing' : ''}${countdown.exiting ? ' lyric-dots-exiting' : ''}`}
+      className={`lyric-line lyric-line-countdown lyric-line-distance-0 lyric-line-countdown-${countdown.kind || 'gap'}${countdown.flashing ? ' lyric-dots-flashing' : ''}${countdown.exiting ? ' lyric-dots-exiting' : ''}${laneClass ? ` ${laneClass}` : ''}`}
       ref={refCallback || null}
     >
-      <CountdownDots count={countdown.count} />
+      <CountdownDots count={countdown.count} exiting={countdown.exiting} />
     </div>
   );
 }
 
-function CountdownDots({ count }) {
+function CountdownDots({ count, exiting = false }) {
   return (
     <span className="lyric-gap-dots" aria-label="•••">
       {[0, 1, 2].map((index) => (
-        <span className={index >= count ? 'lyric-gap-dot lyric-gap-dot-hidden' : 'lyric-gap-dot'} key={index}>•</span>
+        <span className={countdownDotClass(index, count, exiting)} key={index}>•</span>
       ))}
     </span>
   );
 }
 
+function countdownDotClass(index, count, exiting) {
+  const activeCount = Math.max(0, Math.min(3, count));
+  if (exiting) {
+    return index === 0 ? 'lyric-gap-dot lyric-gap-dot-popping' : 'lyric-gap-dot lyric-gap-dot-gone';
+  }
+  if (index < activeCount) {
+    return 'lyric-gap-dot lyric-gap-dot-active';
+  }
+  if (index === activeCount && activeCount < 3) {
+    return 'lyric-gap-dot lyric-gap-dot-popping';
+  }
+  return 'lyric-gap-dot lyric-gap-dot-gone';
+}
+
 function KaraokeStage({
-  flowLines,
+  bodyLines,
   currentMs,
-  activeFlowLine,
-  focusFlowIndex,
+  activeBodyLine,
+  activeMetaLine,
+  activeMetaIndex,
+  introMetaLines,
+  focusBodyIndex,
   showCountdown,
   countdown,
   translationMode,
@@ -266,31 +292,119 @@ function KaraokeStage({
   linesRef,
   t,
 }) {
+  const laneItems = activeMetaLine
+    ? []
+    : karaokeLaneItems(bodyLines, activeBodyLine, focusBodyIndex, showCountdown, countdown);
+  const placeholderLanes = karaokePlaceholderLanes(laneItems);
   return (
-    <div className="lyric-karaoke-lines" ref={linesRef} aria-live="polite">
-      {flowLines.map((line, flowIndex) => {
-        const isActive = activeFlowLine?.id === line.id;
-        const countdownBeforeLine = showCountdown && countdown.targetLineId === line.id;
-        const laneClass = flowIndex % 2 === 0 ? 'lyric-karaoke-line-left' : 'lyric-karaoke-line-right';
+    <div className="lyric-karaoke-lines lyric-karaoke-dual-lines" ref={linesRef} aria-live="polite">
+      <KaraokeMetaPanel lines={introMetaLines} activeLine={activeMetaLine} activeIndex={activeMetaIndex} />
+      {laneItems.map((item) => {
+        if (item.kind === 'countdown') {
+          const { targetLine, bodyIndex } = item;
+          const isActive = activeBodyLine?.id === targetLine?.id;
+          return (
+            <div className={`lyric-karaoke-stack ${item.laneClass} ${item.lanePositionClass}`} key={item.key}>
+              <CountdownRow
+                countdown={countdown}
+                laneClass={`lyric-karaoke-line lyric-karaoke-countdown-above ${item.laneClass} ${item.lanePositionClass}`}
+                refCallback={bindLineRef(item.key)}
+              />
+              {targetLine ? (
+                <button
+                  className={`${lineClassName(targetLine, currentMs, isActive, bodyIndex, focusBodyIndex)} lyric-karaoke-line lyric-karaoke-countdown-target ${item.laneClass}`}
+                  type="button"
+                  onClick={() => seek(targetLine.startMs)}
+                  ref={bindLineRef(targetLine.id)}
+                >
+                  <LineText line={targetLine} currentMs={currentMs} active={isActive} translationMode={translationMode} t={t} />
+                  <LineSubtext line={targetLine} translationMode={translationMode} />
+                </button>
+              ) : null}
+            </div>
+          );
+        }
+        const { line, bodyIndex } = item;
+        const isActive = activeBodyLine?.id === line.id;
         return (
-          <React.Fragment key={line.id}>
-            {countdownBeforeLine ? (
-              <CountdownRow countdown={countdown} refCallback={bindLineRef(`countdown-${line.id}`)} />
-            ) : null}
-            <button
-              className={`${lineClassName(line, currentMs, isActive, flowIndex, focusFlowIndex)} lyric-karaoke-line ${laneClass}`}
-              type="button"
-              onClick={() => seek(line.startMs)}
-              ref={bindLineRef(line.id)}
-            >
-              <LineText line={line} currentMs={currentMs} active={isActive} translationMode={translationMode} t={t} />
-              <LineSubtext line={line} translationMode={translationMode} />
-            </button>
-          </React.Fragment>
+          <button
+            className={`${lineClassName(line, currentMs, isActive, bodyIndex, focusBodyIndex)} lyric-karaoke-line ${item.laneClass} ${item.lanePositionClass}`}
+            type="button"
+            onClick={() => seek(line.startMs)}
+            ref={bindLineRef(line.id)}
+            key={line.id}
+          >
+            <LineText line={line} currentMs={currentMs} active={isActive} translationMode={translationMode} t={t} />
+            <LineSubtext line={line} translationMode={translationMode} />
+          </button>
         );
       })}
+      {placeholderLanes.map((laneClass) => (
+        <span className={`lyric-karaoke-placeholder ${laneClass}`} aria-hidden="true" key={laneClass} />
+      ))}
     </div>
   );
+}
+
+function KaraokeMetaPanel({ lines, activeLine, activeIndex }) {
+  if (!activeLine || !lines.length) {
+    return null;
+  }
+  return (
+    <div className="lyric-karaoke-meta-panel" aria-live="polite">
+      <span className="lyric-karaoke-meta-index">{activeIndex + 1}/{lines.length}</span>
+      <span className="lyric-karaoke-meta-line">{activeLine.text}</span>
+    </div>
+  );
+}
+
+function karaokeLaneItems(bodyLines, activeBodyLine, focusBodyIndex, showCountdown, countdown) {
+  if (!bodyLines.length) {
+    return [];
+  }
+  if (showCountdown) {
+    const targetIndex = bodyLines.findIndex((line) => line.id === countdown.targetLineId);
+    const targetLine = targetIndex >= 0 ? bodyLines[targetIndex] : null;
+    const targetLane = targetLine
+      ? karaokeLineLaneItem(targetLine, targetIndex)
+      : karaokeLineLaneItem(bodyLines[Math.max(0, Math.min(bodyLines.length - 1, focusBodyIndex))], Math.max(0, focusBodyIndex));
+    return [
+      {
+        kind: 'countdown',
+        key: countdown.targetLineId ? `countdown-${countdown.targetLineId}` : 'countdown-gap',
+        targetLine,
+        bodyIndex: targetIndex,
+        laneClass: targetLane.laneClass,
+        lanePositionClass: targetLane.lanePositionClass,
+      },
+    ];
+  }
+
+  const primaryIndex = Math.max(0, Math.min(bodyLines.length - 1, focusBodyIndex));
+  const indexes = [primaryIndex, primaryIndex + 1].filter((index, position, list) => index < bodyLines.length && list.indexOf(index) === position);
+  return indexes
+    .map((index) => karaokeLineLaneItem(bodyLines[index], index))
+    .sort((left, right) => laneSortIndex(left.lanePositionClass) - laneSortIndex(right.lanePositionClass));
+}
+
+function karaokeLineLaneItem(line, bodyIndex) {
+  const topLane = bodyIndex % 2 === 0;
+  return {
+    kind: 'line',
+    line,
+    bodyIndex,
+    laneClass: topLane ? 'lyric-karaoke-line-left' : 'lyric-karaoke-line-right',
+    lanePositionClass: topLane ? 'lyric-karaoke-lane-top' : 'lyric-karaoke-lane-bottom',
+  };
+}
+
+function karaokePlaceholderLanes(items) {
+  const occupied = new Set(items.map((item) => item.lanePositionClass).filter(Boolean));
+  return ['lyric-karaoke-lane-top', 'lyric-karaoke-lane-bottom'].filter((laneClass) => !occupied.has(laneClass));
+}
+
+function laneSortIndex(lanePositionClass) {
+  return lanePositionClass === 'lyric-karaoke-lane-top' ? 0 : 1;
 }
 
 function LineText({ line, currentMs, active, translationMode, t }) {
@@ -469,12 +583,18 @@ function annotationGlyphText(type) {
 }
 
 function AnnotationLayer({ annotations, active, t }) {
-  const unique = [...new Map(annotations.map((annotation) => [annotation.type, annotation])).values()];
+  const unique = uniqueAnnotations(annotations);
+  const labelState = annotationLabelState(unique);
   return (
     <span className="lyric-annotation-layer" aria-hidden="true">
       {unique.map((annotation, index) => {
         const label = t ? t[annotation.labelKey] || annotation.type : annotation.type;
-        const style = { '--annotation-index': String(index) };
+        const style = {
+          '--annotation-index': String(index),
+          '--annotation-label-row': String(labelState.rows.get(annotation.id) ?? index),
+          '--annotation-x': `${annotationAnchorPercent(annotation)}%`,
+        };
+        const showLabel = active && labelState.ids.has(annotation.id);
         return (
           <span
             key={annotation.id}
@@ -482,13 +602,70 @@ function AnnotationLayer({ annotations, active, t }) {
             style={style}
             title={annotation.text ? `${label}: ${annotation.text}` : label}
           >
-            {active ? <span className="lyric-annotation-text lyric-annotation-label">{label}</span> : null}
+            {showLabel ? <span className="lyric-annotation-text lyric-annotation-label">{label}</span> : null}
             <AnnotationGlyph type={annotation.type} />
           </span>
         );
       })}
     </span>
   );
+}
+
+function uniqueAnnotations(annotations) {
+  const unique = new Map();
+  for (const annotation of annotations) {
+    const key = annotation.id || `${annotation.type}:${annotation.startMs}:${annotation.text}:${annotation.anchorKey || ''}`;
+    if (!unique.has(key)) {
+      unique.set(key, annotation);
+    }
+  }
+  return [...unique.values()];
+}
+
+function annotationLabelState(annotations) {
+  const groups = new Map();
+  annotations.forEach((annotation, index) => {
+    if (annotation.suppressLabel) {
+      return;
+    }
+    const key = annotationAnchorKey(annotation);
+    const candidate = { annotation, index, priority: annotationLabelPriority(annotation.type) };
+    const current = groups.get(key);
+    if (!current || candidate.priority < current.priority || (candidate.priority === current.priority && index < current.index)) {
+      groups.set(key, candidate);
+    }
+  });
+
+  const labels = [...groups.values()].sort((left, right) => {
+    const percent = annotationAnchorPercent(left.annotation) - annotationAnchorPercent(right.annotation);
+    return Math.abs(percent) > 0.01 ? percent : left.index - right.index;
+  });
+  return {
+    ids: new Set(labels.map((entry) => entry.annotation.id)),
+    rows: new Map(labels.map((entry, row) => [entry.annotation.id, row])),
+  };
+}
+
+function annotationAnchorKey(annotation) {
+  return annotation.anchorKey || `${Math.round(annotationAnchorPercent(annotation) / 6)}`;
+}
+
+function annotationAnchorPercent(annotation) {
+  const value = Number(annotation.anchorPercent);
+  return Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : 50;
+}
+
+function annotationLabelPriority(type) {
+  switch (type) {
+    case 'breath':
+      return 0;
+    case 'stress':
+      return 1;
+    case 'long_tone':
+      return 2;
+    default:
+      return 3;
+  }
 }
 
 function AnnotationGlyph({ type }) {
@@ -553,15 +730,11 @@ function lineClassName(line, currentMs, active, bodyIndex, focusBodyIndex) {
   return `lyric-line ${state} lyric-line-distance-${distance}${line?.isMeta ? ' lyric-line-meta' : ''}`;
 }
 
-function hasUsableLineTime(line) {
-  return Number.isFinite(line.startMs) && line.startMs > 0;
-}
-
 function findActiveTimedLineIndex(lines, currentMs) {
   return lines.findIndex((line) => currentMs >= line.startMs && currentMs < line.endMs);
 }
 
-function buildIntroMetaLines(lines) {
+function buildIntroMetaLines(lines, firstBodyStartMs = 0) {
   const unique = [];
   const seen = new Set();
   const titleText = firstMetaTitleText(lines);
@@ -575,19 +748,34 @@ function buildIntroMetaLines(lines) {
       continue;
     }
     seen.add(comparable);
-    const index = unique.length;
     unique.push({
       ...line,
       id: `intro-${line.id}`,
-      startMs: index * 2000,
-      durationMs: 2000,
-      endMs: (index + 1) * 2000,
       isMeta: true,
       words: [],
       annotations: [],
     });
   }
-  return unique;
+
+  const durationMs = introMetaDurationMs(unique.length, firstBodyStartMs);
+  return unique.map((line, index) => ({
+    ...line,
+    startMs: index * durationMs,
+    durationMs,
+    endMs: (index + 1) * durationMs,
+  }));
+}
+
+function introMetaDurationMs(count, firstBodyStartMs) {
+  if (!count) {
+    return 1200;
+  }
+  if (!Number.isFinite(firstBodyStartMs) || firstBodyStartMs <= 0) {
+    return 1200;
+  }
+  const availableMs = Math.max(720, firstBodyStartMs - 1200);
+  const perLineMs = Math.floor(availableMs / count);
+  return Math.max(perLineMs < 1000 ? 720 : 1000, Math.min(2000, perLineMs));
 }
 
 function firstMetaTitleText(lines) {
@@ -609,15 +797,20 @@ function looksLikeTitleDuplicate(text, titleText) {
   return Boolean(title && (normalized === title || title.includes(normalized) || normalized.includes(title)));
 }
 
-function lyricCountdown(lines, currentMs) {
-  const exitingLine = lines.find((line, index) => countdownEligible(lines, index) && currentMs >= line.startMs && currentMs < line.startMs + 420);
+function lyricCountdown(lines, currentMs, { introMetaEndMs = 0 } = {}) {
+  const exitingLine = lines.find((line, index) => {
+    const kind = countdownSeparatorKind(lines, index, introMetaEndMs);
+    return kind && currentMs >= line.startMs && currentMs < line.startMs + 420;
+  });
   if (exitingLine) {
+    const exitingIndex = lines.findIndex((line) => line.id === exitingLine.id);
     return {
       count: 1,
       flashing: false,
       exiting: true,
       remainingMs: Math.max(0, exitingLine.startMs + 420 - currentMs),
       targetLineId: exitingLine.id,
+      kind: countdownSeparatorKind(lines, exitingIndex, introMetaEndMs),
       visible: true,
     };
   }
@@ -625,29 +818,45 @@ function lyricCountdown(lines, currentMs) {
   const nextIndex = lines.findIndex((line) => line.startMs > currentMs);
   const nextLine = nextIndex >= 0 ? lines[nextIndex] : null;
   if (!nextLine) {
-    return { count: 0, flashing: false, exiting: false, remainingMs: 0, targetLineId: null, visible: false };
+    return { count: 0, flashing: false, exiting: false, remainingMs: 0, targetLineId: null, kind: 'gap', visible: false };
   }
 
   const remainingMs = nextLine.startMs - currentMs;
-  if (!countdownEligible(lines, nextIndex)) {
-    return { count: 0, flashing: false, exiting: false, remainingMs, targetLineId: nextLine.id, visible: false };
+  const kind = countdownSeparatorKind(lines, nextIndex, introMetaEndMs);
+  const introBlockedByMeta = kind === 'intro' && introMetaEndMs > 0 && currentMs < introMetaEndMs;
+  const interludeBlockedByLyric = kind === 'interlude' && currentMs < previousBodyEndMs(lines, nextIndex);
+  if (!kind || introBlockedByMeta || interludeBlockedByLyric) {
+    return { count: 0, flashing: false, exiting: false, remainingMs, targetLineId: nextLine.id, kind: kind || 'gap', visible: false };
   }
   if (remainingMs <= 1200) {
-    return { count: 1, flashing: false, exiting: false, remainingMs, targetLineId: nextLine.id, visible: true };
+    return { count: 1, flashing: false, exiting: false, remainingMs, targetLineId: nextLine.id, kind, visible: true };
   }
   if (remainingMs <= 2200) {
-    return { count: 2, flashing: false, exiting: false, remainingMs, targetLineId: nextLine.id, visible: true };
+    return { count: 2, flashing: false, exiting: false, remainingMs, targetLineId: nextLine.id, kind, visible: true };
   }
-  return { count: 3, flashing: remainingMs > 3200, exiting: false, remainingMs, targetLineId: nextLine.id, visible: true };
+  return { count: 3, flashing: remainingMs > 3200, exiting: false, remainingMs, targetLineId: nextLine.id, kind, visible: true };
 }
 
-function countdownEligible(lines, index) {
+function countdownSeparatorKind(lines, index, introMetaEndMs = 0) {
   if (index < 0 || !lines[index]) {
-    return false;
+    return null;
   }
   if (index === 0) {
-    return lines[index].startMs >= 3200;
+    const introGapMs = lines[index].startMs - Math.max(0, introMetaEndMs);
+    if (introMetaEndMs > 0) {
+      return introGapMs >= 900 ? 'intro' : null;
+    }
+    return lines[index].startMs >= 3200 ? 'intro' : null;
   }
   const previous = lines[index - 1];
-  return lines[index].startMs - previous.startMs >= 9000;
+  const previousEndMs = previousBodyEndMs(lines, index);
+  return lines[index].startMs - previousEndMs >= 5200 ? 'interlude' : null;
+}
+
+function previousBodyEndMs(lines, index) {
+  const previous = lines[index - 1];
+  if (!previous) {
+    return 0;
+  }
+  return Number.isFinite(previous.endMs) ? previous.endMs : previous.startMs;
 }

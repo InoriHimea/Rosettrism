@@ -190,13 +190,6 @@ impl QqProvider {
         ))
     }
 
-    async fn has_singing_annotations(&self, song_id: u64) -> Result<bool> {
-        Ok(!self
-            .fetch_singing_annotations_lyric(song_id)
-            .await?
-            .is_empty())
-    }
-
     async fn fetch_singing_annotations_lyric(&self, song_id: u64) -> Result<String> {
         let request = singing_annotations_request(song_id);
         let response = self
@@ -216,6 +209,13 @@ impl QqProvider {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string())
+    }
+
+    async fn has_singing_annotations(&self, song_id: u64) -> Result<bool> {
+        Ok(!self
+            .fetch_singing_annotations_lyric(song_id)
+            .await?
+            .is_empty())
     }
 
     async fn fetch_singing_annotations(&self, song_id: u64) -> Result<Vec<Annotation>> {

@@ -26,38 +26,6 @@ impl MusixmatchProvider {
         Self::with_api_base_url(api_key, "https://api.musixmatch.com/ws/1.1")
     }
 
-    #[cfg(test)]
-    fn with_api_base_url(api_key: Option<String>, api_base_url: impl Into<String>) -> Result<Self> {
-        let api_key = api_key
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| {
-                Error::Provider(
-                    "Musixmatch requires an API key. Set ROSETTRISM_MUSIXMATCH_API_KEY (legacy: LRC_DECODE_MUSIXMATCH_API_KEY) or pass a raw key with --cookie-file."
-                        .into(),
-                )
-            })?;
-
-        let mut headers = HeaderMap::new();
-        headers.insert(USER_AGENT, HeaderValue::from_static(USER_AGENT_VALUE));
-        headers.insert(
-            ACCEPT,
-            HeaderValue::from_static("application/json, text/plain, */*"),
-        );
-
-        let client = reqwest::Client::builder()
-            .default_headers(headers)
-            .timeout(Duration::from_secs(12))
-            .build()?;
-
-        Ok(Self {
-            client,
-            api_base_url: trim_trailing_slash(api_base_url.into()),
-            api_key,
-        })
-    }
-
-    #[cfg(not(test))]
     fn with_api_base_url(api_key: Option<String>, api_base_url: impl Into<String>) -> Result<Self> {
         let api_key = api_key
             .map(|value| value.trim().to_string())

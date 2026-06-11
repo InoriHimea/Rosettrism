@@ -1238,51 +1238,53 @@ nav button.nav-active::before {
 }
 
 .lyric-annotation-mark.annotation-stress,
-.lyric-annotation-mark.annotation-long-tone {
-  font-size: 1em;
-}
-
-.lyric-annotation-mark.annotation-breath {
-  display: grid;
-  gap: 0.02em;
-  justify-items: center;
-  left: var(--annotation-x, 0%);
-  top: calc(-1.62em - var(--annotation-label-row, 0) * 1.18em);
-  transform: translateX(-50%);
-}
-
-.lyric-annotation-mark.annotation-stress,
+.lyric-annotation-mark.annotation-breath,
 .lyric-annotation-mark.annotation-long-tone {
   display: block;
+  font-size: 1em;
   height: 100%;
-  left: var(--annotation-x, 50%);
   min-width: 100%;
   top: 0;
   transform: translateX(-50%);
 }
 
+.lyric-annotation-mark.annotation-stress,
+.lyric-annotation-mark.annotation-long-tone {
+  left: var(--annotation-x, 50%);
+}
+
+.lyric-annotation-mark.annotation-breath {
+  left: var(--annotation-x, 0%);
+}
+
 .lyric-annotation-label {
   color: rgba(28, 24, 13, 0.86);
   display: block;
-  font-size: 0.78em;
   font-weight: 950;
   line-height: 1;
-  min-height: 1em;
   padding: 0;
   text-shadow: 0 1px 4px rgba(255, 255, 255, 0.48);
+  white-space: nowrap;
 }
 
 .lyric-annotation-mark.annotation-breath .annotation-glyph-text {
   color: rgba(15, 13, 8, 0.92);
-  font-size: 1.08em;
+  font-size: 16px;
   font-weight: 950;
+  height: 16px;
+  left: 50%;
+  line-height: 16px;
+  position: absolute;
   text-shadow: 0 2px 7px rgba(255, 255, 255, 0.3);
-  transform: scaleX(1.62);
+  top: -14px;
+  transform: translateX(-50%) scaleX(1.62);
   transform-origin: center 62%;
+  width: 16px;
 }
 
 .lyric-annotation-mark.annotation-stress .annotation-glyph-text,
 .lyric-annotation-mark.annotation-long-tone .annotation-glyph-text,
+.lyric-annotation-mark.annotation-breath .lyric-annotation-label,
 .lyric-annotation-mark.annotation-stress .lyric-annotation-label,
 .lyric-annotation-mark.annotation-long-tone .lyric-annotation-label {
   left: 50%;
@@ -1290,11 +1292,16 @@ nav button.nav-active::before {
   transform: translateX(-50%);
 }
 
+.lyric-annotation-mark.annotation-breath .lyric-annotation-label,
 .lyric-annotation-mark.annotation-stress .lyric-annotation-label,
 .lyric-annotation-mark.annotation-long-tone .lyric-annotation-label {
-  font-size: 0.3em;
-  min-height: 1.1em;
-  top: calc(-1.96em - var(--annotation-label-row, 0) * 0.9em);
+  align-items: center;
+  display: flex;
+  font-size: 11px;
+  height: 12px;
+  justify-content: center;
+  min-height: 12px;
+  top: calc(-23px - var(--annotation-label-row, 0) * 14px);
 }
 
 .lyric-annotation-mark.annotation-stress .annotation-glyph-text {
@@ -1802,6 +1809,11 @@ nav button.nav-active::before {
   position: relative;
 }
 
+.lyric-word-has-breath {
+  margin-left: 0.2em;
+  padding-left: 0.04em;
+}
+
 .lyric-word-orphan {
   min-width: 0.5em;
 }
@@ -1826,39 +1838,93 @@ nav button.nav-active::before {
 }
 
 .lyric-karaoke-meta-panel {
-  align-items: center;
+  align-items: flex-start;
   background: rgba(255, 253, 245, 0.58);
   border: 1px solid rgba(82, 67, 26, 0.12);
-  border-radius: 999px;
+  border-radius: 8px;
   box-shadow: 0 10px 26px rgba(117, 77, 17, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.42);
   color: rgba(35, 29, 12, 0.78);
-  display: inline-flex;
-  gap: 10px;
+  display: inline-grid;
+  gap: 2px;
   left: 38px;
   max-width: min(72%, 620px);
   overflow: hidden;
-  padding: 7px 14px;
+  padding: 6px 12px 7px;
   pointer-events: none;
   position: absolute;
   top: 26px;
   z-index: 5;
 }
 
+.lyric-karaoke-meta-row {
+  align-items: center;
+  display: inline-flex;
+  gap: 7px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.lyric-karaoke-meta-title {
+  color: rgba(74, 68, 45, 0.66);
+  display: block;
+  flex: 1 1 auto;
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0;
+  line-height: 1;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lyric-karaoke-meta-detail {
+  animation: lyric-meta-detail-in 260ms ease both;
+  color: rgba(35, 29, 12, 0.78);
+}
+
+.lyric-karaoke-meta-title-row {
+  color: rgba(74, 68, 45, 0.66);
+}
+
+.lyric-karaoke-meta-detail,
+.lyric-karaoke-meta-title-row {
+  align-items: center;
+  display: inline-flex;
+  gap: 7px;
+  max-width: 100%;
+  min-width: 0;
+}
+
 .lyric-karaoke-meta-index {
   color: rgba(47, 126, 103, 0.82);
   flex: 0 0 auto;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 900;
+  line-height: 1;
 }
 
 .lyric-karaoke-meta-line {
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 850;
   letter-spacing: 0;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: 1;
+}
+
+@keyframes lyric-meta-detail-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .lyric-karaoke-lines::-webkit-scrollbar {

@@ -149,10 +149,10 @@ export function LyricPlaybackView({ lyric, settings, t }) {
         {renderMode === 'karaoke' ? (
           <KaraokeStage
             bodyLines={bodyLines}
+            headingTitle={headingTitle}
             currentMs={currentMs}
             activeBodyLine={activeBodyLine}
             activeMetaLine={activeMetaLine}
-            activeMetaIndex={activeMetaIndex}
             introMetaLines={introMetaLines}
             focusBodyIndex={focusBodyIndex}
             showCountdown={showCountdown}
@@ -278,10 +278,10 @@ function countdownDotClass(index, count, exiting) {
 
 function KaraokeStage({
   bodyLines,
+  headingTitle,
   currentMs,
   activeBodyLine,
   activeMetaLine,
-  activeMetaIndex,
   introMetaLines,
   focusBodyIndex,
   showCountdown,
@@ -292,13 +292,15 @@ function KaraokeStage({
   linesRef,
   t,
 }) {
-  const laneItems = activeMetaLine
-    ? []
-    : karaokeLaneItems(bodyLines, activeBodyLine, focusBodyIndex, showCountdown, countdown);
+  const laneItems = activeMetaLine ? [] : karaokeLaneItems(bodyLines, activeBodyLine, focusBodyIndex, showCountdown, countdown);
   const placeholderLanes = karaokePlaceholderLanes(laneItems);
   return (
     <div className="lyric-karaoke-lines lyric-karaoke-dual-lines" ref={linesRef} aria-live="polite">
-      <KaraokeMetaPanel lines={introMetaLines} activeLine={activeMetaLine} activeIndex={activeMetaIndex} />
+      <KaraokeMetaPanel
+        lines={introMetaLines}
+        currentMs={currentMs}
+        headingTitle={headingTitle}
+      />
       {laneItems.map((item) => {
         if (item.kind === 'countdown') {
           const { targetLine, bodyIndex } = item;
@@ -346,14 +348,31 @@ function KaraokeStage({
   );
 }
 
-function KaraokeMetaPanel({ lines, activeLine, activeIndex }) {
-  if (!activeLine || !lines.length) {
+function KaraokeMetaPanel({ lines, currentMs, headingTitle }) {
+  const titleText = String(headingTitle || '').trim();
+  if (!titleText && !lines.length) {
     return null;
   }
+  const normalizedTitle = normalizeMetaText(titleText);
+  const detailLines = lines.filter((line) => {
+    const text = String(line.text || '').trim();
+    return text && normalizeMetaText(text) !== normalizedTitle && !looksLikeTitleDuplicate(text, titleText);
+  });
+  const metaCount = Math.max(1, detailLines.length + 1);
+  const detailIndex = detailLines.length ? Math.floor(Math.max(0, currentMs) / 2400) % detailLines.length : -1;
+  const activeDetailLine = detailIndex >= 0 ? detailLines[detailIndex] : null;
   return (
     <div className="lyric-karaoke-meta-panel" aria-live="polite">
-      <span className="lyric-karaoke-meta-index">{activeIndex + 1}/{lines.length}</span>
-      <span className="lyric-karaoke-meta-line">{activeLine.text}</span>
+      <span className="lyric-karaoke-meta-row lyric-karaoke-meta-title-row">
+        <span className="lyric-karaoke-meta-index">1/{metaCount}</span>
+        <span className="lyric-karaoke-meta-title">{titleText}</span>
+      </span>
+      {activeDetailLine ? (
+        <span className="lyric-karaoke-meta-detail" key={activeDetailLine.id}>
+          <span className="lyric-karaoke-meta-index">{detailIndex + 2}/{metaCount}</span>
+          <span className="lyric-karaoke-meta-line">{activeDetailLine.text}</span>
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -381,7 +400,8 @@ function karaokeLaneItems(bodyLines, activeBodyLine, focusBodyIndex, showCountdo
   }
 
   const primaryIndex = Math.max(0, Math.min(bodyLines.length - 1, focusBodyIndex));
-  const indexes = [primaryIndex, primaryIndex + 1].filter((index, position, list) => index < bodyLines.length && list.indexOf(index) === position);
+  const secondaryIndex = primaryIndex + 1 < bodyLines.length ? primaryIndex + 1 : primaryIndex - 1;
+  const indexes = [primaryIndex, secondaryIndex].filter((index, position, list) => index >= 0 && index < bodyLines.length && list.indexOf(index) === position);
   return indexes
     .map((index) => karaokeLineLaneItem(bodyLines[index], index))
     .sort((left, right) => laneSortIndex(left.lanePositionClass) - laneSortIndex(right.lanePositionClass));
@@ -444,9 +464,12 @@ function LineText({ line, currentMs, active, translationMode, t }) {
         const progress = active ? wordProgress(word, currentMs) : 0;
         const annotations = visibleWordAnnotations(line.words, word, wordIndex);
         const wordState = progress >= 1 ? ' lyric-word-complete' : progress > 0 ? ' lyric-word-current' : '';
+        const markerClass = shouldReserveBreathGap(line.words, wordIndex, annotations)
+          ? ' lyric-word-has-breath'
+          : '';
         return (
           <span
-            className={`lyric-word lyric-progress-text${annotations.length ? ' lyric-word-annotated' : ''}${wordState}`}
+            className={`lyric-word lyric-progress-text${annotations.length ? ' lyric-word-annotated' : ''}${markerClass}${wordState}`}
             style={lyricProgressStyle(progress, true)}
             key={word.id}
           >
@@ -531,6 +554,14 @@ function visibleWordAnnotations(words, word, wordIndex) {
 
 function isSingleWordAnnotation() {
   return true;
+}
+
+function shouldReserveBreathGap(words, wordIndex, annotations) {
+  const hasLeadingBreath = annotations.some((annotation) => annotation.type === 'breath' && annotationAnchorPercent(annotation) <= 12);
+  if (!hasLeadingBreath) {
+    return false;
+  }
+  return words.slice(0, wordIndex).some((word) => /\S/.test(String(word.text || '')));
 }
 
 function LineSubtext({ line, translationMode }) {

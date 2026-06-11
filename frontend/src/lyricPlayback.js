@@ -823,8 +823,9 @@ function applyAnnotationLabelSuppression(line) {
         return annotation;
       }
       const breathPosition = annotationLyricPosition(annotation, wordStarts[wordIndex]);
+      const previousStress = stressPositions.some((stressPosition) => stressPosition >= 0 && stressPosition < breathPosition && breathPosition - stressPosition <= 1);
       const nearbyStressCount = stressPositions.filter((stressPosition) => Math.abs(stressPosition - breathPosition) <= 1).length;
-      return nearbyStressCount >= 2 ? { ...annotation, suppressLabel: true } : annotation;
+      return previousStress || nearbyStressCount >= 2 ? { ...annotation, suppressLabel: true } : annotation;
     });
     return { ...word, annotations };
   });

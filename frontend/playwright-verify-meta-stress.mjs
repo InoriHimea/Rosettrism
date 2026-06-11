@@ -74,6 +74,23 @@ const unified = {
       ],
     },
     { start_ms: 20000, duration_ms: 1600, text: 'next', words: [{ text: 'next', offset_ms: 0, duration_ms: 1000 }] },
+    {
+      start_ms: 23000,
+      duration_ms: 4400,
+      text: '我坚决 冲破这一场浩劫',
+      words: [
+        { text: '我', offset_ms: 0, duration_ms: 440 },
+        { text: '坚', offset_ms: 440, duration_ms: 225 },
+        { text: '决', offset_ms: 665, duration_ms: 735 },
+        { text: ' ', offset_ms: 1400, duration_ms: 0 },
+        { text: '冲', offset_ms: 2008, duration_ms: 481 },
+        { text: '破', offset_ms: 2489, duration_ms: 251 },
+        { text: '这', offset_ms: 2740, duration_ms: 484 },
+        { text: '一', offset_ms: 3224, duration_ms: 512 },
+        { text: '场', offset_ms: 3736, duration_ms: 497 },
+        { text: '浩', offset_ms: 4233, duration_ms: 167 },
+      ],
+    },
   ],
 };
 const singingAnnotations = [
@@ -86,6 +103,11 @@ const singingAnnotations = [
   { annotation_type: 'breath', start_ms: 14250, duration_ms: 180, text: 'm' },
   { annotation_type: 'stress', start_ms: 14250, duration_ms: 180, text: 'm' },
   { annotation_type: 'stress', start_ms: 14510, duration_ms: 180, text: 'n' },
+  { annotation_type: 'breath', start_ms: 23000, duration_ms: 300, text: '我' },
+  { annotation_type: 'stress', start_ms: 23665, duration_ms: 400, text: '决' },
+  { annotation_type: 'breath', start_ms: 25008, duration_ms: 300, text: '冲' },
+  { annotation_type: 'stress', start_ms: 26736, duration_ms: 300, text: '场' },
+  { annotation_type: 'stress', start_ms: 27233, duration_ms: 300, text: '浩' },
 ];
 const MOCK_FETCH_RESULT_WITH_ANNOTATIONS = {
   unified,
@@ -175,7 +197,7 @@ const dragonKnightChargeLine = dragonKnightReal.lines.find((line) => line.text =
 const dragonKnightWoBreath = dragonKnightChargeLine?.words.find((word) => word.text === '我')?.annotations.find((annotation) => annotation.type === 'breath');
 const dragonKnightChongBreath = dragonKnightChargeLine?.words.find((word) => word.text === '冲')?.annotations.find((annotation) => annotation.type === 'breath');
 const dragonKnightJueStress = dragonKnightChargeLine?.words.find((word) => word.text === '决')?.annotations.find((annotation) => annotation.type === 'stress');
-requirePass(dragonKnightWoBreath && !dragonKnightWoBreath.suppressLabel && dragonKnightChongBreath && !dragonKnightChongBreath.suppressLabel && dragonKnightJueStress, 'DRAGON_KNIGHT_SINGLE_STRESS_BREATH_LABEL_PRIORITY_WRONG', {
+requirePass(dragonKnightWoBreath && !dragonKnightWoBreath.suppressLabel && dragonKnightChongBreath && dragonKnightChongBreath.suppressLabel && dragonKnightJueStress, 'DRAGON_KNIGHT_SINGLE_STRESS_BREATH_LABEL_PRIORITY_WRONG', {
   charge: dragonKnightChargeLine?.words.map((word) => ({ text: word.text, annotations: word.annotations })),
 });
 
@@ -251,13 +273,15 @@ async function activeMetaSample(ms) {
       scrollWidth: node.scrollWidth,
       clientWidth: node.clientWidth,
       whiteSpace: textNode ? getComputedStyle(textNode).whiteSpace : getComputedStyle(node).whiteSpace,
+      title: node.querySelector('.lyric-karaoke-meta-title')?.textContent?.trim() || '',
+      detail: node.querySelector('.lyric-karaoke-meta-detail')?.textContent?.trim() || '',
       directKaraokeItems: document.querySelectorAll('.lyric-karaoke-lines > .lyric-karaoke-line').length,
     };
   }, ms);
 }
 
 const metaSamples = [];
-for (const ms of [200, 1700, 3200, 4700]) {
+for (const ms of [200, 2600, 5000]) {
   metaSamples.push(await activeMetaSample(ms));
 }
 for (const sample of metaSamples) {
@@ -265,16 +289,15 @@ for (const sample of metaSamples) {
   requirePass(!sample.className.includes('lyric-karaoke-line'), 'META_SHOULD_NOT_JOIN_KARAOKE_LANES', sample);
   requirePass(sample.directKaraokeItems === 0, 'META_SHOULD_NOT_RENDER_IN_DUAL_LANES', sample);
   requirePass(sample.whiteSpace === 'nowrap', 'META_LINE_WRAPPED', sample);
-  requirePass(sample.height <= 42, 'META_LINE_TOO_TALL', sample);
+  requirePass(sample.height <= 60, 'META_LINE_TOO_TALL', sample);
+  requirePass(sample.title.includes(MOCK_SEARCH.results[0].title), 'META_TITLE_SHOULD_STAY_VISIBLE', sample);
 }
-requirePass(metaSamples.some((sample) => sample.text.includes('作词')), 'META_LYRICIST_LINE_MISSING', { metaSamples });
-requirePass(metaSamples.some((sample) => sample.text.includes('作曲')), 'META_COMPOSER_LINE_MISSING', { metaSamples });
-requirePass(metaSamples.some((sample) => sample.text.includes('编曲')), 'META_ARRANGER_LINE_MISSING', { metaSamples });
-requirePass(metaSamples.every((sample) => !sample.text.includes('海 阔 天 空')), 'BODY_SHOULD_NOT_RENDER_DURING_METADATA', { metaSamples });
-const titleOccurrences = metaSamples
-  .map((sample) => sample.text)
-  .filter((text) => text.includes(MOCK_SEARCH.results[0].title)).length;
-requirePass(titleOccurrences === 1, 'TITLE_RENDERED_MORE_THAN_ONCE', { titleOccurrences, metaSamples });
+requirePass(metaSamples.some((sample) => sample.detail.includes('作词')), 'META_LYRICIST_LINE_MISSING', { metaSamples });
+requirePass(metaSamples.some((sample) => sample.detail.includes('作曲')), 'META_COMPOSER_LINE_MISSING', { metaSamples });
+requirePass(metaSamples.some((sample) => sample.detail.includes('编曲')), 'META_ARRANGER_LINE_MISSING', { metaSamples });
+requirePass(metaSamples.every((sample) => !sample.detail.includes('海 阔 天 空')), 'BODY_SHOULD_NOT_RENDER_DURING_METADATA', { metaSamples });
+const titleOccurrences = metaSamples.filter((sample) => sample.title.includes(MOCK_SEARCH.results[0].title)).length;
+requirePass(titleOccurrences === metaSamples.length, 'TITLE_SHOULD_REMAIN_VISIBLE_DURING_METADATA', { titleOccurrences, metaSamples });
 
 const introCountdownSample = await activeTextSample(200);
 requirePass(introCountdownSample.countdownCount === 0, 'INTRO_COUNTDOWN_SHOULD_NOT_APPEAR_DURING_METADATA', introCountdownSample);
@@ -334,9 +357,10 @@ const stressSample = { word: stressWord, glyph: stressGlyph, label: stressLabel,
 const longToneSample = { word: longToneWord, glyph: longToneGlyph, label: longToneLabel, labelBoxes };
 const breathSample = { word: breathWord, glyph: breathGlyph, label: breathLabel, labelBoxes };
 const labelTopSpread = Math.max(...labelBoxes.map((box) => box.y)) - Math.min(...labelBoxes.map((box) => box.y));
+const labelCenterSpread = Math.max(...labelBoxes.map((box) => box.y + box.h / 2)) - Math.min(...labelBoxes.map((box) => box.y + box.h / 2));
 requirePass(labelBoxes.length >= 3, 'INLINE_ANNOTATION_LABELS_MISSING', { labelBoxes });
 requirePass(!overlappingBoxes(labelBoxes), 'INLINE_ANNOTATION_LABELS_OVERLAPPED', { labelBoxes });
-requirePass(labelTopSpread <= 5, 'INLINE_ANNOTATION_LABELS_NOT_ALIGNED', { labelBoxes, labelTopSpread });
+requirePass(labelTopSpread <= 1 && labelCenterSpread <= 1, 'INLINE_ANNOTATION_LABELS_NOT_ALIGNED', { labelBoxes, labelTopSpread, labelCenterSpread });
 requirePass(stressWord && stressGlyph && stressLabel, 'STRESS_BOUNDS_MISSING', stressSample);
 requirePass(longToneWord && longToneGlyph && longToneLabel, 'LONG_TONE_BOUNDS_MISSING', longToneSample);
 requirePass(breathWord && breathGlyph && breathLabel, 'BREATH_BOUNDS_MISSING', breathSample);
@@ -395,6 +419,46 @@ requirePass(markerXyWord.breathGlyph.x + markerXyWord.breathGlyph.w / 2 <= marke
 requirePass(markerXyWord.stressGlyph.x + markerXyWord.stressGlyph.w / 2 >= markerXyWord.box.x && markerXyWord.stressGlyph.x + markerXyWord.stressGlyph.w / 2 <= markerXyWord.box.x + markerXyWord.box.w * 0.48, 'SAME_CHARACTER_STRESS_NOT_ON_TARGET_CHAR', multiMarkerSample);
 requirePass(markerXyWord.stressGlyph.y + markerXyWord.stressGlyph.h / 2 >= markerXyWord.box.y + markerXyWord.box.h * 0.60, 'SAME_CHARACTER_STRESS_DOT_NOT_BELOW_TEXT', multiMarkerSample);
 
+await seek(25200);
+const dragonKnightClusterSample = await page.evaluate(() => {
+  const box = (node) => {
+    if (!node) return null;
+    const rect = node.getBoundingClientRect();
+    return { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) };
+  };
+  const words = [...document.querySelectorAll('.lyric-line-active .lyric-word')].map((node) => ({
+    text: node.querySelector('.lyric-progress-base')?.textContent?.trim() || '',
+    box: box(node),
+    labels: [...node.querySelectorAll('.lyric-annotation-label')].map((label) => label.textContent.trim()),
+    breathGlyph: box(node.querySelector('.annotation-breath .annotation-glyph-text')),
+    stressGlyph: box(node.querySelector('.annotation-stress .annotation-glyph-text')),
+    hasBreathSpacing: node.classList.contains('lyric-word-has-breath'),
+  }));
+  const labels = [...document.querySelectorAll('.lyric-line-active .lyric-annotation-label')].map((label) => ({
+    text: label.textContent.trim(),
+    ...box(label),
+  }));
+  return { words, labels };
+});
+const jueWord = dragonKnightClusterSample.words.find((word) => word.text === '决');
+const chongWord = dragonKnightClusterSample.words.find((word) => word.text === '冲');
+requirePass(jueWord?.stressGlyph && chongWord?.breathGlyph, 'DRAGON_KNIGHT_CLUSTER_MARKERS_MISSING', dragonKnightClusterSample);
+requirePass(chongWord.hasBreathSpacing, 'BREATH_WORD_SHOULD_RESERVE_SPACING', dragonKnightClusterSample);
+requirePass(jueWord.labels.includes('重音') && !chongWord.labels.includes('换气'), 'STRESS_CLUSTER_SHOULD_HIDE_BREATH_LABEL', dragonKnightClusterSample);
+requirePass(chongWord.box.x - (jueWord.box.x + jueWord.box.w) >= 3, 'BREATH_CLUSTER_WORDS_TOO_TIGHT', dragonKnightClusterSample);
+
+await seek(27400);
+const endingKaraokeSample = await page.evaluate(() => ({
+  rows: [...document.querySelectorAll('.lyric-karaoke-lines .lyric-karaoke-line')].map((node) => ({
+    text: node.textContent.trim(),
+    className: node.className,
+  })),
+  placeholders: document.querySelectorAll('.lyric-karaoke-placeholder').length,
+}));
+requirePass(endingKaraokeSample.rows.length >= 2, 'ENDING_KARAOKE_SHOULD_KEEP_PREVIOUS_LINE', endingKaraokeSample);
+requirePass(endingKaraokeSample.rows.some((row) => row.text.includes('决') && row.text.includes('冲')), 'ENDING_KARAOKE_LAST_LINE_MISSING', endingKaraokeSample);
+requirePass(endingKaraokeSample.rows.some((row) => row.text.includes('next')), 'ENDING_KARAOKE_PREVIOUS_LINE_MISSING', endingKaraokeSample);
+
 console.log('META_SAMPLES:', JSON.stringify(metaSamples));
 console.log('INTRO_COUNTDOWN:', JSON.stringify(introCountdownSample));
 console.log('COUNTDOWN_AFTER_META:', JSON.stringify(countdownSample));
@@ -408,5 +472,7 @@ console.log('STRESS_SAMPLE:', JSON.stringify(stressSample));
 console.log('LONG_TONE_SAMPLE:', JSON.stringify(longToneSample));
 console.log('BREATH_SAMPLE:', JSON.stringify(breathSample));
 console.log('MULTI_MARKER_SAMPLE:', JSON.stringify(multiMarkerSample));
+console.log('DRAGON_KNIGHT_CLUSTER_SAMPLE:', JSON.stringify(dragonKnightClusterSample));
+console.log('ENDING_KARAOKE_SAMPLE:', JSON.stringify(endingKaraokeSample));
 await page.screenshot({ path: resolve(SCRIPT_DIR, 'playwright-artifacts/verify-meta-stress.png'), fullPage: false });
 await browser.close();

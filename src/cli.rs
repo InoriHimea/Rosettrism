@@ -340,6 +340,7 @@ pub async fn run() -> anyhow::Result<()> {
                         top.unwrap_or(1),
                         Some(ttl),
                         force_refresh,
+                        true,
                     )
                     .await?;
                 match result {
@@ -533,6 +534,7 @@ fn service_context(
         offline_db,
         default_ttl: ttl,
         force_refresh,
+        ..Default::default()
     })
 }
 

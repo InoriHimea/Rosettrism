@@ -5,6 +5,7 @@ import { LyricPlaybackView } from './LyricPlaybackView.jsx';
 import { defaultLyricSettings, formatSourceName, normalizeLyricPayload, readLyricSettings, resolveLyricGradient } from './lyricPlayback.js';
 import {
   BarChart3,
+  CheckCircle2,
   Database,
   Languages,
   PanelLeftClose,
@@ -98,6 +99,20 @@ const dictionaries = {
     searchOps: '搜索',
     fetchOps: '获取',
     otherOps: '其他',
+    dashboardFocus: '缓存诊断',
+    dashboardReady: '待采集',
+    dashboardReadyHint: '开始搜索或导入歌词后，这里会汇总缓存质量与来源分布。',
+    dashboardFreshHint: '缓存可直接复用',
+    dashboardExpiredHint: '建议按需刷新',
+    dashboardSourceHint: '来源覆盖',
+    dashboardOperationHint: '操作画像',
+    dashboardInspectCache: '查看缓存',
+    dashboardTopSource: '主要来源',
+    dashboardTopOperation: '主要操作',
+    dashboardNoSourceHint: '完成一次搜索后会展示各平台占比。',
+    dashboardNoOperationHint: '搜索和获取记录会在这里形成操作画像。',
+    dashboardNoRecentHint: '最近缓存会以状态列展示大小与新鲜度。',
+    dashboardRecentHint: '按响应体大小显示最近缓存，颜色区分新鲜与过期。',
     sourcePolicy: '指定来源必须选择 raw 或 json。',
     advancedOptions: '高级选项',
     searchHint: '输入关键词、歌曲 URL 或平台 ID 开始搜索。也可以填写歌名和艺术家提升匹配率。',
@@ -240,6 +255,20 @@ const dictionaries = {
     searchOps: 'Search',
     fetchOps: 'Fetch',
     otherOps: 'Other',
+    dashboardFocus: 'Cache diagnostics',
+    dashboardReady: 'Ready',
+    dashboardReadyHint: 'Search or import lyrics to summarize cache quality and source coverage here.',
+    dashboardFreshHint: 'Reusable cache',
+    dashboardExpiredHint: 'Refresh as needed',
+    dashboardSourceHint: 'Source coverage',
+    dashboardOperationHint: 'Operation profile',
+    dashboardInspectCache: 'Inspect cache',
+    dashboardTopSource: 'Top source',
+    dashboardTopOperation: 'Top operation',
+    dashboardNoSourceHint: 'Run a search to see platform distribution.',
+    dashboardNoOperationHint: 'Search and fetch records will form the operation profile here.',
+    dashboardNoRecentHint: 'Recent cache entries will appear as freshness columns.',
+    dashboardRecentHint: 'Recent cache entries are sized by response body and colored by freshness.',
     sourcePolicy: 'Source-specific requests require raw or json.',
     advancedOptions: 'Advanced options',
     searchHint: 'Enter keywords, a song URL, or a platform ID to search. Add title and artist for better matches.',
@@ -791,19 +820,34 @@ function Overview({ t, stats, cache, setActiveView }) {
   const fresh = stats?.cache?.fresh_upstream_entries ?? cache.filter((entry) => entry.fresh).length;
   const expired = Math.max((stats?.cache?.expired_upstream_entries ?? total - fresh) || 0, 0);
   const freshPercent = total > 0 ? Math.round((fresh / total) * 100) : 0;
-  const sourceRows = groupedRows(cache, 'source').slice(0, 7);
+  const sourceRows = groupedRows(cache, 'source').slice(0, 4);
   const operationRows = operationSummary(cache, t);
   const recentRows = cache.slice(0, 8);
+  const topSource = sourceRows[0]?.label || '-';
+  const topOperation = operationRows[0]?.label || '-';
 
   return (
     <section className="dashboard-grid">
+      <article className="dashboard-brief">
+        <div>
+          <span className="dashboard-kicker">{t.dashboardFocus}</span>
+          <h2>{total > 0 ? `${freshPercent}% ${t.freshRatio}` : t.dashboardReady}</h2>
+          <p>{total > 0 ? t.dashboardRecentHint : t.dashboardReadyHint}</p>
+        </div>
+        <div className="dashboard-brief-stats">
+          <MiniStat label={t.totalEntries} value={total} />
+          <MiniStat label={t.dashboardTopSource} value={topSource} />
+          <MiniStat label={t.dashboardTopOperation} value={topOperation} />
+        </div>
+      </article>
+
       <article className="chart-panel health-panel">
         <div className="chart-title">
           <div>
             <h2>{t.cacheHealth}</h2>
             <p>{t.totalEntries}: {total}</p>
           </div>
-          <Database size={20} />
+          <CheckCircle2 size={20} />
         </div>
         <div className="donut-row">
           <div
@@ -815,10 +859,11 @@ function Overview({ t, stats, cache, setActiveView }) {
             <span>{t.freshRatio}</span>
           </div>
           <div className="legend">
-            <LegendDot label={t.fresh} value={fresh} color="green" />
-            <LegendDot label={t.expired} value={expired} color="amber" />
+            <LegendDot label={t.fresh} value={fresh} color="green" hint={t.dashboardFreshHint} />
+            <LegendDot label={t.expired} value={expired} color="amber" hint={t.dashboardExpiredHint} />
             <button className="button-secondary text-action" type="button" onClick={() => setActiveView('cache')}>
-              {t.cache}
+              <Database size={16} />
+              {t.dashboardInspectCache}
             </button>
           </div>
         </div>
@@ -832,7 +877,7 @@ function Overview({ t, stats, cache, setActiveView }) {
           </div>
           <BarChart3 size={20} />
         </div>
-        <BarList rows={sourceRows} empty={t.noData} />
+        <BarList rows={sourceRows} emptyTitle={t.noData} emptyHint={t.dashboardNoSourceHint} footer={t.dashboardSourceHint} />
       </article>
 
       <article className="chart-panel">
@@ -843,7 +888,7 @@ function Overview({ t, stats, cache, setActiveView }) {
           </div>
           <Server size={20} />
         </div>
-        <BarList rows={operationRows} empty={t.noData} />
+        <BarList rows={operationRows} emptyTitle={t.noData} emptyHint={t.dashboardNoOperationHint} footer={t.dashboardOperationHint} />
       </article>
 
       <article className="chart-panel wide-panel">
@@ -856,13 +901,13 @@ function Overview({ t, stats, cache, setActiveView }) {
         </div>
         <div className="spark-grid">
           {recentRows.length === 0 ? (
-            <span className="empty-state">{t.noData}</span>
+            <EmptyState title={t.noData} hint={t.dashboardNoRecentHint} />
           ) : (
             recentRows.map((entry) => (
               <div className="spark-column" key={entry.id}>
                 <span
                   className={entry.fresh ? 'spark-bar fresh-bar' : 'spark-bar expired-bar'}
-                  style={{ height: `${Math.max(18, Math.min(92, Math.round((entry.body_len || 1) / 80)))}px` }}
+                  style={{ height: `${Math.max(16, Math.min(58, Math.round((entry.body_len || 1) / 120)))}px` }}
                 />
                 <small>{entry.source}</small>
               </div>
@@ -874,34 +919,58 @@ function Overview({ t, stats, cache, setActiveView }) {
   );
 }
 
-function LegendDot({ label, value, color }) {
+function MiniStat({ label, value }) {
   return (
-    <div className="legend-row">
-      <span className={`legend-dot ${color}`} />
+    <div className="mini-stat">
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
   );
 }
 
-function BarList({ rows, empty }) {
+function LegendDot({ label, value, color, hint }) {
+  return (
+    <div className="legend-row">
+      <span className={`legend-dot ${color}`} />
+      <span>
+        {label}
+        {hint ? <small>{hint}</small> : null}
+      </span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function BarList({ rows, emptyTitle, emptyHint, footer }) {
   const max = Math.max(...rows.map((row) => row.value), 1);
   if (rows.length === 0) {
-    return <span className="empty-state">{empty}</span>;
+    return <EmptyState title={emptyTitle} hint={emptyHint} />;
   }
   return (
-    <div className="bar-list">
-      {rows.map((row) => (
-        <div className="bar-row" key={row.label}>
-          <div className="bar-label">
-            <span>{row.label}</span>
-            <strong>{row.value}</strong>
+    <>
+      <div className="bar-list">
+        {rows.map((row) => (
+          <div className="bar-row" key={row.label}>
+            <div className="bar-label">
+              <span>{row.label}</span>
+              <strong>{row.value}</strong>
+            </div>
+            <div className="bar-track">
+              <span style={{ width: `${Math.max(6, Math.round((row.value / max) * 100))}%` }} />
+            </div>
           </div>
-          <div className="bar-track">
-            <span style={{ width: `${Math.max(6, Math.round((row.value / max) * 100))}%` }} />
-          </div>
-        </div>
-      ))}
+        ))}
+      </div>
+      {footer ? <span className="chart-footnote">{footer}</span> : null}
+    </>
+  );
+}
+
+function EmptyState({ title, hint }) {
+  return (
+    <div className="empty-state rich-empty-state">
+      <span>{title}</span>
+      {hint ? <small>{hint}</small> : null}
     </div>
   );
 }

@@ -1,11 +1,12 @@
 {
   "name": "rosettrism-dashboard",
   "private": true,
-  "version": "4.8.17",
+  "version": "4.8.18",
   "type": "module",
   "scripts": {
     "build": "vite build",
     "dev": "vite --host 127.0.0.1",
+    "verify:dashboard": "node playwright-verify-dashboard.mjs",
     "verify:meta-stress": "node playwright-verify-meta-stress.mjs"
   },
   "dependencies": {

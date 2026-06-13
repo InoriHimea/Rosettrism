@@ -1,0 +1,37 @@
+{
+  "schema_version": "1.0",
+  "meta": { "title": "LRC Song", "artist": "LRCLIB Artist", "album": "Album", "by": null, "offset_ms": 0, "source": "lrclib" },
+  "mode": "inline",
+  "tracks": [
+    {
+      "kind": "original",
+      "source": "lrclib",
+      "document": {
+        "meta": { "title": "LRC Song", "artist": "LRCLIB Artist", "album": "Album", "by": null, "offset_ms": 0, "source": "lrclib" },
+        "lines": [
+          { "start_ms": 10000, "duration_ms": null, "text": "We sing together", "words": [] }
+        ]
+      },
+      "quality": { "score": 80.0, "line_count": 1, "timed_line_count": 1, "word_timing_count": 0 }
+    },
+    {
+      "kind": "romanized",
+      "language": "und-Latn",
+      "source": "lrclib",
+      "document": {
+        "meta": { "title": "LRC Song", "artist": "LRCLIB Artist", "album": "Album", "by": null, "offset_ms": 0, "source": "lrclib" },
+        "lines": [
+          { "start_ms": 10000, "duration_ms": null, "text": "We sing together", "words": [] }
+        ]
+      },
+      "quality": { "score": 50.0, "line_count": 1, "timed_line_count": 1, "word_timing_count": 0 }
+    }
+  ],
+  "inline_lines": [
+    { "start_ms": 10000, "duration_ms": null, "text": "We sing together", "romanized": "We sing together", "source_refs": ["lrclib"] }
+  ],
+  "source_refs": ["lrclib"],
+  "score": { "final_score": 86.6, "timing_score": 80.0, "completeness_score": 100.0, "enrichment_score": 33.3 },
+  "cache_refs": ["lrclib:101:lrc"],
+  "warnings": ["plain timed line without word timing"]
+}

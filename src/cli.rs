@@ -14,7 +14,10 @@ use crate::service::{
     parse_ttl, AggregateFetchRequest, LyricNeed, MergeMode, ServiceContext, SpecificFetchFormat,
     SpecificFetchResult,
 };
-use crate::{cache::UpstreamCache, server};
+use crate::{
+    cache::{CacheExportFormat, CacheExportOptions, CachePruneOptions, UpstreamCache},
+    server,
+};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -104,6 +107,11 @@ enum Command {
         #[arg(long = "force-refresh")]
         force_refresh: bool,
     },
+    #[command(about = "Inspect and maintain the local cache database")]
+    Cache {
+        #[command(subcommand)]
+        command: CacheCommand,
+    },
     #[command(about = "Run the local HTTP API and embedded dashboard")]
     Server {
         #[arg(long = "host", default_value = "127.0.0.1")]
@@ -115,6 +123,78 @@ enum Command {
         #[arg(long = "open")]
         open: bool,
     },
+}
+
+#[derive(Debug, Subcommand)]
+enum CacheCommand {
+    #[command(about = "Print cache counters as pretty JSON")]
+    Stats,
+    #[command(
+        about = "Prune expired cache entries and old history records (dry-run unless --yes)"
+    )]
+    Prune {
+        #[arg(long = "yes")]
+        yes: bool,
+
+        #[arg(long = "keep-fetch-runs", default_value_t = 1000)]
+        keep_fetch_runs: usize,
+
+        #[arg(long = "keep-ai-scores", default_value_t = 1000)]
+        keep_ai_scores: usize,
+    },
+    #[command(about = "Run SQLite VACUUM on the cache database (dry-run unless --yes)")]
+    Vacuum {
+        #[arg(long = "yes")]
+        yes: bool,
+    },
+    #[command(about = "Export cache summaries as JSONL or pretty JSON")]
+    Export {
+        #[arg(long = "format", value_enum, default_value = "jsonl")]
+        format: CacheCliExportFormat,
+
+        #[arg(long = "upstream")]
+        upstream: bool,
+
+        #[arg(long = "unified")]
+        unified: bool,
+
+        #[arg(long = "fetch-runs")]
+        fetch_runs: bool,
+
+        #[arg(long = "ai-scores")]
+        ai_scores: bool,
+
+        #[arg(long = "limit", default_value_t = 100)]
+        limit: usize,
+
+        #[arg(short = 'o', long = "output", value_name = "PATH")]
+        output: Option<PathBuf>,
+    },
+    #[command(about = "List recent fetch runs as pretty JSON")]
+    Runs {
+        #[arg(long = "limit", default_value_t = 50)]
+        limit: usize,
+    },
+    #[command(about = "List recent AI score records as pretty JSON")]
+    AiScores {
+        #[arg(long = "limit", default_value_t = 20)]
+        limit: usize,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum CacheCliExportFormat {
+    Jsonl,
+    PrettyJson,
+}
+
+impl From<CacheCliExportFormat> for CacheExportFormat {
+    fn from(format: CacheCliExportFormat) -> Self {
+        match format {
+            CacheCliExportFormat::Jsonl => CacheExportFormat::Jsonl,
+            CacheCliExportFormat::PrettyJson => CacheExportFormat::PrettyJson,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -260,6 +340,7 @@ pub async fn run() -> anyhow::Result<()> {
                         top.unwrap_or(1),
                         Some(ttl),
                         force_refresh,
+                        true,
                     )
                     .await?;
                 match result {
@@ -326,6 +407,71 @@ pub async fn run() -> anyhow::Result<()> {
                 write_output(output.as_ref(), &rendered).await?;
             }
         }
+        Command::Cache { command } => {
+            let cache = open_cache(db.as_ref())?;
+            match command {
+                CacheCommand::Stats => {
+                    let rendered = serde_json::to_vec_pretty(&cache.stats()?)?;
+                    write_output(None, &rendered).await?;
+                }
+                CacheCommand::Prune {
+                    yes,
+                    keep_fetch_runs,
+                    keep_ai_scores,
+                } => {
+                    let report = cache.prune(CachePruneOptions {
+                        dry_run: !yes,
+                        keep_fetch_runs,
+                        keep_ai_scores,
+                    })?;
+                    let rendered = serde_json::to_vec_pretty(&report)?;
+                    write_output(None, &rendered).await?;
+                    if !yes {
+                        eprintln!("dry-run only; pass --yes to delete matching cache records");
+                    }
+                }
+                CacheCommand::Vacuum { yes } => {
+                    let rendered = serde_json::to_vec_pretty(&serde_json::json!({
+                        "dry_run": !yes,
+                        "vacuumed": yes,
+                    }))?;
+                    if yes {
+                        cache.vacuum()?;
+                    } else {
+                        eprintln!("dry-run only; pass --yes to run VACUUM");
+                    }
+                    write_output(None, &rendered).await?;
+                }
+                CacheCommand::Export {
+                    format,
+                    upstream,
+                    unified,
+                    fetch_runs,
+                    ai_scores,
+                    limit,
+                    output,
+                } => {
+                    let any_section = upstream || unified || fetch_runs || ai_scores;
+                    let rendered = cache.export(CacheExportOptions {
+                        format: format.into(),
+                        upstream: upstream || !any_section,
+                        unified: unified || !any_section,
+                        fetch_runs: fetch_runs || !any_section,
+                        ai_scores: ai_scores || !any_section,
+                        limit,
+                    })?;
+                    write_output(output.as_ref(), &rendered).await?;
+                }
+                CacheCommand::Runs { limit } => {
+                    let rendered = serde_json::to_vec_pretty(&cache.list_fetch_runs(limit)?)?;
+                    write_output(None, &rendered).await?;
+                }
+                CacheCommand::AiScores { limit } => {
+                    let rendered = serde_json::to_vec_pretty(&cache.list_recent_ai_scores(limit)?)?;
+                    write_output(None, &rendered).await?;
+                }
+            }
+        }
         Command::Server { host, port, open } => {
             let cookie = load_cookie(cookie_file.as_ref()).await?;
             let ttl = crate::cache::default_ttl();
@@ -365,6 +511,13 @@ fn print_results(results: &[crate::provider::SearchResult]) {
     eprintln!("{}", render_results_table(results));
 }
 
+fn open_cache(db: Option<&PathBuf>) -> anyhow::Result<UpstreamCache> {
+    match db {
+        Some(path) => Ok(UpstreamCache::open(path)?),
+        None => Ok(UpstreamCache::open_default()?),
+    }
+}
+
 fn service_context(
     cookie: Option<String>,
     offline_db: Option<PathBuf>,
@@ -373,10 +526,7 @@ fn service_context(
     ttl: Duration,
     force_refresh: bool,
 ) -> anyhow::Result<ServiceContext> {
-    let cache = match db {
-        Some(path) => UpstreamCache::open(path)?,
-        None => UpstreamCache::open_default()?,
-    };
+    let cache = open_cache(db)?;
     Ok(ServiceContext {
         cache: Some(cache),
         provider_options,
@@ -384,6 +534,7 @@ fn service_context(
         offline_db,
         default_ttl: ttl,
         force_refresh,
+        ..Default::default()
     })
 }
 

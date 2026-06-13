@@ -36,6 +36,25 @@ function startVite() {
   return { child, getOutput: () => output };
 }
 
+async function stopServer(server) {
+  if (!server?.child || server.child.exitCode !== null) {
+    return;
+  }
+  if (process.platform === 'win32') {
+    await new Promise((resolvePromise) => {
+      const killer = spawn('taskkill.exe', ['/pid', String(server.child.pid), '/t', '/f'], { stdio: 'ignore' });
+      killer.on('exit', resolvePromise);
+      killer.on('error', resolvePromise);
+    });
+    return;
+  }
+  server.child.kill();
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
+  if (server.child.exitCode === null) {
+    server.child.kill('SIGKILL');
+  }
+}
+
 async function waitForServer() {
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
@@ -59,8 +78,11 @@ function requirePass(condition, message, sample = {}) {
 }
 
 async function installRoutes(page, scenarioRef) {
-  await page.route('**/api/**', (route) => {
+  await page.route('**/*', (route) => {
     const path = new URL(route.request().url()).pathname;
+    if (!path.startsWith('/api/')) {
+      return route.continue();
+    }
     const cache = scenarioRef.current === 'empty' ? [] : populatedCache;
     const fresh = cache.filter((entry) => entry.fresh).length;
     const expired = Math.max(cache.length - fresh, 0);
@@ -161,9 +183,5 @@ try {
   if (browser) {
     await browser.close();
   }
-  server.child.kill();
-  await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
-  if (server.child.exitCode === null) {
-    server.child.kill('SIGKILL');
-  }
+  await stopServer(server);
 }

@@ -1,4 +1,5 @@
 import { chromium } from '@playwright/test';
+import { spawn } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -134,24 +135,6 @@ const MOCK_FETCH_RESULT_WITHOUT_ANNOTATIONS = {
 const dragonKnightReal = normalizeLyricPayload(JSON.parse(readFileSync(resolve(SCRIPT_DIR, 'dragon-knight-real.json'), 'utf8')));
 
 let fetchResultCount = 0;
-const browser = await chromium.launch({ headless: false });
-const page = await browser.newPage({ viewport: { width: 1280, height: 920 } });
-await page.route('**/api/**', (route) => {
-  const path = new URL(route.request().url()).pathname;
-  if (path === '/api/search') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(MOCK_SEARCH) });
-  if (path === '/api/fetch-result') {
-    fetchResultCount += 1;
-    return route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify(fetchResultCount === 1 ? MOCK_FETCH_RESULT_WITH_ANNOTATIONS : MOCK_FETCH_RESULT_WITHOUT_ANNOTATIONS),
-    });
-  }
-  if (path === '/api/cache') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ entries: [] }) });
-  if (path === '/api/health') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, version: 'test' }) });
-  if (path === '/api/stats') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ total: 0, fresh: 0, expired: 0 }) });
-  return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
-});
 
 function requirePass(condition, message, sample = {}) {
   if (!condition) {
@@ -185,6 +168,54 @@ function overlappingBoxes(boxes) {
   return false;
 }
 
+function startVite() {
+  const isWindows = process.platform === 'win32';
+  const command = isWindows ? 'cmd.exe' : 'npm';
+  const args = isWindows
+    ? ['/d', '/s', '/c', 'npm run dev -- --port 5181 --strictPort']
+    : ['run', 'dev', '--', '--port', '5181', '--strictPort'];
+  const child = spawn(command, args, { cwd: SCRIPT_DIR, stdio: ['ignore', 'pipe', 'pipe'] });
+  let output = '';
+  child.stdout.on('data', (chunk) => { output += chunk.toString(); });
+  child.stderr.on('data', (chunk) => { output += chunk.toString(); });
+  return { child, getOutput: () => output };
+}
+
+async function waitForServer() {
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(BASE);
+      if (response.ok) {
+        return;
+      }
+    } catch {
+      // Keep polling until Vite is ready.
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
+  }
+  throw new Error('Meta stress dev server did not start in time');
+}
+
+async function stopServer(server) {
+  if (!server?.child || server.child.exitCode !== null) {
+    return;
+  }
+  if (process.platform === 'win32') {
+    await new Promise((resolvePromise) => {
+      const killer = spawn('taskkill.exe', ['/pid', String(server.child.pid), '/t', '/f'], { stdio: 'ignore' });
+      killer.on('exit', resolvePromise);
+      killer.on('error', resolvePromise);
+    });
+    return;
+  }
+  server.child.kill();
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
+  if (server.child.exitCode === null) {
+    server.child.kill('SIGKILL');
+  }
+}
+
 const dragonKnightPrevLine = dragonKnightReal.lines.find((line) => line.text === '咆哮声不自觉');
 const dragonKnightHengLine = dragonKnightReal.lines.find((line) => line.text === '横越过了几条街');
 const dragonKnightPrevBreath = dragonKnightPrevLine?.words.flatMap((word) => word.annotations || []).find((annotation) => annotation.type === 'breath' && annotation.text === '横');
@@ -199,6 +230,30 @@ const dragonKnightChongBreath = dragonKnightChargeLine?.words.find((word) => wor
 const dragonKnightJueStress = dragonKnightChargeLine?.words.find((word) => word.text === '决')?.annotations.find((annotation) => annotation.type === 'stress');
 requirePass(dragonKnightWoBreath && !dragonKnightWoBreath.suppressLabel && dragonKnightChongBreath && dragonKnightChongBreath.suppressLabel && dragonKnightJueStress, 'DRAGON_KNIGHT_SINGLE_STRESS_BREATH_LABEL_PRIORITY_WRONG', {
   charge: dragonKnightChargeLine?.words.map((word) => ({ text: word.text, annotations: word.annotations })),
+});
+
+const server = startVite();
+let browser;
+try {
+await waitForServer();
+browser = await chromium.launch({ headless: true });
+const page = await browser.newPage({ viewport: { width: 1280, height: 920 } });
+await page.route('**/*', (route) => {
+  const path = new URL(route.request().url()).pathname;
+  if (!path.startsWith('/api/')) return route.continue();
+  if (path === '/api/search') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(MOCK_SEARCH) });
+  if (path === '/api/fetch-result') {
+    fetchResultCount += 1;
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(fetchResultCount === 1 ? MOCK_FETCH_RESULT_WITH_ANNOTATIONS : MOCK_FETCH_RESULT_WITHOUT_ANNOTATIONS),
+    });
+  }
+  if (path === '/api/cache') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ entries: [] }) });
+  if (path === '/api/health') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, version: 'test' }) });
+  if (path === '/api/stats') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ total: 0, fresh: 0, expired: 0 }) });
+  return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
 });
 
 await page.goto(BASE);
@@ -475,4 +530,9 @@ console.log('MULTI_MARKER_SAMPLE:', JSON.stringify(multiMarkerSample));
 console.log('DRAGON_KNIGHT_CLUSTER_SAMPLE:', JSON.stringify(dragonKnightClusterSample));
 console.log('ENDING_KARAOKE_SAMPLE:', JSON.stringify(endingKaraokeSample));
 await page.screenshot({ path: resolve(SCRIPT_DIR, 'playwright-artifacts/verify-meta-stress.png'), fullPage: false });
-await browser.close();
+} finally {
+  if (browser) {
+    await browser.close();
+  }
+  await stopServer(server);
+}

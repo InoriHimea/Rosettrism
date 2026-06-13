@@ -5,8 +5,9 @@ use clap::ValueEnum;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 
-use crate::cache::{default_ttl, UpstreamCache};
+use crate::cache::{default_ttl, now_unix, FetchRunMetadata, UpstreamCache};
 use crate::cached_provider::{fetch_cache_key, CachedProvider};
 use crate::decoder::{decode_bytes, decode_raw_bytes, InputFormat};
 use crate::model::{
@@ -14,13 +15,16 @@ use crate::model::{
     LyricTrackQuality, UnifiedLyric, UnifiedLyricMode, UnifiedLyricScore,
 };
 use crate::provider::{
-    provider_for_with_options, FetchedLyric, LyricProvider, ProviderOptions, SearchResult, Source,
+    provider_for_with_options, FetchedLyric, LyricProvider, ProviderOptions, ProviderRequestPolicy,
+    ProviderRuntime, SearchResult, Source,
 };
 use crate::{Error, Result};
 
 const DEFAULT_TRANSLATION_LANG: &str = "zh-Hans";
 const DEFAULT_OPENAI_MODEL: &str = "gpt-4o-mini";
 const AI_SCORING_TIMEOUT: Duration = Duration::from_secs(30);
+const AI_PROMPT_VERSION: &str = "ai-score-prompt-v1";
+const AI_CANDIDATE_SUMMARY_VERSION: &str = "candidate-summary-v1";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
 #[serde(rename_all = "snake_case")]
@@ -118,12 +122,54 @@ pub struct AiScoringConfig {
     pub model: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FetchRunStructuredMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub candidate_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_warning_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_event: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AggregateFetchResponse {
     pub mode: MergeMode,
     pub results: Vec<UnifiedLyric>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_score: Option<AiScoringResult>,
+    #[serde(default, skip_serializing_if = "is_default_fetch_metadata")]
+    pub metadata: FetchRunStructuredMetadata,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiScoringResult {
+    pub model: String,
+    pub base_url: String,
+    pub prompt_version: String,
+    pub config_hash: String,
+    pub candidate_summary_version: String,
+    pub candidate_summary_hash: String,
+    pub best_index: usize,
+    pub scores: Vec<AiCandidateScore>,
+    pub reason: String,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiCandidateScore {
+    pub index: usize,
+    pub source: String,
+    pub title: String,
+    pub artist: String,
+    pub heuristic_score: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_score: Option<f32>,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -146,6 +192,8 @@ pub struct MultiSourceSearchResponse {
     pub sources: Vec<SourceSearchResult>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
+    #[serde(default, skip_serializing_if = "is_default_fetch_metadata")]
+    pub metadata: FetchRunStructuredMetadata,
 }
 
 #[derive(Clone)]
@@ -156,6 +204,12 @@ pub struct ServiceContext {
     pub offline_db: Option<PathBuf>,
     pub default_ttl: Duration,
     pub force_refresh: bool,
+    #[cfg(test)]
+    pub(crate) provider_factory: Option<
+        std::sync::Arc<
+            dyn Fn(Source, Duration, bool) -> Result<Box<dyn LyricProvider>> + Send + Sync,
+        >,
+    >,
 }
 
 impl Default for ServiceContext {
@@ -167,12 +221,32 @@ impl Default for ServiceContext {
             offline_db: None,
             default_ttl: default_ttl(),
             force_refresh: false,
+            #[cfg(test)]
+            provider_factory: None,
         }
     }
 }
 
+const FETCH_STATUS_SUCCESS: &str = "success";
+const FETCH_STATUS_ERROR: &str = "error";
+const FETCH_STATUS_CACHE_HIT: &str = "cache_hit";
+const FETCH_STATUS_CACHE_STORE: &str = "cache_store";
+const FETCH_STATUS_PROVIDER_WARNING: &str = "provider_warning";
+const FETCH_STATUS_AI_SKIPPED: &str = "ai_skipped";
+const FETCH_STATUS_NO_LYRICS: &str = "no_lyrics_found";
+
 impl ServiceContext {
     pub async fn aggregate_fetch(
+        &self,
+        request: AggregateFetchRequest,
+    ) -> Result<AggregateFetchResponse> {
+        let run_id = self.start_fetch_run(&request.query, None, "aggregate_fetch")?;
+        let result = self.aggregate_fetch_inner(request).await;
+        self.finish_fetch_run_from_result(run_id, &result)?;
+        result
+    }
+
+    async fn aggregate_fetch_inner(
         &self,
         mut request: AggregateFetchRequest,
     ) -> Result<AggregateFetchResponse> {
@@ -201,7 +275,8 @@ impl ServiceContext {
                     let mut response: AggregateFetchResponse = serde_json::from_slice(&hit.body)?;
                     response
                         .warnings
-                        .push(format!("served unified cache {}", hit.id));
+                        .push(format!("served_unified_cache: id={}", hit.id));
+                    response.metadata.cache_event = Some("cache_hit".into());
                     return Ok(response);
                 }
             }
@@ -227,7 +302,7 @@ impl ServiceContext {
             match handle.await {
                 Ok(Ok(candidate)) => candidates.push(candidate),
                 Ok(Err(err)) => warnings.push(err.to_string()),
-                Err(err) => warnings.push(format!("provider task failed: {err}")),
+                Err(err) => warnings.push(format!("provider_warning: provider task failed: {err}")),
             }
         }
 
@@ -239,6 +314,7 @@ impl ServiceContext {
         warnings.retain(|warning| !is_low_signal_aggregate_warning(warning));
 
         candidates.sort_by(compare_candidate_quality);
+        let mut ai_score = None;
         match self
             .select_best_candidate_with_ai(&candidates, request.ai_scoring.as_ref())
             .await
@@ -246,15 +322,16 @@ impl ServiceContext {
             Ok(Some(selection)) => {
                 warnings.push(format!(
                     "AI lyric selection chose {} with score {:.1}: {}",
-                    candidates[selection.index].source.cli_name(),
-                    selection.score,
+                    candidates[selection.best_index].source.cli_name(),
+                    selection.best_score().unwrap_or(0.0),
                     selection.reason
                 ));
-                let selected = candidates.remove(selection.index);
+                let selected = candidates.remove(selection.best_index);
                 candidates.insert(0, selected);
+                ai_score = Some(selection);
             }
             Ok(None) => {}
-            Err(err) => warnings.push(format!("AI lyric selection skipped: {err}")),
+            Err(err) => warnings.push(format!("ai_skipped: {err}")),
         }
 
         let results = candidates
@@ -263,10 +340,24 @@ impl ServiceContext {
             .map(|candidate| build_unified(candidate, &candidates, request.merge_mode))
             .collect::<Result<Vec<_>>>()?;
 
+        let provider_warning_count = provider_warning_count(&warnings);
         let mut response = AggregateFetchResponse {
             mode: request.merge_mode,
             results,
             warnings,
+            ai_score: ai_score.clone(),
+            metadata: FetchRunStructuredMetadata {
+                provider_count: Some(
+                    candidates
+                        .iter()
+                        .map(|candidate| candidate.source.cli_name())
+                        .collect::<std::collections::BTreeSet<_>>()
+                        .len(),
+                ),
+                candidate_count: Some(candidates.len()),
+                provider_warning_count: Some(provider_warning_count),
+                cache_event: None,
+            },
         };
 
         if let Some(cache) = &self.cache {
@@ -277,13 +368,29 @@ impl ServiceContext {
                 .flat_map(|result| result.cache_refs.clone())
                 .collect::<Vec<_>>();
             let id = cache.put_unified(&cache_key, &body, &dependency_keys, ttl)?;
-            response.warnings.push(format!("stored unified cache {id}"));
+            if let Some(ai_score) = &ai_score {
+                cache.put_ai_score(id, &serde_json::to_value(ai_score)?)?;
+            }
+            response
+                .warnings
+                .push(format!("stored_unified_cache: id={id}"));
+            response.metadata.cache_event = Some("cache_store".into());
         }
 
         Ok(response)
     }
 
     pub async fn search_sources(
+        &self,
+        request: SourceSearchRequest,
+    ) -> Result<MultiSourceSearchResponse> {
+        let run_id = self.start_fetch_run(&request.query, None, "search_sources")?;
+        let result = self.search_sources_inner(request).await;
+        self.finish_fetch_run_from_result(run_id, &result)?;
+        result
+    }
+
+    async fn search_sources_inner(
         &self,
         mut request: SourceSearchRequest,
     ) -> Result<MultiSourceSearchResponse> {
@@ -322,7 +429,7 @@ impl ServiceContext {
                     groups.push(group);
                 }
                 Ok(Err(err)) => warnings.push(err.to_string()),
-                Err(err) => warnings.push(format!("provider task failed: {err}")),
+                Err(err) => warnings.push(format!("provider_warning: provider task failed: {err}")),
             }
         }
 
@@ -332,8 +439,15 @@ impl ServiceContext {
         }
         results.truncate(request.limit);
 
+        let provider_warning_count = warnings.len();
         Ok(MultiSourceSearchResponse {
             query: request.query,
+            metadata: FetchRunStructuredMetadata {
+                provider_count: Some(groups.len() + provider_warning_count),
+                candidate_count: Some(results.len()),
+                provider_warning_count: Some(provider_warning_count),
+                cache_event: None,
+            },
             results,
             sources: groups,
             warnings,
@@ -348,6 +462,7 @@ impl ServiceContext {
         top: usize,
         ttl: Option<Duration>,
         force: bool,
+        enrich: bool,
     ) -> Result<SpecificFetchResult> {
         let ttl = ttl.unwrap_or(self.default_ttl);
         let provider = self
@@ -373,8 +488,22 @@ impl ServiceContext {
                     })
                 }
                 SpecificFetchFormat::Json => {
-                    self.fetch_enriched_source_result(source, result, fetched, ttl, force)
-                        .await
+                    if enrich {
+                        self.fetch_enriched_source_result(source, result, fetched, ttl, force)
+                            .await
+                    } else {
+                        let input_format = fetched.input_format;
+                        let annotations = fetched.annotations.clone();
+                        let document = decode_fetched(fetched)?;
+                        Ok(SpecificFetchResult::Json {
+                            source,
+                            result,
+                            input_format,
+                            document,
+                            annotations,
+                            unified: None,
+                        })
+                    }
                 }
             };
         }
@@ -462,6 +591,24 @@ impl ServiceContext {
         format: SpecificFetchFormat,
         ttl: Option<Duration>,
         force: bool,
+        enrich: bool,
+    ) -> Result<SpecificFetchResult> {
+        let query = fetch_run_query_for_result(&result);
+        let run_id = self.start_fetch_run(&query, Some(result.source), "fetch_source_result")?;
+        let fetch_result = self
+            .fetch_source_result_inner(result, format, ttl, force, enrich)
+            .await;
+        self.finish_fetch_run_from_result(run_id, &fetch_result)?;
+        fetch_result
+    }
+
+    async fn fetch_source_result_inner(
+        &self,
+        result: SearchResult,
+        format: SpecificFetchFormat,
+        ttl: Option<Duration>,
+        force: bool,
+        enrich: bool,
     ) -> Result<SpecificFetchResult> {
         let ttl = ttl.unwrap_or(self.default_ttl);
         let source = result.source;
@@ -479,13 +626,44 @@ impl ServiceContext {
                 })
             }
             SpecificFetchFormat::Json => {
-                self.fetch_enriched_source_result(source, result, fetched, ttl, force)
-                    .await
+                if enrich {
+                    self.fetch_enriched_source_result(source, result, fetched, ttl, force)
+                        .await
+                } else {
+                    let input_format = fetched.input_format;
+                    let annotations = fetched.annotations.clone();
+                    let document = decode_fetched(fetched)?;
+                    Ok(SpecificFetchResult::Json {
+                        source,
+                        result,
+                        input_format,
+                        document,
+                        annotations,
+                        unified: None,
+                    })
+                }
             }
         }
     }
 
     pub async fn fetch_aggregate_members(
+        &self,
+        members: Vec<SearchResult>,
+        merge_mode: MergeMode,
+        ttl: Option<Duration>,
+        force: bool,
+        ai_scoring: Option<&AiScoringConfig>,
+    ) -> Result<UnifiedLyric> {
+        let query = fetch_run_query_for_members(&members);
+        let run_id = self.start_fetch_run(&query, None, "fetch_aggregate_members")?;
+        let result = self
+            .fetch_aggregate_members_inner(members, merge_mode, ttl, force, ai_scoring)
+            .await;
+        self.finish_fetch_run_from_result(run_id, &result)?;
+        result
+    }
+
+    async fn fetch_aggregate_members_inner(
         &self,
         members: Vec<SearchResult>,
         merge_mode: MergeMode,
@@ -524,15 +702,15 @@ impl ServiceContext {
             Ok(Some(selection)) => {
                 warnings.push(format!(
                     "AI lyric selection chose {} with score {:.1}: {}",
-                    candidates[selection.index].source.cli_name(),
-                    selection.score,
+                    candidates[selection.best_index].source.cli_name(),
+                    selection.best_score().unwrap_or(0.0),
                     selection.reason
                 ));
-                let selected = candidates.remove(selection.index);
+                let selected = candidates.remove(selection.best_index);
                 candidates.insert(0, selected);
             }
             Ok(None) => {}
-            Err(err) => warnings.push(format!("AI lyric selection skipped: {err}")),
+            Err(err) => warnings.push(format!("ai_skipped: {err}")),
         }
 
         let mut unified = build_unified(&candidates[0], &candidates, merge_mode)?;
@@ -544,11 +722,39 @@ impl ServiceContext {
         Ok(unified)
     }
 
+    fn start_fetch_run(
+        &self,
+        query: &str,
+        source: Option<Source>,
+        mode: &str,
+    ) -> Result<Option<i64>> {
+        self.cache
+            .as_ref()
+            .map(|cache| cache.start_fetch_run(query, source, mode))
+            .transpose()
+    }
+
+    fn finish_fetch_run_from_result<T: FetchRunOutcome>(
+        &self,
+        run_id: Option<i64>,
+        result: &Result<T>,
+    ) -> Result<()> {
+        let Some(run_id) = run_id else {
+            return Ok(());
+        };
+        let (status, message) = classify_fetch_run_result(result);
+        let metadata = fetch_run_metadata_from_result(result);
+        if let Some(cache) = &self.cache {
+            cache.finish_fetch_run(run_id, status, message.as_deref(), metadata)?;
+        }
+        Ok(())
+    }
+
     async fn select_best_candidate_with_ai(
         &self,
         candidates: &[SourceCandidate],
         config: Option<&AiScoringConfig>,
-    ) -> Result<Option<AiCandidateSelection>> {
+    ) -> Result<Option<AiScoringResult>> {
         let Some(config) = resolve_ai_scoring_config(config) else {
             return Ok(None);
         };
@@ -556,49 +762,41 @@ impl ServiceContext {
             return Ok(None);
         }
 
-        let request = json!({
-            "model": config.model,
-            "response_format": { "type": "json_object" },
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "You score synced lyric candidates. Return strict JSON only: {\"best_index\":number,\"scores\":[{\"index\":number,\"score\":number,\"reason\":string}]}"
-                },
-                {
-                    "role": "user",
-                    "content": serde_json::to_string(&candidate_summaries(candidates))?
-                }
-            ]
-        });
-        let client = reqwest::Client::builder()
-            .timeout(AI_SCORING_TIMEOUT)
-            .build()?;
-        let response = client
-            .post(openai_chat_completions_url(&config.base_url)?)
-            .header(AUTHORIZATION, format!("Bearer {}", config.api_key))
-            .header(CONTENT_TYPE, "application/json")
-            .json(&request)
-            .send()
-            .await?;
-        let status = response.status();
-        let body = response.text().await?;
-        if !status.is_success() {
-            return Err(Error::Provider(format!(
-                "OpenAI compatible endpoint returned {status}: {}",
-                text_preview(&body, 1_000)
-            )));
+        let summaries = candidate_summaries(candidates);
+        score_ai_candidate_summaries(&summaries, &config).await
+    }
+
+    pub async fn replay_ai_score_for_unified_cache(
+        &self,
+        unified_cache_id: i64,
+        config: Option<&AiScoringConfig>,
+    ) -> Result<AiScoringResult> {
+        let Some(config) = resolve_ai_scoring_config(config) else {
+            return Err(Error::Service("AI scoring is not configured".into()));
+        };
+        let cache = self
+            .cache
+            .as_ref()
+            .ok_or_else(|| Error::Service("cache is not configured".into()))?;
+        let body = cache
+            .unified_body(unified_cache_id)?
+            .ok_or_else(|| Error::Service("unified cache entry not found".into()))?;
+        let response: AggregateFetchResponse = serde_json::from_slice(&body)?;
+        let unified = response
+            .results
+            .first()
+            .ok_or_else(|| Error::Service("unified cache entry has no candidates".into()))?;
+        let summaries = candidate_summaries_from_unified(unified);
+        if summaries.len() < 2 {
+            return Err(Error::Service(
+                "unified cache entry has fewer than two candidates".into(),
+            ));
         }
-        let value: serde_json::Value = serde_json::from_str(&body)?;
-        let content = value
-            .get("choices")
-            .and_then(|choices| choices.get(0))
-            .and_then(|choice| choice.get("message"))
-            .and_then(|message| message.get("content"))
-            .and_then(|content| content.as_str())
-            .ok_or_else(|| {
-                Error::Provider("OpenAI compatible response missing message content".into())
-            })?;
-        parse_ai_candidate_selection(content, candidates.len())
+        let score = score_ai_candidate_summaries(&summaries, &config)
+            .await?
+            .ok_or_else(|| Error::Service("AI scoring returned no selection".into()))?;
+        cache.put_ai_score(unified_cache_id, &serde_json::to_value(&score)?)?;
+        Ok(score)
     }
 
     pub async fn provider(
@@ -607,19 +805,28 @@ impl ServiceContext {
         ttl: Duration,
         force: bool,
     ) -> Result<Box<dyn LyricProvider>> {
+        #[cfg(test)]
+        if let Some(factory) = &self.provider_factory {
+            return factory(source, ttl, force);
+        }
         let credential =
             credential_for_source(source, self.cookie.as_deref(), self.offline_db.as_ref()).await?;
         let inner = provider_for_with_options(source, credential, self.provider_options)?;
+        let runtime = Box::new(ProviderRuntime::new(
+            source,
+            inner,
+            ProviderRequestPolicy::from(source.provider_config()),
+        ));
         if let Some(cache) = &self.cache {
             Ok(Box::new(CachedProvider::new(
                 source,
-                inner,
+                runtime,
                 cache.clone(),
                 ttl,
                 force,
             )))
         } else {
-            Ok(inner)
+            Ok(runtime)
         }
     }
 
@@ -831,14 +1038,7 @@ struct ResolvedAiScoringConfig {
     model: String,
 }
 
-#[derive(Debug, Clone)]
-struct AiCandidateSelection {
-    index: usize,
-    score: f32,
-    reason: String,
-}
-
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct AiCandidateSummary {
     index: usize,
     source: String,
@@ -916,6 +1116,61 @@ fn text_preview(value: &str, max_chars: usize) -> String {
     preview
 }
 
+async fn score_ai_candidate_summaries(
+    summaries: &[AiCandidateSummary],
+    config: &ResolvedAiScoringConfig,
+) -> Result<Option<AiScoringResult>> {
+    let summary_json = serde_json::to_string(summaries)?;
+    let summary_hash = hash_json(summary_json.as_bytes());
+    let request = json!({
+        "model": config.model,
+        "response_format": { "type": "json_object" },
+        "messages": [
+            {
+                "role": "system",
+                "content": ai_scoring_system_prompt()
+            },
+            {
+                "role": "user",
+                "content": summary_json
+            }
+        ]
+    });
+    let client = reqwest::Client::builder()
+        .timeout(AI_SCORING_TIMEOUT)
+        .build()?;
+    let response = client
+        .post(openai_chat_completions_url(&config.base_url)?)
+        .header(AUTHORIZATION, format!("Bearer {}", config.api_key))
+        .header(CONTENT_TYPE, "application/json")
+        .json(&request)
+        .send()
+        .await?;
+    let status = response.status();
+    let body = response.text().await?;
+    if !status.is_success() {
+        return Err(Error::Provider(format!(
+            "OpenAI compatible endpoint returned {status}: {}",
+            text_preview(&body, 1_000)
+        )));
+    }
+    let value: serde_json::Value = serde_json::from_str(&body)?;
+    let content = value
+        .get("choices")
+        .and_then(|choices| choices.get(0))
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("content"))
+        .and_then(|content| content.as_str())
+        .ok_or_else(|| {
+            Error::Provider("OpenAI compatible response missing message content".into())
+        })?;
+    parse_ai_candidate_selection(content, config, summaries, summary_hash)
+}
+
+fn ai_scoring_system_prompt() -> &'static str {
+    "You score synced lyric candidates. Return strict JSON only: {\"best_index\":number,\"scores\":[{\"index\":number,\"score\":number,\"reason\":string}]}"
+}
+
 fn candidate_summaries(candidates: &[SourceCandidate]) -> Vec<AiCandidateSummary> {
     candidates
         .iter()
@@ -943,48 +1198,333 @@ fn candidate_summaries(candidates: &[SourceCandidate]) -> Vec<AiCandidateSummary
         .collect()
 }
 
+fn candidate_summaries_from_unified(unified: &UnifiedLyric) -> Vec<AiCandidateSummary> {
+    unified
+        .tracks
+        .iter()
+        .enumerate()
+        .map(|(index, track)| AiCandidateSummary {
+            index,
+            source: track.source.clone(),
+            title: track
+                .document
+                .meta
+                .title
+                .clone()
+                .unwrap_or_else(|| unified.meta.title.clone().unwrap_or_default()),
+            artist: track
+                .document
+                .meta
+                .artist
+                .clone()
+                .unwrap_or_else(|| unified.meta.artist.clone().unwrap_or_default()),
+            line_count: track.quality.line_count,
+            timed_line_count: track.quality.timed_line_count,
+            word_timing_count: track.quality.word_timing_count,
+            heuristic_score: track.quality.score,
+            sample_lines: track
+                .document
+                .lines
+                .iter()
+                .filter_map(|line| {
+                    let text = line.text.trim();
+                    (!text.is_empty()).then(|| text.chars().take(120).collect::<String>())
+                })
+                .take(18)
+                .collect(),
+        })
+        .collect()
+}
+
+fn ai_config_hash(config: &ResolvedAiScoringConfig) -> String {
+    let value = json!({
+        "base_url": config.base_url,
+        "model": config.model,
+        "prompt_version": AI_PROMPT_VERSION,
+        "candidate_summary_version": AI_CANDIDATE_SUMMARY_VERSION,
+    });
+    hash_json(serde_json::to_string(&value).unwrap_or_default().as_bytes())
+}
+
 fn parse_ai_candidate_selection(
     content: &str,
-    candidate_len: usize,
-) -> Result<Option<AiCandidateSelection>> {
+    config: &ResolvedAiScoringConfig,
+    summaries: &[AiCandidateSummary],
+    summary_hash: String,
+) -> Result<Option<AiScoringResult>> {
     let value: serde_json::Value = serde_json::from_str(content.trim())?;
     let best_index = value
         .get("best_index")
         .and_then(|value| value.as_u64())
         .ok_or_else(|| Error::Provider("AI response missing best_index".into()))?
         as usize;
-    if best_index >= candidate_len {
+    if best_index >= summaries.len() {
         return Err(Error::Provider(format!(
             "AI response best_index {best_index} is out of range"
         )));
     }
-    let score_item = value
+    let response_scores = value
         .get("scores")
         .and_then(|value| value.as_array())
-        .and_then(|scores| {
-            scores.iter().find(|score| {
+        .cloned()
+        .unwrap_or_default();
+    let scores = summaries
+        .iter()
+        .map(|summary| {
+            let score_item = response_scores.iter().find(|score| {
                 score
                     .get("index")
                     .and_then(|index| index.as_u64())
-                    .is_some_and(|index| index as usize == best_index)
-            })
-        });
-    let score = score_item
-        .and_then(|item| item.get("score"))
-        .and_then(|score| score.as_f64())
-        .unwrap_or(0.0) as f32;
-    let reason = score_item
-        .and_then(|item| item.get("reason"))
-        .and_then(|reason| reason.as_str())
+                    .is_some_and(|index| index as usize == summary.index)
+            });
+            AiCandidateScore {
+                index: summary.index,
+                source: summary.source.clone(),
+                title: summary.title.clone(),
+                artist: summary.artist.clone(),
+                heuristic_score: summary.heuristic_score,
+                ai_score: score_item
+                    .and_then(|item| item.get("score"))
+                    .and_then(|score| score.as_f64())
+                    .map(|score| score as f32),
+                reason: score_item
+                    .and_then(|item| item.get("reason"))
+                    .and_then(|reason| reason.as_str())
+                    .unwrap_or("")
+                    .chars()
+                    .take(240)
+                    .collect(),
+            }
+        })
+        .collect::<Vec<_>>();
+    let reason = scores
+        .iter()
+        .find(|score| score.index == best_index)
+        .map(|score| score.reason.as_str())
+        .filter(|reason| !reason.is_empty())
         .unwrap_or("selected by AI")
-        .chars()
-        .take(180)
-        .collect();
-    Ok(Some(AiCandidateSelection {
-        index: best_index,
-        score,
+        .to_string();
+    Ok(Some(AiScoringResult {
+        model: config.model.clone(),
+        base_url: config.base_url.clone(),
+        prompt_version: AI_PROMPT_VERSION.to_string(),
+        config_hash: ai_config_hash(config),
+        candidate_summary_version: AI_CANDIDATE_SUMMARY_VERSION.to_string(),
+        candidate_summary_hash: summary_hash,
+        best_index,
+        scores,
         reason,
+        created_at: now_unix(),
     }))
+}
+
+trait FetchRunOutcome {
+    fn fetch_run_warnings(&self) -> &[String];
+
+    fn fetch_run_metadata(&self) -> FetchRunMetadata {
+        FetchRunMetadata::default()
+    }
+}
+
+impl FetchRunOutcome for AggregateFetchResponse {
+    fn fetch_run_warnings(&self) -> &[String] {
+        &self.warnings
+    }
+
+    fn fetch_run_metadata(&self) -> FetchRunMetadata {
+        metadata_for_run(&self.metadata)
+    }
+}
+
+impl FetchRunOutcome for MultiSourceSearchResponse {
+    fn fetch_run_warnings(&self) -> &[String] {
+        &self.warnings
+    }
+
+    fn fetch_run_metadata(&self) -> FetchRunMetadata {
+        metadata_for_run(&self.metadata)
+    }
+}
+
+impl FetchRunOutcome for UnifiedLyric {
+    fn fetch_run_warnings(&self) -> &[String] {
+        &self.warnings
+    }
+
+    fn fetch_run_metadata(&self) -> FetchRunMetadata {
+        FetchRunMetadata {
+            provider_count: Some(self.source_refs.len() as i64),
+            candidate_count: Some(self.cache_refs.len() as i64),
+            cache_event: None,
+        }
+    }
+}
+
+impl FetchRunOutcome for SpecificFetchResult {
+    fn fetch_run_warnings(&self) -> &[String] {
+        match self {
+            SpecificFetchResult::Raw { .. } | SpecificFetchResult::Json { .. } => &[],
+            SpecificFetchResult::RawMany { warnings, .. }
+            | SpecificFetchResult::JsonMany { warnings, .. } => warnings,
+        }
+    }
+
+    fn fetch_run_metadata(&self) -> FetchRunMetadata {
+        match self {
+            SpecificFetchResult::Raw { .. } | SpecificFetchResult::Json { .. } => {
+                FetchRunMetadata {
+                    provider_count: Some(1),
+                    candidate_count: Some(1),
+                    cache_event: None,
+                }
+            }
+            SpecificFetchResult::RawMany { results, .. } => FetchRunMetadata {
+                provider_count: Some(1),
+                candidate_count: Some(results.len() as i64),
+                cache_event: None,
+            },
+            SpecificFetchResult::JsonMany { results, .. } => FetchRunMetadata {
+                provider_count: Some(1),
+                candidate_count: Some(results.len() as i64),
+                cache_event: None,
+            },
+        }
+    }
+}
+
+fn fetch_run_metadata_from_result<T: FetchRunOutcome>(result: &Result<T>) -> FetchRunMetadata {
+    result
+        .as_ref()
+        .map(FetchRunOutcome::fetch_run_metadata)
+        .unwrap_or_default()
+}
+
+fn provider_warning_count(warnings: &[String]) -> usize {
+    warnings
+        .iter()
+        .filter(|warning| {
+            warning.starts_with("provider_warning:")
+                || warning.contains("provider task failed")
+                || warning.contains("enrichment skipped")
+        })
+        .count()
+}
+
+fn metadata_for_run(metadata: &FetchRunStructuredMetadata) -> FetchRunMetadata {
+    FetchRunMetadata {
+        provider_count: metadata.provider_count.map(|value| value as i64),
+        candidate_count: metadata.candidate_count.map(|value| value as i64),
+        cache_event: metadata.cache_event.clone(),
+    }
+}
+
+fn is_default_fetch_metadata(metadata: &FetchRunStructuredMetadata) -> bool {
+    metadata.provider_count.is_none()
+        && metadata.candidate_count.is_none()
+        && metadata.provider_warning_count.is_none()
+        && metadata.cache_event.is_none()
+}
+
+fn classify_fetch_run_result<T: FetchRunOutcome>(
+    result: &Result<T>,
+) -> (&'static str, Option<String>) {
+    match result {
+        Ok(value) => classify_fetch_run_warnings(value.fetch_run_warnings()),
+        Err(err) => {
+            let message = err.to_string();
+            let status = if message.contains("no_lyrics_found")
+                || message.contains("no lyric candidates")
+                || message.contains("no aggregate members")
+            {
+                FETCH_STATUS_NO_LYRICS
+            } else if message.contains("ai_skipped")
+                || message.contains("AI lyric selection skipped")
+            {
+                FETCH_STATUS_AI_SKIPPED
+            } else if message.contains("provider_warning")
+                || message.contains("provider task failed")
+            {
+                FETCH_STATUS_PROVIDER_WARNING
+            } else {
+                FETCH_STATUS_ERROR
+            };
+            (status, Some(message))
+        }
+    }
+}
+
+fn classify_fetch_run_warnings(warnings: &[String]) -> (&'static str, Option<String>) {
+    if let Some(message) = warnings
+        .iter()
+        .find(|warning| warning.starts_with("served_unified_cache:"))
+    {
+        return (FETCH_STATUS_CACHE_HIT, Some(message.clone()));
+    }
+    if let Some(message) = warnings
+        .iter()
+        .find(|warning| warning.starts_with("ai_skipped:"))
+    {
+        return (FETCH_STATUS_AI_SKIPPED, Some(message.clone()));
+    }
+    if let Some(message) = warnings
+        .iter()
+        .find(|warning| warning.starts_with("provider_warning:"))
+    {
+        return (FETCH_STATUS_PROVIDER_WARNING, Some(message.clone()));
+    }
+    if let Some(message) = warnings
+        .iter()
+        .find(|warning| warning.starts_with("stored_unified_cache:"))
+    {
+        return (FETCH_STATUS_CACHE_STORE, Some(message.clone()));
+    }
+    (FETCH_STATUS_SUCCESS, None)
+}
+
+fn fetch_run_query_for_result(result: &SearchResult) -> String {
+    [result.title.as_str(), result.artist.as_str()]
+        .into_iter()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+        .if_empty_then(|| result.id.clone())
+}
+
+fn fetch_run_query_for_members(members: &[SearchResult]) -> String {
+    members
+        .first()
+        .map(fetch_run_query_for_result)
+        .unwrap_or_else(|| "aggregate members".into())
+}
+
+trait EmptyStringExt {
+    fn if_empty_then(self, fallback: impl FnOnce() -> String) -> String;
+}
+
+impl EmptyStringExt for String {
+    fn if_empty_then(self, fallback: impl FnOnce() -> String) -> String {
+        if self.is_empty() {
+            fallback()
+        } else {
+            self
+        }
+    }
+}
+
+impl AiScoringResult {
+    fn best_score(&self) -> Option<f32> {
+        self.scores
+            .iter()
+            .find(|score| score.index == self.best_index)
+            .and_then(|score| score.ai_score)
+    }
+}
+
+fn hash_json(body: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(body);
+    format!("{:x}", hasher.finalize())
 }
 
 fn build_unified(
@@ -1072,6 +1612,7 @@ fn build_unified(
     };
 
     Ok(UnifiedLyric {
+        schema_version: crate::model::UNIFIED_LYRIC_SCHEMA_VERSION.to_string(),
         meta: merged_meta(base),
         mode: merge_mode.into(),
         tracks,
@@ -1585,6 +2126,65 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn golden_ai_score_fixture_tracks_quality_changes() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/ai_score_history/candidate_regression.json"
+        ))
+        .unwrap();
+        let summaries: Vec<AiCandidateSummary> =
+            serde_json::from_value(fixture["candidates"].clone()).unwrap();
+        let expected = &fixture["expected"];
+        let heuristic_best_index = summaries
+            .iter()
+            .max_by(|left, right| {
+                left.heuristic_score
+                    .partial_cmp(&right.heuristic_score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|summary| summary.index)
+            .unwrap();
+        assert_eq!(
+            heuristic_best_index,
+            expected["heuristic_best_index"].as_u64().unwrap() as usize
+        );
+
+        let config = ResolvedAiScoringConfig {
+            base_url: "https://example.invalid/v1".into(),
+            api_key: "fixture-secret".into(),
+            model: "fixture-model".into(),
+        };
+        let summary_hash = hash_json(serde_json::to_string(&summaries).unwrap().as_bytes());
+        let v1 = parse_ai_candidate_selection(
+            &fixture["ai_response_v1"].to_string(),
+            &config,
+            &summaries,
+            summary_hash.clone(),
+        )
+        .unwrap()
+        .unwrap();
+        let v2 = parse_ai_candidate_selection(
+            &fixture["ai_response_v2"].to_string(),
+            &config,
+            &summaries,
+            summary_hash,
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(
+            v1.best_index,
+            expected["ai_best_index_v1"].as_u64().unwrap() as usize
+        );
+        assert_eq!(
+            v2.best_index,
+            expected["ai_best_index_v2"].as_u64().unwrap() as usize
+        );
+        assert_eq!(v1.prompt_version, AI_PROMPT_VERSION);
+        assert_eq!(v1.candidate_summary_version, AI_CANDIDATE_SUMMARY_VERSION);
+        assert_ne!(v1.best_index, v2.best_index);
+    }
+
+    #[test]
     fn parses_ttl_units() {
         assert_eq!(parse_ttl("7d").unwrap(), Duration::from_secs(604_800));
         assert_eq!(parse_ttl("2h").unwrap(), Duration::from_secs(7_200));
@@ -1738,6 +2338,7 @@ mod tests {
                 2,
                 Some(Duration::from_secs(60)),
                 false,
+                false,
             )
             .await
             .unwrap();
@@ -1784,6 +2385,7 @@ mod tests {
                 second,
                 SpecificFetchFormat::Raw,
                 Some(Duration::from_secs(60)),
+                false,
                 false,
             )
             .await

@@ -15,8 +15,9 @@ const MOCK_FETCH_RESULT = {
 
 const browser = await chromium.launch({ headless: false });
 const page = await browser.newPage();
-await page.route('**/api/**', (route) => {
+await page.route('**/*', (route) => {
   const path = new URL(route.request().url()).pathname;
+  if (!path.startsWith('/api/')) return route.continue();
   if (path === '/api/search') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(MOCK_SEARCH) });
   if (path === '/api/fetch') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(MOCK_SEARCH.results[0]) });
   if (path === '/api/fetch-result') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(MOCK_FETCH_RESULT) });

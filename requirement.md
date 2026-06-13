@@ -1,5 +1,35 @@
 # Requirement History
 
+## 需求追加格式
+
+每次追加需求时，建议在本文件末尾新增一个版本化章节，格式如下：
+
+```markdown
+## vX.Y.Z — YYYY-MM-DD — 主题
+
+### 目标
+- 本次追加需求要达成的结果。
+
+### 验收条件
+- 可验证的完成标准。
+
+### 实作状态
+- [ ] 待处理项目。
+- [ ] 已完成项目。
+
+### 关联 plan
+- `.plan/YYYY-MM-DD-topic.md`
+```
+
+建议规则：
+
+- `vX.Y.Z` 遵循 semantic versioning；功能新增通常提升 minor，修补提升 patch，破坏性变更提升 major。
+- `YYYY-MM-DD` 使用需求确认或开始规划的日期。
+- `主题` 使用简短、可读的人类描述。
+- `目标` 与 `验收条件` 应尽量可验证，避免只描述实现细节。
+- `实作状态` 随开发进度更新，完成后应与对应 `.plan/` 文件互相呼应。
+- `关联 plan` 必须指向本次开发前建立的时间命名计划文件。
+
 ## v1.0.0 — 2026-06-01 — QQ/QRC Karaoke 实际播放修正
 
 ### 目标
@@ -25,123 +55,248 @@
 - [x] 实际 App dialog 浏览器验收
 - [x] 发布检查与提交
 
-## v1.1.0 — 2026-06-12 — Dashboard 与歌词播放 UI/UX 现代化改造
+## v1.1.0 — 2026-06-05 — AI 优选可追踪化
 
-### 背景
-- 当前 Dashboard 已完成从传统后台向现代工具界面的第一轮转型，具备暗色侧栏、日系暖色调、玻璃面板、图标导航、歌词 Karaoke 舞台等基础。
-- 实机页面审视后，整体仍存在“样式现代，但信息组织和产品体验还偏表单/卡片堆叠”的问题。
-- 本轮需求不要求推倒重做，应保留现有日系暖色、墨绿侧栏、歌词舞台和一定 R 角，围绕信息层级、组件一致性、移动端密度、仪表盘空态、歌词播放质感继续深化。
+### 目标
+- 将 AI 歌词优选从前端与数据库中的“预留入口”升级为可审计、可回放的评分记录。
+- 在聚合候选评分后保存模型、base URL、候选摘要 hash、`best_index`、各候选 heuristic/AI 分数、原因和创建时间。
+- 通过 `/api/stats` 与 `/api/cache/:id` 暴露最近评分和统一缓存对应评分明细，让仪表盘 Quality/Inspector 视图可直接显示。
 
-### 总目标
+### 验收条件
+- `aggregate_fetch` 在成功写入 `unified_cache` 后写入对应 `ai_scores`。
+- `src/cache.rs` 提供明确的 `put_ai_score(unified_cache_id, score_json)` 与 `list_ai_scores(unified_cache_id)` 方法。
+- 前端 Inspector 显示候选来源、heuristic score、AI score、reason 与最终选中来源，不再显示“预留”文案。
+- README / README-zh 同步说明 AI 优选是可追踪功能。
+
+### 实现状态
+- [x] AI 评分结果结构与候选摘要 hash
+- [x] `ai_scores` 写入和查询方法
+- [x] `/api/stats`、`/api/cache/:id` 评分明细输出
+- [x] Inspector AI 评分表格
+- [x] 文档同步
+
+## v1.2.0 — 2026-06-05 — Dashboard Server Token 驗證整合
+
+### 目標
+- 讓 Dashboard 在 `ROSETTRISM_SERVER_TOKEN` 啟用時仍可安全呼叫 API。
+- 將前端 API 呼叫集中到共用 client，統一注入 `x-rosettrism-token` 與 JSON 錯誤解析。
+- 在設定頁提供 Server Token 輸入與清除流程，並避免長期保存敏感 token。
+
+### 驗收條件
+- 遠端綁定且啟用 token 時，Dashboard 可透過設定頁 token 成功呼叫 `/api/*`。
+- 未帶 token 或 token 錯誤時，後端回傳可讀的 401 JSON 錯誤。
+- README / README-zh 說明 Dashboard token 使用方式與 `sessionStorage` 儲存策略。
+
+### 實作狀態
+- [x] `frontend/src/api/client.js` 共用 API client
+- [x] `sessionStorage` token 讀寫與清除
+- [x] Settings 頁 Server Token 欄位
+- [x] API 401 錯誤訊息改善
+- [x] 文件同步
+
+### 關聯 plan
+- `.plan/2026-06-06-six-version-completion-audit.md`（歷史需求補登與合併後複查）
+
+## v1.3.0 — 2026-06-05 — fetch_runs 任務紀錄與可觀測性
+
+### 目標
+- 將 `fetch_runs` 從資料表預留升級為實際任務紀錄系統。
+- 記錄聚合 fetch、多來源 search、指定結果 fetch 與聚合成員 fetch 的 query、source、mode、status、message 與 created_at。
+- 透過 API 與 Dashboard 展示近期任務與狀態分布。
+
+### 驗收條件
+- `src/cache.rs` 提供 start / finish / list / status count 方法。
+- `src/service.rs` 在主要 fetch/search 路徑建立並完成 fetch run。
+- `/api/runs` 與 `/api/stats` 可輸出近期任務與狀態分布。
+- Overview / Cache 視圖可展示最近任務。
+
+### 實作狀態
+- [x] `fetch_runs` 寫入與查詢方法
+- [x] service fetch/search 路徑接入
+- [x] `/api/runs` 與 stats 輸出
+- [x] Dashboard 最近任務面板
+- [x] README / README-zh 可觀測性說明
+
+### 關聯 plan
+- `.plan/2026-06-06-six-version-completion-audit.md`（歷史需求補登與合併後複查）
+
+## v1.4.0 — 2026-06-05 — Dashboard 前端拆分與設計系統基礎
+
+### 目標
+- 將過大的 `App.jsx` 與單一 CSS 拆分為 views、hooks、api client、i18n 與分層 styles。
+- 降低後續科技感 UI、動畫與 plugin/skill 化改造的耦合風險。
+- 保留現有播放與搜尋行為，優先完成結構性重構。
+
+### 驗收條件
+- `frontend/src/App.jsx` 不再承載大部分 view 實作細節。
+- Overview、Fetch、Cache、Inspector、Settings 皆有獨立 view 檔案。
+- API 呼叫、AI 設定、lyric 設定、cache entries、sidebar 狀態皆可由獨立模組追蹤。
+- 樣式已拆分為 tokens、layout、components、lyric-stage。
+
+### 實作狀態
+- [x] views 拆分
+- [x] hooks 拆分
+- [x] API client 拆分
+- [x] i18n 字典拆分
+- [x] styles 分層
+- [x] 前端 build 驗證
+
+### 關聯 plan
+- `.plan/2026-06-06-six-version-completion-audit.md`（歷史需求補登與合併後複查）
+
+## v1.5.0 — 2026-06-05 — requirement 與 .plan 工作流制度化
+
+### 目標
+- 建立 `.plan/` 目錄規範，讓每次開發前的需求、階段、驗收與測試紀錄可版本追蹤。
+- 建立 plan template，降低後續維護者漏寫需求與任務狀態的風險。
+- 在 README-zh 補充開發工作流，優先採 zh-TW 描述。
+
+### 驗收條件
+- `.plan/README.md` 說明命名規則與使用流程。
+- `.plan/TEMPLATE.md` 包含背景、目標、非目標、風險、階段 checklist、驗收條件、測試紀錄與完成狀態。
+- `requirement.md` 定義版本化追加格式。
+- README-zh 有開發工作流章節。
+
+### 實作狀態
+- [x] `.plan/README.md`
+- [x] `.plan/TEMPLATE.md`
+- [x] `requirement.md` 追加格式
+- [x] README-zh 開發工作流
+- [x] `.plan` 納入版本追蹤
+
+### 關聯 plan
+- `.plan/2026-06-06-six-version-completion-audit.md`（歷史需求補登與合併後複查）
+
+## v1.6.0 — 2026-06-05 — Unified JSON Schema 與客戶端相容性策略
+
+### 目標
+- 為 `UnifiedLyric` 建立正式 JSON Schema 與相容性說明。
+- 在聚合輸出中提供 `schema_version`，讓客戶端可依版本做降級策略。
+- 以 fixtures 與測試驗證典型來源輸出仍能符合 schema 與 Rust model。
+
+### 驗收條件
+- `schema/unified-lyric.schema.json` 描述核心 UnifiedLyric 結構。
+- `docs/unified-json.md` 說明 tracks、inline、annotations、ruby、translation、reading、romanized 的解析規則。
+- `tests/unified_schema.rs` 驗證 schema 本身與 fixtures。
+- README / README-zh 指向 schema 與客戶端建議解析策略。
+
+### 實作狀態
+- [x] `schema_version` 欄位
+- [x] JSON Schema 文件
+- [x] Unified JSON 相容性文件
+- [x] 多來源 fixtures
+- [x] schema / model 測試
+- [x] README / README-zh 同步
+
+### 關聯 plan
+- `.plan/2026-06-06-six-version-completion-audit.md`（歷史需求補登與合併後複查）
+
+## v1.7.0 — 2026-06-06 — 六大版本完成度複查與後續優化評估
+
+### 目標
+- 重新檢查 v1.1.0 至 v1.6.0 六項大版本成果是否已有可追蹤落點。
+- 補齊已合併功能在 `requirement.md` 中缺少的版本化歷史。
+- 產出後續可優化空間，協助下一輪開發排序。
+
+### 驗收條件
+- 新增完成度複查報告，列出六大版本狀態、主要落點與複查判斷。
+- 本次 plan 已建立並標記各階段完成。
+- 後續優化建議按短期、中期、長期分類。
+- Rust 測試與前端 build 通過。
+
+### 實作狀態
+- [x] 六大版本完成度矩陣
+- [x] v1.2.0 至 v1.6.0 需求歷史補登
+- [x] v1.7.0 複查需求追加
+- [x] 後續優化建議整理
+- [x] CLI fixture 路徑跨平台修正
+- [x] 測試與 build 驗證
+
+### 關聯 plan
+- `.plan/2026-06-06-six-version-completion-audit.md`
+
+## v1.8.0 — 2026-06-06 — README 开源格式与 AGPLv3 授权同步
+
+### 目标
+- 将 README / README-zh 调整为常见开源项目格式，包含项目简介、功能特性、安装、快速开始、CLI/API、路线图、开发、贡献与协议。
+- 明确回答当前项目在一轮计划完成后仍建议继续做功能迭代与优化，并按短期、中期、长期给出优先方向。
+- 将项目授权 metadata 与仓库 LICENSE 统一为 AGPLv3。
+
+### 验收条件
+- README / README-zh 可作为开源项目首页使用，并保留原有核心使用说明。
+- README / README-zh 明确指向完成度复查报告与后续优化路线图。
+- `Cargo.toml` 与 `frontend/package.json` 的 license 字段为 `AGPL-3.0-only`，与 AGPLv3 LICENSE 一致。
+
+### 实作状态
+- [x] README 开源格式重写
+- [x] README-zh 开源格式重写
+- [x] 后续迭代与优化路线图补充
+- [x] Rust crate license metadata 更新
+- [x] Frontend package license metadata 更新
+
+### 关联 plan
+- `.plan/2026-06-06-readme-agpl-open-source-refresh.md`
+
+### 測試基線追加目標（2026-06-06）
+- 為 Server API 建立 Axum router 層級測試，覆蓋 `/api/health`、`/api/stats`、`/api/runs`、`/api/cache/:id`。
+- 固定 Server Token 驗證：未帶 token 回 `401` JSON；`x-rosettrism-token` 與 `Authorization: Bearer` 正確時通過。
+- 為 `cache_detail` handler 固定 upstream、unified、missing id 三種情境。
+- Rust 測試基線明確使用 localhost proxy bypass：`NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost cargo test`。
+- Frontend 至少提供 `npm test` smoke script，驗證 Dashboard 可載入、Settings token input 可操作、Fetch 頁可渲染。
+
+### 測試基線驗收結果（2026-06-06）
+- [x] `src/server.rs` 已新增 Axum router integration tests，涵蓋指定 API endpoint。
+- [x] Server Token 401 JSON、`x-rosettrism-token`、`Authorization: Bearer` 三種情境已納入測試。
+- [x] `cache_detail` upstream / unified / missing id 三種分支已納入測試。
+- [x] `frontend/package.json` 已新增 `test` script，並以 Playwright smoke 覆蓋 Dashboard / Settings / Fetch 基線。
+- [x] Rust 測試與 frontend build 通過；`npm test` 在目前容器因缺少 Playwright Chromium 且 CDN 下載 403 而記錄為環境限制。
+- [x] 本次補強 plan 已建立：`.plan/2026-06-06-v1.8-test-baseline.md`。
+
+## v1.9.0 — 2026-06-06 — Plan / Requirement 一致性检查
+
+### 目标
+- 在进入下一阶段开发前，为当前已修改优化版本建立 release tag，并继续推进短期优化计划。
+- 新增轻量工作流检查，提醒维护者在修改功能相关文件时同步更新 `requirement.md` 或 `.plan/`。
+- 支援本地 staged 检查与 CI / 分支检查常用的 base ref 对比模式。
+
+### 验收条件
+- 当前 HEAD 已建立 `v4.8.13` annotated tag，作为上一轮优化版本切点。
+- `scripts/check-plan-requirement.sh` 可检查 feature-sensitive 变更是否伴随 `requirement.md` 或 `.plan/` 更新。
+- README / README-zh 的推荐检查命令包含该脚本。
+- 本次 plan 文件记录 tag、实现与测试结果。
+
+### 实作状态
+- [x] 建立 `v4.8.13` annotated tag
+- [x] 新增 plan / requirement 一致性检查脚本
+- [x] README / README-zh 开发检查同步
+- [x] 本次 plan 与需求历史追加
+- [x] 脚本、格式与 Rust 测试验证
+
+### 关联 plan
+- `.plan/2026-06-06-plan-requirement-consistency-check.md`
+
+## v2.0.0 — 2026-06-12 — Dashboard 与歌词播放 UI/UX 现代化改造
+
+### 目标
 - 将前端体验从“可用且有风格的控制台”提升为“成熟、现代、带轻科技感的歌词工具产品界面”。
-- 每个阶段必须可独立验证、可回滚、可发布，并通过截图或 Playwright 检查留下视觉回归证据。
-- 改造后不能破坏既有搜索、缓存、设置、歌词播放、QQ 助唱标注、Karaoke 双行显示、气泡计时等核心功能。
+- 保留现有 R 角、歌词舞台和工具型信息密度，继续深化日系轻科技配色，避免回到蓝紫主导。
+- 每个阶段必须可独立验证、可回滚、可发布，并留下截图或 Playwright 视觉回归证据。
 
-### REQ-UI-001：仪表盘现代化与信息密度优化
+### 验收条件
+- 总览页首屏形成清晰诊断流，桌面 1280x720 可同时看到状态卡、缓存健康和多个辅助模块。
+- 移动端 390x844 首屏能看到导航、关键状态和一个主要内容模块，不出现横向滚动、遮挡或文本溢出。
+- CSS 设计 token 覆盖颜色、R 角、阴影、边框、间距、字号、动效，常用控件状态一致。
+- 页面观感稳定落在米白、墨绿、樱色、金茶、青绿的日系轻科技方向。
+- 歌词播放页保持 QQ 音乐参考行为，助唱标注锚定正确，换气、重音、长音高度统一，气泡独立消散。
+- 获取页与设置页从长表单堆叠升级为更清晰的检索台和控制分组。
 
-#### 现象
-- 总览页首屏结构清晰，但空态占比偏高，图表在无数据时显得空泛。
-- 健康环形图在桌面和移动端都偏大，移动端首屏信息密度不足。
-- 状态卡、图表卡和最近缓存区域之间缺少统一的诊断叙事。
+### 实作状态
+- [x] REQ-UI-001：仪表盘现代化与信息密度优化
+- [ ] REQ-UI-002：设计 Token、R 角与组件一致性
+- [ ] REQ-UI-003：日系轻科技配色系统深化
+- [ ] REQ-UI-004：歌词播放页产品化精修
+- [ ] REQ-UI-005：移动端响应式与首屏效率
+- [ ] REQ-UI-006：获取页与设置页产品化
 
-#### 改造要求
-- 重构总览页首屏信息层级，让服务状态、版本、缓存健康、来源分布、操作类型和最近缓存形成连贯的诊断流。
-- 为无数据状态设计更轻量的空态视觉，不再只显示“暂无数据”。
-- 优化图表尺寸、图例位置和卡片留白，桌面端提升信息密度，移动端减少首屏纵向浪费。
-- 保留现有日系科技风基调，不引入蓝紫主导配色。
-
-#### 验收标准
-- 桌面 1280x720 首屏可同时看到关键状态卡、缓存健康和至少两个辅助诊断模块。
-- 移动 390x844 首屏中导航和状态区不应挤压主要内容到不可见。
-- 空态模块应有明确状态含义、下一步操作入口或诊断提示。
-- 不出现文字溢出、卡片互相重叠或图表遮挡。
-
-### REQ-UI-002：设计 Token、R 角与组件一致性
-
-#### 现象
-- 当前界面已有圆角、阴影、半透明面板和渐变按钮，但圆角层级与阴影强度还不够统一。
-- 部分按钮、输入框、面板、歌词舞台使用相近但不完全一致的视觉语法。
-
-#### 改造要求
-- 建立前端设计 token：颜色、圆角、阴影、边框、间距、字号、动效时长。
-- 保留一定 R 角，但约束使用层级：普通卡片克制，歌词舞台和弹窗可更柔和，按钮/输入框避免过度圆润。
-- 统一按钮、图标按钮、输入框、select、badge、status、panel、dialog 的视觉状态。
-- 优先使用现有 `lucide-react` 图标，避免手写重复符号。
-
-#### 验收标准
-- CSS 中核心视觉值优先由 token 表达，减少散落的临时颜色和阴影值。
-- 常用控件 hover、focus、disabled、active 状态一致。
-- 页面整体仍保留柔和 R 角，不退回锐利工业风，也不过度胶囊化。
-- `npm run build` 通过，主要页面无视觉回退。
-
-### REQ-UI-003：日系轻科技配色系统深化
-
-#### 现象
-- 当前配色已从蓝紫转为米白、墨绿、珊瑚红、金茶和青绿，但按钮与局部渐变仍有进一步统一空间。
-- 歌词播放气泡、图表、状态条和重点按钮之间的颜色语义仍需稳定。
-
-#### 改造要求
-- 建立日系轻科技配色语义：背景、表面、主操作、强调、成功、警告、危险、歌词高亮、气泡计时。
-- 降低大面积强渐变按钮的使用比例，保留更精致的局部光泽和状态线。
-- 优化气泡计时颜色，使其与歌词舞台、状态条和日系色板一致。
-- 避免重新回到蓝紫主导，也避免单一米色导致页面发灰。
-
-#### 验收标准
-- 页面主观观感应稳定落在“米白/墨绿/樱色/金茶/青绿”的日系轻科技方向。
-- 主操作和危险操作有清晰语义区分。
-- 气泡计时颜色不突兀，且在浅色歌词舞台上对比度足够。
-- 桌面和移动截图中不存在大面积蓝紫主导区域。
-
-### REQ-UI-004：歌词播放页产品化精修
-
-#### 现象
-- 歌词 Karaoke 舞台、助唱标注、气泡计时已具备特色，但控件区、时间轴、状态标识和舞台层次仍可进一步产品化。
-- 歌词播放是本项目最有辨识度的界面，需要比普通后台模块更精致。
-
-#### 改造要求
-- 优化歌词舞台层次、Karaoke 双行布局、标题/元数据区、气泡计时、助唱标注和时间轴的整体协调。
-- 保持 QQ 音乐参考行为：助唱标注锚定正确、换气/重音/长音高度统一、同字多标记按已定规则展示。
-- 气泡消散应保持每个气泡独立飞溅，不应在最后统一闪现。
-- 播放控件应更像音乐工具界面，减少普通表单按钮感。
-
-#### 验收标准
-- `npm run verify:meta-stress` 继续通过，并覆盖标注对齐、元数据轮播、双行 Karaoke 结尾保留等行为。
-- 《龙战骑士 - 周杰伦》真实数据 smoke 页面可稳定复现关键片段。
-- 桌面截图中歌词舞台、控件、时间轴视觉一致，无标注与汉字重叠。
-- 移动端歌词播放区域不出现控制区遮挡正文或时间轴不可操作。
-
-### REQ-UI-005：移动端响应式与首屏效率
-
-#### 现象
-- 移动端当前可用，但顶部导航占据首屏较多空间。
-- 总览页卡片两列布局可读，但主图表过大，导致首屏效率下降。
-
-#### 改造要求
-- 优化移动端导航：保持可发现性，同时减少首屏高度占用。
-- 调整状态卡、图表卡、表单、缓存列表和歌词播放器在 390px 宽度附近的密度。
-- 确保常用操作按钮、输入框、select、时间轴在触控设备上有稳定点击区域。
-- 移动端不应只压缩桌面布局，而应按任务优先级重新排序。
-
-#### 验收标准
-- 390x844 视口下首屏能看到导航、关键状态和一个主要内容模块的有效信息。
-- 主要控件触控目标不小于 40px 高。
-- 无横向滚动、文字截断、卡片挤压、按钮文本溢出。
-- 移动截图纳入验证产物。
-
-### REQ-UI-006：获取页与设置页产品化
-
-#### 现象
-- 获取页和设置页功能完整，但视觉结构仍像长表单堆叠。
-- 高级选项、AI 评分、歌词颜色、播放模式等设置缺少更直观的控制形态和实时反馈。
-
-#### 改造要求
-- 将获取页优化为专业检索台：主搜索突出，辅助字段、来源、格式、聚合策略和结果区形成清晰流程。
-- 将设置页拆分为更清晰的控制分组，歌词相关配置应提供更直接的模式选择、色板和实时预览。
-- 使用 segmented control、swatch、toggle、slider/stepper 等更贴合现代前端的控件形态。
-- 保持可访问性：label、focus、键盘操作和错误提示不能退化。
-
-#### 验收标准
-- 获取页在无结果、搜索中、有结果、错误四种状态下都有明确视觉反馈。
-- 设置页中歌词播放相关选项可以通过预览即时理解效果。
-- 高级选项不再显得像未整理的字段集合。
-- 表单提交、禁用状态、错误展示和 token/AI 设置安全提示保持原有行为。
+### 关联 plan
+- `.plan/20260612-152430-ui-ux-modernization.md`

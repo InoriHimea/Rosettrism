@@ -4,6 +4,9 @@ export const defaultLyricSettings = {
   solidColor: '#14c9a2',
   renderMode: 'karaoke',
   stageBackgroundColor: '#fff0a6',
+  motionPreset: 'cinematic',
+  lowDistraction: false,
+  ambientEffects: true,
 };
 
 const gradients = {

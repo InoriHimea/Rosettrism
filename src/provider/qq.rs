@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use async_trait::async_trait;
 use base64::Engine;
 use reqwest::header::{HeaderMap, HeaderValue, COOKIE, REFERER, USER_AGENT};
@@ -26,7 +24,7 @@ pub struct QqProvider {
 }
 
 impl QqProvider {
-    pub fn new(cookie: Option<String>) -> Result<Self> {
+    pub fn new(cookie: Option<String>, timeout_ms: u64) -> Result<Self> {
         let url = "https://u.y.qq.com/cgi-bin/musicu.fcg";
         Self::with_endpoints(
             cookie,
@@ -34,6 +32,7 @@ impl QqProvider {
             "https://c.y.qq.com/qqmusic/fcgi-bin/lyric_download.fcg",
             "https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg",
             url,
+            timeout_ms,
         )
     }
 
@@ -43,6 +42,7 @@ impl QqProvider {
         qrc_url: impl Into<String>,
         lrc_url: impl Into<String>,
         annotations_url: impl Into<String>,
+        timeout_ms: u64,
     ) -> Result<Self> {
         let mut headers = HeaderMap::new();
         headers.insert(USER_AGENT, HeaderValue::from_static(USER_AGENT_VALUE));
@@ -60,10 +60,11 @@ impl QqProvider {
             }
         }
 
-        let client = reqwest::Client::builder()
-            .default_headers(headers)
-            .timeout(Duration::from_secs(12))
-            .build()?;
+        let client = crate::provider::apply_client_timeout(
+            reqwest::Client::builder().default_headers(headers),
+            timeout_ms,
+        )
+        .build()?;
 
         Ok(Self {
             client,
@@ -539,6 +540,7 @@ mod tests {
             format!("{}/qrc", server.uri()),
             format!("{}/lrc", server.uri()),
             format!("{}/annotations", server.uri()),
+            12_000,
         )
         .unwrap();
 

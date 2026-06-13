@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, USER_AGENT};
 use serde::de::DeserializeOwned;
@@ -22,11 +20,15 @@ pub struct MusixmatchProvider {
 }
 
 impl MusixmatchProvider {
-    pub fn new(api_key: Option<String>) -> Result<Self> {
-        Self::with_api_base_url(api_key, "https://api.musixmatch.com/ws/1.1")
+    pub fn new(api_key: Option<String>, timeout_ms: u64) -> Result<Self> {
+        Self::with_api_base_url(api_key, "https://api.musixmatch.com/ws/1.1", timeout_ms)
     }
 
-    fn with_api_base_url(api_key: Option<String>, api_base_url: impl Into<String>) -> Result<Self> {
+    fn with_api_base_url(
+        api_key: Option<String>,
+        api_base_url: impl Into<String>,
+        timeout_ms: u64,
+    ) -> Result<Self> {
         let api_key = api_key
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
@@ -44,10 +46,11 @@ impl MusixmatchProvider {
             HeaderValue::from_static("application/json, text/plain, */*"),
         );
 
-        let client = reqwest::Client::builder()
-            .default_headers(headers)
-            .timeout(Duration::from_secs(12))
-            .build()?;
+        let client = crate::provider::apply_client_timeout(
+            reqwest::Client::builder().default_headers(headers),
+            timeout_ms,
+        )
+        .build()?;
 
         Ok(Self {
             client,
@@ -458,13 +461,14 @@ mod tests {
         MusixmatchProvider::with_api_base_url(
             Some("key-1".into()),
             format!("{}/ws/1.1", server.uri()),
+            12_000,
         )
         .unwrap()
     }
 
     #[test]
     fn requires_api_key() {
-        let err = match MusixmatchProvider::with_api_base_url(None, "http://localhost") {
+        let err = match MusixmatchProvider::with_api_base_url(None, "http://localhost", 12_000) {
             Ok(_) => panic!("provider should require an API key"),
             Err(err) => err.to_string(),
         };

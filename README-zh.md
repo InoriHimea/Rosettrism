@@ -1,154 +1,277 @@
 # Rosettrism
 
-Rosettrism 是一个 Rust 单二进制歌词工具。它可以解码本地 KRC/QRC/YRC/LRC/TTML 文件，从在线源获取歌词，使用 SQLite 缓存上游请求，并将多个来源聚合为统一的 JSON 结果。
+[![Rust](https://img.shields.io/badge/Rust-2021-orange.svg)](https://www.rust-lang.org/)
+[![Frontend](https://img.shields.io/badge/Dashboard-React%20%2B%20Vite-61dafb.svg)](frontend/package.json)
+[![Schema](https://img.shields.io/badge/Unified%20JSON-1.0-blue.svg)](schema/unified-lyric.schema.json)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPLv3-blue.svg)](LICENSE)
 
-4.0 版本新增了本地 HTTP 服务器、内嵌仪表盘、TTL 上游缓存和多源歌词合并功能。4.2 版本新增了 QQ 音乐助唱标注支持。
+[English](README.md) · [Unified JSON 指南](docs/unified-json.md) · [完成度複查報告](docs/completion-audit-2026-06-06.md)
 
-## 功能亮点
+Rosettrism 是一个 Rust 单二进制歌词工具集，可解码本地歌词文件、从在线来源获取歌词、缓存上游请求，并把多个候选聚合为稳定的统一 JSON。项目同时提供 CLI、本地 Axum HTTP API 与内嵌 React 仪表盘。
 
-- 本地解码：KRC、QQ QRC/XML、网易云 YRC、Apple Music TTML、LRC、纯文本和 Rosettrism JSON。
-- 在线源：酷狗、QQ 音乐、网易云、Apple Music、Musixmatch、PetitLyrics、LRCLIB、UtaTen、JOYSOUND、咪咕 H5、LINE MUSIC、KKBOX、Genius、AZLyrics、Songtexte、Uta-Net、J-Lyric、J-Total、Kashinavi、UtaMap、Lyrical Nonsense、Animesongz、AWA、TuneCore、RockLyric、Spotify Lyrics 和离线数据库。
-- 助唱标注：自动获取 QQ 音乐的助唱标注数据并包含在输出中。标注标记了重音、换气、长音、上滑音、下滑音等声乐技巧，精确到每个音节的时间。
-- TTL 缓存：provider 的 `search` 和 `fetch` 调用结果缓存在 SQLite 中，默认 TTL 为 7 天。TTL 过期前，Rosettrism 复用之前的上游结果，不再重复请求。
-- 聚合：当 `fetch` 不指定 `--source` 时，Rosettrism 查询预设的源池，优先选择高质量的逐行/逐字时间轴歌词，并在可用时补充 ruby/reading/romanized 轨道。
-- 统一 JSON：默认输出为多轨 JSON。`--merge-mode inline` 可输出逐行合并视图。
-- 指定源模式：指定 `--source` 时，必须同时提供 `--format raw` 或 `--format json`。
-- 服务器模式：`rosettrism server` 启动本地 Axum API 并提供内嵌仪表盘。
+## 项目状态
 
-Rosettrism 不实现验证码绕过、凭证采集、SSL Pinning 绕过、私有应用签名或非公开协议自动化。
+上一轮计划已经完成并完成复查。Rosettrism 目前可以作为 CLI / Server / Dashboard 使用，但项目不应视为完全结束，仍然建议继续做功能迭代与优化。下一阶段最值得投入的是可靠性与可维护性：API 端到端测试、统一 API 错误码、Provider 健康度统计、缓存维护工具、AI 评分回放、Schema 兼容治理，以及仪表盘体验打磨。
 
-## 构建
+详细完成矩阵与后续建议见 [docs/completion-audit-2026-06-06.md](docs/completion-audit-2026-06-06.md)。
 
-```powershell
+## 功能特性
+
+- **本地解码**：KRC、QQ QRC/XML、网易云 YRC、Apple Music TTML、LRC、纯文本与 Rosettrism JSON。
+- **多在线来源**：酷狗、QQ 音乐、网易云、Apple Music、Musixmatch、PetitLyrics、LRCLIB、UtaTen、JOYSOUND、咪咕 H5、LINE MUSIC、KKBOX、Genius、AZLyrics、Songtexte、Uta-Net、J-Lyric、J-Total、Kashinavi、UtaMap、Lyrical Nonsense、Animesongz、AWA、TuneCore、RockLyric、Spotify Lyrics 与 Offline DB。
+- **统一歌词模型**：默认输出多轨 JSON，可选 inline 合并行，支持 `schema_version`、助唱标注、翻译、读音、ruby 与罗马音轨道。
+- **助唱标注**：QQ 音乐助唱标注可在可用时自动获取，并映射为逐音节、带时间的声乐技巧标记。
+- **TTL 缓存**：Provider `search` 与 `fetch` 调用会写入 SQLite，默认 TTL 为 7 天。
+- **聚合与 AI 可追踪性**：聚合 fetch 会优先选择高质量 timed / word-timed 歌词；可选 OpenAI-compatible AI 优选会记录 model、endpoint、候选 hash、评分、原因与最终来源。
+- **可观测性**：fetch run 会记录近期 query、source、mode、status、message、cache hit/store、provider warning、AI skip 与 no-lyrics 结果。
+- **本地仪表盘**：`rosettrism server` 提供内嵌 Dashboard 与 HTTP API。非本地绑定必须设置 `ROSETTRISM_SERVER_TOKEN`。
+
+Rosettrism **不实现** CAPTCHA 绕过、凭证收集、SSL pinning 绕过、私有 App 签名或非公开协议自动化。
+
+## 目录
+
+- [安装](#安装)
+- [快速开始](#快速开始)
+- [CLI 用法](#cli-用法)
+- [服务器 API](#服务器-api)
+- [Unified JSON](#unified-json)
+- [缓存与可观测性](#缓存与可观测性)
+- [助唱标注](#助唱标注)
+- [来源](#来源)
+- [路线图](#路线图)
+- [开发](#开发)
+- [贡献](#贡献)
+- [协议](#协议)
+
+## 安装
+
+### 构建 Rust 二进制
+
+```bash
 cargo build --release
 ```
 
-二进制文件生成在：
+Release 二进制输出位置：
+
+```text
+target/release/rosettrism
+```
+
+Windows 输出位置：
 
 ```text
 target\release\rosettrism.exe
 ```
 
-重新构建 React 仪表盘：
+### 构建内嵌仪表盘
 
-```powershell
+```bash
 cd frontend
 npm install
 npm run build
 ```
 
-Rust 服务器内嵌 `frontend/dist`。
+Rust server 会内嵌 `frontend/dist`。如果前端文件有变化，打包前请重新构建仪表盘。
+
+## 快速开始
+
+解码本地歌词文件：
+
+```bash
+rosettrism decode ./lyric.qrc --input-format qrc --format json -o ./lyric.json
+```
+
+聚合多个来源并输出统一 JSON：
+
+```bash
+rosettrism fetch "歌曲名 歌手" --merge-mode tracks --top 1 -o ./unified.json
+```
+
+启动本地服务器与仪表盘：
+
+```bash
+rosettrism server --host 127.0.0.1 --port 8080 --open
+```
 
 ## CLI 用法
 
-解码本地文件：
+### 解码本地文件
 
-```powershell
-rosettrism decode .\lyric.qrc --input-format qrc --format json -o .\lyric.json
-rosettrism decode .\lyric.krc --format lrc -o .\lyric.lrc
+```bash
+rosettrism decode ./lyric.qrc --input-format qrc --format json -o ./lyric.json
+rosettrism decode ./lyric.krc --format lrc -o ./lyric.lrc
 ```
 
-聚合多源为统一 JSON：
+### 聚合来源
 
-```powershell
+```bash
 rosettrism fetch "歌曲名 歌手" --merge-mode tracks --top 1
-rosettrism fetch "歌曲名 歌手" --merge-mode inline --top 3 -o .\unified.json
+rosettrism fetch "歌曲名 歌手" --merge-mode inline --top 3 -o ./unified.json
 ```
 
 强制刷新并覆盖 TTL：
 
-```powershell
+```bash
 rosettrism fetch "歌曲名 歌手" --ttl 7d --force-refresh
 ```
 
-从指定源获取：
+### 指定来源获取
 
-```powershell
+使用 `--source` 做指定来源 fetch 时，请提供 `--format raw` 或 `--format json`。
+
+```bash
 rosettrism fetch "歌曲名 歌手" --source lrclib --format json
-rosettrism fetch "歌曲名 歌手" --source qq --format raw -o .\qq.raw.txt
+rosettrism fetch "歌曲名 歌手" --source qq --format raw -o ./qq.raw.txt
 ```
 
-指定 `--source` 时，`--format` 为必填，值为 `raw` 或 `json`。
+### 搜索候选
 
-搜索指定源并保存原始数据：
+搜索指定来源并保存选中的原始 payload：
 
-```powershell
-rosettrism search "歌曲名 歌手" --source kugou -o .\lyric.krc
+```bash
+rosettrism search "歌曲名 歌手" --source kugou -o ./lyric.krc
 ```
 
-不指定源的搜索返回聚合候选结果 JSON：
+不指定来源时，搜索返回聚合候选 JSON：
 
-```powershell
-rosettrism search "歌曲名 歌手" -o .\candidates.json
+```bash
+rosettrism search "歌曲名 歌手" -o ./candidates.json
 ```
 
 ## 服务器 API
 
 启动本地服务器：
 
-```powershell
+```bash
 rosettrism server --host 127.0.0.1 --port 8080 --open
 ```
 
-绑定非本地地址时需设置 `ROSETTRISM_SERVER_TOKEN`。
+绑定非本地地址时必须设置 `ROSETTRISM_SERVER_TOKEN`。客户端需通过 `x-rosettrism-token: <token>` 或 `Authorization: Bearer <token>` 发送该值。缺失或错误时会收到 JSON `401` 响应，例如 `{ "error": "missing or invalid server token" }`。
 
 获取统一 JSON：
 
-```powershell
-curl -X POST http://127.0.0.1:8080/api/fetch ^
-  -H "content-type: application/json" ^
-  -d "{\"query\":\"歌曲名 歌手\",\"merge_mode\":\"tracks\",\"top\":1}"
+```bash
+curl -X POST http://127.0.0.1:8080/api/fetch \
+  -H "content-type: application/json" \
+  -H "x-rosettrism-token: ${ROSETTRISM_SERVER_TOKEN}" \
+  -d '{"query":"歌曲名 歌手","merge_mode":"tracks","top":1}'
 ```
 
-获取源原始文本：
+获取来源原始文本：
 
-```powershell
-curl -X POST http://127.0.0.1:8080/api/fetch ^
-  -H "content-type: application/json" ^
-  -d "{\"query\":\"歌曲名 歌手\",\"source\":\"qq\",\"format\":\"raw\"}"
+```bash
+curl -X POST http://127.0.0.1:8080/api/fetch \
+  -H "content-type: application/json" \
+  -H "Authorization: Bearer ${ROSETTRISM_SERVER_TOKEN}" \
+  -d '{"query":"歌曲名 歌手","source":"qq","format":"raw"}'
 ```
+
+Dashboard token 行为：
+
+- 未设置 `ROSETTRISM_SERVER_TOKEN` 的 localhost 服务不需要 Dashboard token。
+- 远端服务需要在 Settings 中填写同一个 token。Dashboard 仅保存到 `sessionStorage`，浏览器会话结束后清除；也可以使用 **Clear Token** 立即移除。
 
 可用端点：
 
 - `GET /api/health`
-- `GET /api/sources`
+- `GET /api/sources` — 返回内置 provider manifest 注册表，其中包含每个 source 的 timeout/retry/rate-limit 配置。这些 manifest 值会在 provider runtime 中被强制执行，然后才会发起任何上游请求。
+- `GET /api/providers/health?limit=20` — 汇总近期 `fetch_runs` 中的 provider 表现。它反映的是 runtime 强制执行后的行为，不是实时探测。
 - `POST /api/fetch`
 - `GET /api/cache`
 - `GET /api/cache/:id`
 - `DELETE /api/cache/:id`
 - `POST /api/cache/:id/revalidate`
+- `GET /api/runs`
 - `GET /api/stats`
 
-## 缓存
+## Unified JSON
 
-缓存数据库路径按以下顺序选择：
+统一聚合输出由 [`schema/unified-lyric.schema.json`](schema/unified-lyric.schema.json) 描述。tracks、inline lines、annotations、ruby、translation、reading 与 romanization 的兼容规则见 [`docs/unified-json.md`](docs/unified-json.md)。
 
-- `--db <PATH>`
-- `ROSETTRISM_DB`
-- `LRC_DECODE_DB`
-- 系统数据目录回退
+客户端解析器应忽略未知字段，使新版 Rosettrism 可以添加可选数据而不破坏旧客户端。请使用 `schema_version` 做降级策略：兼容 `1.x` payload 时可乐观接收；遇到更新 major 版本时，优先回退到 `tracks[0].document.lines` 或 `inline_lines`。
 
-缓存表包括上游原始操作缓存、派生统一缓存、获取记录、AI 评分占位和 schema 迁移。
+## 缓存与可观测性
 
-上游缓存键基于源、操作、规范化请求数据和请求版本。Cookie 和 token 不包含在缓存键中。
+缓存数据库路径优先级：
+
+1. `--db <PATH>`
+2. `ROSETTRISM_DB`
+3. `LRC_DECODE_DB`
+4. 系统数据目录回退
+
+缓存会存储上游原始操作、派生统一结果、fetch-run 记录、可追踪 AI 评分记录与 schema migration。上游缓存键基于 source、operation、规范化请求数据与请求版本；cookie 与 token 不进入缓存键。
+
+fetch-run 可观测性覆盖聚合 fetch、多来源 search、选中结果 fetch 与聚合成员 fetch。Dashboard Overview/Cache 页面与 `/api/runs` 会展示 `provider_warning`、`ai_skipped`、`no_lyrics_found`、`cache_hit`、`cache_store` 等状态。每条 run 会记录 `started_at`、可选 `finished_at`、`duration_ms`、`provider_count`、`candidate_count` 与 `cache_event`；`created_at` 保留为插入时间，方便旧客户端兼容。
+
+Provider health 来自带有具体 `source` 的近期 `fetch_runs`，不是实时探测。`GET /api/providers/health?limit=N` 与 `/api/stats.provider_health` 会汇总每个 provider 最近 N 次 run：成功率、平均耗时、warning/error 比例以及最后一条 warning 或 error。provider runtime 现在会在上游请求前强制执行每个 source 的 manifest timeout、retry、backoff 和 rate-limit 配置。状态定义：近期成功率至少 80%、没有错误且 warning 未升高时为 `healthy`；出现 warning/error 或成功率低于 80% 时为 `degraded`；错误占比过高或成功率低于 50% 时为 `critical`。排查 degraded provider 时，请先查看最后错误、比较 cache hit/store 与上游请求，确认 rate limit 后再用 `--force` 重试，并检查 provider cookie 或地区可用性。
+
+缓存维护命令统一放在 `cache` 子命令组下：
+
+```bash
+rosettrism --db /var/lib/rosettrism/cache.sqlite cache stats
+rosettrism --db /var/lib/rosettrism/cache.sqlite cache runs --limit 100
+rosettrism --db /var/lib/rosettrism/cache.sqlite cache ai-scores --limit 100
+rosettrism --db /var/lib/rosettrism/cache.sqlite cache export --format jsonl --output /backup/rosettrism-cache.jsonl
+rosettrism --db /var/lib/rosettrism/cache.sqlite cache export --format pretty-json --upstream --unified
+rosettrism --db /var/lib/rosettrism/cache.sqlite cache prune --keep-fetch-runs 5000 --keep-ai-scores 5000
+rosettrism --db /var/lib/rosettrism/cache.sqlite cache prune --yes --keep-fetch-runs 5000 --keep-ai-scores 5000
+rosettrism --db /var/lib/rosettrism/cache.sqlite cache vacuum --yes
+```
+
+`cache prune` 会删除过期 upstream/unified cache，保留最近 N 条 `fetch_runs`，并保留最近 N 条 `ai_scores`。`cache prune` 与 `cache vacuum` 默认都是 dry-run；请先检查输出的数量，确认无误后再加 `--yes` 实际执行。`cache export` 默认输出 JSONL，也可通过 `--format pretty-json` 输出格式化 JSON；未指定 section flag 时会同时导出 upstream summary、unified cache summary、fetch runs 与 AI scores。
+
+Cron 示例：
+
+```cron
+15 3 * * * rosettrism --db /var/lib/rosettrism/cache.sqlite cache prune --yes --keep-fetch-runs 5000 --keep-ai-scores 5000 >>/var/log/rosettrism-cache.log 2>&1
+45 3 * * 0 rosettrism --db /var/lib/rosettrism/cache.sqlite cache vacuum --yes >>/var/log/rosettrism-cache.log 2>&1
+```
+
+Systemd timer 示例：
+
+```ini
+# /etc/systemd/system/rosettrism-cache-prune.service
+[Unit]
+Description=Prune Rosettrism cache
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/rosettrism --db /var/lib/rosettrism/cache.sqlite cache prune --yes --keep-fetch-runs 5000 --keep-ai-scores 5000
+
+# /etc/systemd/system/rosettrism-cache-prune.timer
+[Unit]
+Description=Daily Rosettrism cache prune
+
+[Timer]
+OnCalendar=03:15
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+Docker 示例：
+
+```bash
+docker run --rm \
+  -v rosettrism-data:/data \
+  ghcr.io/your-org/rosettrism:latest \
+  rosettrism --db /data/cache.sqlite cache prune --yes --keep-fetch-runs 5000 --keep-ai-scores 5000
+```
 
 ## 助唱标注
 
-从 QQ 音乐获取歌词时，Rosettrism 会自动获取助唱标注数据（如果可用）。标注在每个音节上标记声乐技巧，并附带精确的时间信息。
-
-### 标注类型
+从 QQ 音乐获取歌词时，Rosettrism 会在可用时请求助唱标注数据。标注会以时间信息标记声乐技巧。
 
 | 类型 | 符号 | 说明 |
 |------|------|------|
-| Stress | `` ` `` | 重音 — 强调该音节 |
-| Breath | `^` | 换气 — 音节前的换气标记 |
-| LongTone | `_` | 长音 — 延长音 |
-| PortamentoUp | `↑` | 上滑音 — 音高向上滑动 |
-| PortamentoDown | `↓` | 下滑音 — 音高向下滑动 |
+| Stress | `` ` `` | 重音，强调该音节 |
+| Breath | `^` | 换气，音节前的换气标记 |
+| LongTone | `_` | 长音 |
+| PortamentoUp | `↑` | 上滑音，音高向上滑动 |
+| PortamentoDown | `↓` | 下滑音，音高向下滑动 |
 
-### 输出格式
-
-标注出现在统一 JSON 输出的 `annotations` 字段中：
+统一 JSON 片段示例：
 
 ```json
 {
@@ -169,20 +292,13 @@ curl -X POST http://127.0.0.1:8080/api/fetch ^
 }
 ```
 
-当标注不可用时（歌曲不支持或非 QQ 音乐源），输出中省略 `annotations` 字段。
+当标注不可用时，输出会省略 `annotations` 字段。
 
-### 工作原理
+## 来源
 
-1. 在 QQ 音乐 `fetch` 过程中，Rosettrism 在 `GetPlayLyricInfo` 请求中发送 `needSingingAnnotations: true`。
-2. API 返回 `singingAnnotationsLyric` 字段中的十六进制编码加密数据。
-3. Rosettrism 使用与 QRC 相同的解密流程解密数据，提取 QRC 格式的歌词内容，并解析嵌入在标注字符前的标注符号。
-4. 如果标注获取因任何原因失败，主歌词获取流程正常继续，标注列表为空。
+实验性来源默认受限。可通过 `--allow-experimental` 或 `ROSETTRISM_ALLOW_EXPERIMENTAL=1` 启用。
 
-## 源
-
-实验性源默认被限制。使用 `--allow-experimental` 或 `ROSETTRISM_ALLOW_EXPERIMENTAL=1` 启用。
-
-别名包括：
+常见别名包括：
 
 - `lrclib`、`lrc-lib`
 - `utaten`、`uta-ten`
@@ -193,16 +309,59 @@ curl -X POST http://127.0.0.1:8080/api/fetch ^
 - `spotify-lyrics`、`spotify`
 - `offline-db`、`local-db`
 
-运行帮助查看完整源列表：
+运行帮助查看完整来源列表：
 
-```powershell
+```bash
 rosettrism search --help
 ```
 
-## 验证
+## 路线图
 
-```powershell
-cargo fmt
-cargo clippy --all-targets -- -D warnings
-cargo test --no-fail-fast
+项目仍然值得继续做功能迭代与优化。建议优先级如下：
+
+### 短期
+
+- 为 token 处理、`/api/cache/:id`、`/api/runs` 与 AI score 输出补充 Server/API 端到端测试。
+- 将 API 错误统一为 `{ code, message, details, retryable }`，方便 Dashboard 给出更清晰的恢复动作。
+- 增加轻量 plan / requirement 一致性检查，保证开发流程可追踪。
+- 检查 AI 评分记录的隐私遮罩与 payload 大小限制。
+
+### 中期
+
+- 增加 cache 维护命令：prune、export、vacuum、migration status。
+- 基于 `fetch_runs` 建立 Provider 健康度统计，包括成功率、警告率、耗时与最近错误。
+- 支持 AI 评分在不同模型或 prompt 下回放与对比。
+- 维护 schema changelog、golden snapshot 与明确兼容规则。
+
+### 长期
+
+- 深化 Dashboard 视觉系统，加入主题、动效 preset 与更丰富的 karaoke 舞台效果。
+- 探索插件式 Provider / Decoder metadata、rate limit 与能力声明。
+- 从 JSON Schema 生成 TypeScript / Kotlin / Swift 客户端契约包。
+- 增加部署安全能力，例如 token rotation、read-only/admin token、CORS allowlist 与反向代理示例。
+
+## 开发
+
+推荐检查命令：
+
+```bash
+cargo fmt --check
+NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost cargo test
+scripts/check-plan-requirement.sh --base HEAD
+cd frontend && npm run build
 ```
+
+开发计划记录在 [`.plan/`](.plan/README.md)，需求历史记录在 [`requirement.md`](requirement.md)。
+
+## 贡献
+
+欢迎贡献。请保持变更符合项目边界：
+
+- 不添加 CAPTCHA 绕过、凭证收集、SSL pinning 绕过、私有 App 签名或非公开协议自动化。
+- 行为变化时同步更新 README、docs、schema 或 fixtures。
+- 适用时补充 CLI、Server、Schema、Provider parsing 或 Dashboard 测试。
+- 较大的工作请在实现前记录到 `.plan/` 与 `requirement.md`。
+
+## 协议
+
+Rosettrism 使用 GNU Affero General Public License v3.0 授权。完整 AGPLv3 文本见 [LICENSE](LICENSE)。

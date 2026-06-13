@@ -1,18 +1,17 @@
 use std::net::SocketAddr;
 
 use axum::body::Body;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, HeaderValue, Response, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use clap::ValueEnum;
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::cache::UpstreamCache;
-use crate::provider::{SearchResult, Source};
+use crate::cache::{AiScoreQuery, UpstreamCache};
+use crate::provider::{builtin_provider_registry, SearchResult, Source};
 use crate::service::{
     source_from_cli_name, AggregateFetchRequest, AiScoringConfig, LyricNeed, MergeMode,
     ServiceContext, SourceSearchRequest, SourceSearchResult, SpecificFetchFormat,
@@ -72,13 +71,24 @@ pub async fn run(options: ServerOptions) -> Result<()> {
 fn app(state: AppState) -> Router {
     Router::new()
         .route("/api/health", get(health))
+        .route("/api/providers/health", get(providers_health))
         .route("/api/sources", get(sources))
         .route("/api/search", post(search))
         .route("/api/fetch", post(fetch))
         .route("/api/fetch-result", post(fetch_result))
+        .route("/api/ai/replay", post(ai_replay))
         .route("/api/cache", get(cache_list))
         .route("/api/cache/:id", get(cache_detail).delete(cache_delete))
         .route("/api/cache/:id/revalidate", post(cache_revalidate))
+        .route(
+            "/api/unified-cache/:id",
+            get(unified_cache_detail).delete(unified_cache_delete),
+        )
+        .route(
+            "/api/unified-cache/:id/revalidate",
+            post(unified_cache_revalidate),
+        )
+        .route("/api/runs", get(fetch_runs))
         .route("/api/stats", get(stats))
         .route("/", get(index))
         .route("/*path", get(asset))
@@ -97,21 +107,34 @@ async fn health(
     })))
 }
 
+#[derive(Debug, Deserialize)]
+struct ProviderHealthQuery {
+    limit: Option<usize>,
+}
+
+async fn providers_health(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<ProviderHealthQuery>,
+) -> ApiResult<Json<serde_json::Value>> {
+    authorize(&state, &headers)?;
+    let cache = require_cache(&state)?;
+    let limit = query.limit.unwrap_or(20).clamp(1, 500);
+    Ok(Json(json!({
+        "sample_size": limit,
+        "providers": enrich_provider_health(cache.provider_health(limit)?),
+    })))
+}
+
 async fn sources(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> ApiResult<Json<serde_json::Value>> {
     authorize(&state, &headers)?;
-    let sources = Source::value_variants()
-        .iter()
-        .map(|source| {
-            json!({
-                "name": source.cli_name(),
-                "experimental": source.is_experimental()
-            })
-        })
-        .collect::<Vec<_>>();
-    Ok(Json(json!({ "sources": sources })))
+    Ok(Json(json!({
+        "manifest_file": crate::provider::ProviderManifest::manifest_file_name(),
+        "sources": builtin_provider_registry(),
+    })))
 }
 
 async fn fetch(
@@ -146,7 +169,15 @@ async fn fetch(
         })?;
         let result = state
             .context
-            .fetch_source_specific(source, &request.query, format, top.unwrap_or(1), ttl, force)
+            .fetch_source_specific(
+                source,
+                &request.query,
+                format,
+                top.unwrap_or(1),
+                ttl,
+                force,
+                request.enrich,
+            )
             .await?;
         return match result {
             SpecificFetchResult::Raw { raw, .. } => Ok(response_with_body(
@@ -342,7 +373,7 @@ async fn fetch_result(
     }
     let result = state
         .context
-        .fetch_source_result(request.result, request.format, ttl, force)
+        .fetch_source_result(request.result, request.format, ttl, force, request.enrich)
         .await?;
     match result {
         SpecificFetchResult::Raw {
@@ -394,14 +425,42 @@ async fn fetch_result(
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct AiReplayRequest {
+    unified_cache_id: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ai_scoring: Option<AiScoringConfig>,
+}
+
+async fn ai_replay(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<AiReplayRequest>,
+) -> ApiResult<Json<serde_json::Value>> {
+    authorize(&state, &headers)?;
+    let score = state
+        .context
+        .replay_ai_score_for_unified_cache(request.unified_cache_id, request.ai_scoring.as_ref())
+        .await?;
+    Ok(Json(json!({
+        "unified_cache_id": request.unified_cache_id,
+        "ai_score": score
+    })))
+}
+
 async fn cache_list(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> ApiResult<Json<serde_json::Value>> {
     authorize(&state, &headers)?;
     let cache = require_cache(&state)?;
-    let entries = cache.list(100)?;
-    Ok(Json(json!({ "entries": entries })))
+    let upstream_entries = cache.list(100)?;
+    let unified_entries = cache.list_unified(100)?;
+    Ok(Json(json!({
+        "upstream_entries": upstream_entries,
+        "unified_entries": unified_entries,
+        "entries": upstream_entries
+    })))
 }
 
 async fn cache_detail(
@@ -411,10 +470,38 @@ async fn cache_detail(
 ) -> ApiResult<Json<serde_json::Value>> {
     authorize(&state, &headers)?;
     let cache = require_cache(&state)?;
-    let Some(entry) = cache.detail(id)? else {
+    let entry = cache.detail(id)?;
+    let unified_entry = cache.unified_detail(id)?;
+    if entry.is_none() && unified_entry.is_none() {
         return Err(ApiError::not_found("cache entry not found"));
-    };
-    Ok(Json(json!({ "entry": entry })))
+    }
+    Ok(Json(json!({
+        "entry": entry,
+        "unified_entry": unified_entry,
+        "ai_scores": unified_entry
+            .as_ref()
+            .map(|entry| cache.list_ai_scores(entry.id))
+            .transpose()?
+            .unwrap_or_default()
+    })))
+}
+
+async fn unified_cache_detail(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<serde_json::Value>> {
+    authorize(&state, &headers)?;
+    let cache = require_cache(&state)?;
+    let unified_entry = cache.unified_detail(id)?;
+    if unified_entry.is_none() {
+        return Err(ApiError::not_found("unified cache entry not found"));
+    }
+    Ok(Json(json!({
+        "entry": null,
+        "unified_entry": unified_entry,
+        "ai_scores": cache.list_ai_scores(id)?
+    })))
 }
 
 async fn cache_delete(
@@ -442,13 +529,103 @@ async fn cache_revalidate(
     })))
 }
 
-async fn stats(
+async fn unified_cache_delete(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<serde_json::Value>> {
+    authorize(&state, &headers)?;
+    let cache = require_cache(&state)?;
+    let deleted = cache.delete_unified(id)?;
+    Ok(Json(json!({ "deleted": deleted })))
+}
+
+async fn unified_cache_revalidate(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<serde_json::Value>> {
+    authorize(&state, &headers)?;
+    let cache = require_cache(&state)?;
+    let deleted = cache.delete_unified(id)?;
+    Ok(Json(json!({
+        "revalidate": "deleted_unified_cached_entry",
+        "deleted": deleted
+    })))
+}
+
+async fn fetch_runs(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> ApiResult<Json<serde_json::Value>> {
     authorize(&state, &headers)?;
     let cache = require_cache(&state)?;
-    Ok(Json(json!({ "cache": cache.stats()? })))
+    Ok(Json(json!({
+        "runs": cache.list_fetch_runs(100)?,
+        "status_counts": cache.fetch_run_status_counts()?
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct StatsQuery {
+    query_hash: Option<String>,
+    model: Option<String>,
+    prompt_version: Option<String>,
+    created_at_start: Option<i64>,
+    created_at_end: Option<i64>,
+}
+
+async fn stats(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<StatsQuery>,
+) -> ApiResult<Json<serde_json::Value>> {
+    authorize(&state, &headers)?;
+    let cache = require_cache(&state)?;
+    Ok(Json(json!({
+        "cache": cache.stats()?,
+        "ai_scores": cache.query_ai_scores(AiScoreQuery {
+            query_hash: query.query_hash,
+            model: query.model,
+            prompt_version: query.prompt_version,
+            created_at_start: query.created_at_start,
+            created_at_end: query.created_at_end,
+            limit: 20,
+        })?,
+        "fetch_runs": cache.list_fetch_runs(20)?,
+        "fetch_run_status_counts": cache.fetch_run_status_counts()?,
+        "provider_health": enrich_provider_health(cache.provider_health(20)?)
+    })))
+}
+
+fn enrich_provider_health(
+    records: Vec<crate::cache::ProviderHealthRecord>,
+) -> Vec<serde_json::Value> {
+    records
+        .into_iter()
+        .map(|record| {
+            let mut value = serde_json::to_value(&record).unwrap_or_else(|_| {
+                json!({
+                    "source": record.source,
+                    "status": "unknown"
+                })
+            });
+            if let Some(object) = value.as_object_mut() {
+                if let Ok(source) = source_from_cli_name(&record.source) {
+                    let manifest = source.manifest();
+                    object.insert("capabilities".into(), json!(manifest.capabilities));
+                    object.insert("config".into(), json!(manifest.config));
+                    object.insert("auth".into(), json!(manifest.auth));
+                    object.insert(
+                        "experimental".into(),
+                        json!(manifest.capabilities.experimental),
+                    );
+                    object.insert("display_name".into(), json!(manifest.display_name));
+                }
+            }
+            value
+        })
+        .collect()
 }
 
 async fn index() -> impl IntoResponse {
@@ -576,6 +753,8 @@ struct ApiFetchRequest {
     sources: Option<Vec<String>>,
     #[serde(default)]
     force: Option<bool>,
+    #[serde(default)]
+    enrich: bool,
     #[serde(default)]
     ttl_seconds: Option<u64>,
     #[serde(default)]
@@ -1159,6 +1338,8 @@ struct ApiFetchResultRequest {
     #[serde(default)]
     force: Option<bool>,
     #[serde(default)]
+    enrich: bool,
+    #[serde(default)]
     ttl_seconds: Option<u64>,
     #[serde(default)]
     ai_scoring: Option<AiScoringConfig>,
@@ -1166,68 +1347,451 @@ struct ApiFetchResultRequest {
 
 type ApiResult<T> = std::result::Result<T, ApiError>;
 
+#[derive(Debug, Serialize)]
+struct ApiErrorBody {
+    code: &'static str,
+    message: String,
+    details: Option<Value>,
+    retryable: bool,
+}
+
 #[derive(Debug)]
 struct ApiError {
     status: StatusCode,
-    message: String,
+    body: ApiErrorBody,
 }
 
 impl ApiError {
-    fn bad_request(message: impl Into<String>) -> Self {
+    fn new(
+        status: StatusCode,
+        code: &'static str,
+        message: impl Into<String>,
+        details: Option<Value>,
+        retryable: bool,
+    ) -> Self {
         Self {
-            status: StatusCode::BAD_REQUEST,
-            message: message.into(),
+            status,
+            body: ApiErrorBody {
+                code,
+                message: message.into(),
+                details,
+                retryable,
+            },
         }
+    }
+
+    fn bad_request(message: impl Into<String>) -> Self {
+        let message = message.into();
+        let code = if message == "cache is disabled" {
+            "cache_disabled"
+        } else {
+            "validation_error"
+        };
+        Self::new(StatusCode::BAD_REQUEST, code, message, None, false)
     }
 
     fn unauthorized(message: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::UNAUTHORIZED,
-            message: message.into(),
-        }
+        Self::new(
+            StatusCode::UNAUTHORIZED,
+            "auth_missing_or_invalid",
+            message,
+            None,
+            false,
+        )
     }
 
     fn not_found(message: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::NOT_FOUND,
-            message: message.into(),
-        }
+        Self::new(
+            StatusCode::NOT_FOUND,
+            "no_lyrics_found",
+            message,
+            None,
+            false,
+        )
     }
 }
 
 impl From<Error> for ApiError {
     fn from(value: Error) -> Self {
-        Self {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            message: value.to_string(),
-        }
+        let message = value.to_string();
+        let (status, code, retryable) = match &value {
+            Error::Provider(_) if message.contains("ai_skipped") => {
+                (StatusCode::BAD_GATEWAY, "ai_skipped", true)
+            }
+            Error::Provider(_) if message.contains("provider_warning") => {
+                (StatusCode::BAD_GATEWAY, "provider_warning", true)
+            }
+            Error::Provider(_) if looks_like_no_lyrics_error(&message) => {
+                (StatusCode::NOT_FOUND, "no_lyrics_found", false)
+            }
+            Error::Provider(_) | Error::Network(_) => {
+                (StatusCode::BAD_GATEWAY, "provider_warning", true)
+            }
+            Error::Service(_) if message.contains("invalid source") => {
+                (StatusCode::BAD_REQUEST, "validation_error", false)
+            }
+            Error::Service(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal_error", false),
+            Error::Json(_) | Error::Parse(_) | Error::Decode(_) | Error::UnknownFormat => {
+                (StatusCode::BAD_REQUEST, "validation_error", false)
+            }
+            Error::Storage(_) | Error::Sqlite(_) | Error::Io(_) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, "internal_error", false)
+            }
+        };
+        Self::new(
+            status,
+            code,
+            message,
+            Some(error_details(&value)),
+            retryable,
+        )
     }
 }
 
 impl From<serde_json::Error> for ApiError {
     fn from(value: serde_json::Error) -> Self {
-        Self {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            message: value.to_string(),
-        }
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "validation_error",
+            value.to_string(),
+            Some(json!({ "source": "serde_json" })),
+            false,
+        )
     }
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> axum::response::Response {
-        (
-            self.status,
-            Json(json!({
-                "error": self.message
-            })),
-        )
-            .into_response()
+        (self.status, Json(self.body)).into_response()
     }
+}
+
+fn looks_like_no_lyrics_error(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("no_lyrics_found")
+        || lower.contains("no lyric")
+        || lower.contains("no aggregate members could be fetched")
+}
+
+fn error_details(value: &Error) -> Value {
+    json!({
+        "source": match value {
+            Error::UnknownFormat => "unknown_format",
+            Error::Decode(_) => "decode",
+            Error::Parse(_) => "parse",
+            Error::Provider(_) => "provider",
+            Error::Service(_) => "service",
+            Error::Storage(_) => "storage",
+            Error::Network(_) => "network",
+            Error::Sqlite(_) => "sqlite",
+            Error::Io(_) => "io",
+            Error::Json(_) => "json",
+        }
+    })
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    use async_trait::async_trait;
+    use axum::body::to_bytes;
+    use axum::http::{Method, Request};
+    use tower::ServiceExt;
+
     use super::*;
+    use crate::cache::CachePut;
+    use crate::decoder::InputFormat;
+    use crate::model::{LyricDocument, LyricLine, LyricMeta};
+    use crate::provider::{FetchedLyric, LyricProvider};
+
+    #[test]
+    fn api_error_maps_common_codes() {
+        let cache = ApiError::bad_request("cache is disabled");
+        assert_eq!(cache.status, StatusCode::BAD_REQUEST);
+        assert_eq!(cache.body.code, "cache_disabled");
+        assert!(!cache.body.retryable);
+
+        let validation = ApiError::bad_request("query must not be empty");
+        assert_eq!(validation.body.code, "validation_error");
+
+        let provider_warning = ApiError::from(Error::Provider(
+            "provider_warning: provider task failed".into(),
+        ));
+        assert_eq!(provider_warning.status, StatusCode::BAD_GATEWAY);
+        assert_eq!(provider_warning.body.code, "provider_warning");
+        assert!(provider_warning.body.retryable);
+
+        let ai_skipped = ApiError::from(Error::Provider("ai_skipped: missing key".into()));
+        assert_eq!(ai_skipped.body.code, "ai_skipped");
+        assert!(ai_skipped.body.retryable);
+
+        let no_lyrics = ApiError::from(Error::Provider(
+            "no_lyrics_found: all selected sources returned no usable lyric".into(),
+        ));
+        assert_eq!(no_lyrics.status, StatusCode::NOT_FOUND);
+        assert_eq!(no_lyrics.body.code, "no_lyrics_found");
+    }
+
+    #[tokio::test]
+    async fn api_routes_return_json_with_cache_enabled() {
+        let cache = test_cache("api_routes_return_json_with_cache_enabled");
+        let cache_id = cache
+            .put(CachePut {
+                key: "upstream-route",
+                source: Source::Lrclib,
+                operation: "fetch",
+                status_code: 200,
+                body: br#"{"lyrics":"hello"}"#,
+                metadata: &json!({ "query": "hello", "item_id": "lrclib-1" }),
+                ttl: Duration::from_secs(60),
+            })
+            .unwrap();
+        let run_id = cache
+            .start_fetch_run("hello", Some(Source::Lrclib), "fetch")
+            .unwrap();
+        cache
+            .finish_fetch_run(
+                run_id,
+                "success",
+                None,
+                crate::cache::FetchRunMetadata {
+                    provider_count: Some(1),
+                    candidate_count: Some(1),
+                    cache_event: None,
+                },
+            )
+            .unwrap();
+        let app = test_app(cache, None);
+
+        let (health_status, health) = get_json(app.clone(), "/api/health", None).await;
+        assert_eq!(health_status, StatusCode::OK);
+        assert_eq!(health["ok"], true);
+        assert_eq!(health["cache"], true);
+
+        let (stats_status, stats) = get_json(app.clone(), "/api/stats", None).await;
+        assert_eq!(stats_status, StatusCode::OK);
+        assert_eq!(stats["cache"]["upstream_entries"], 1);
+        assert_eq!(stats["fetch_run_status_counts"][0]["status"], "success");
+        assert_eq!(stats["provider_health"][0]["source"], "lrclib");
+
+        let (provider_status, provider_health) =
+            get_json(app.clone(), "/api/providers/health?limit=5", None).await;
+        assert_eq!(provider_status, StatusCode::OK);
+        assert_eq!(provider_health["providers"][0]["status"], "healthy");
+
+        let (runs_status, runs) = get_json(app.clone(), "/api/runs", None).await;
+        assert_eq!(runs_status, StatusCode::OK);
+        assert_eq!(runs["runs"][0]["query"], "hello");
+
+        let (cache_status, detail) = get_json(app, &format!("/api/cache/{cache_id}"), None).await;
+        assert_eq!(cache_status, StatusCode::OK);
+        assert_eq!(detail["entry"]["id"], cache_id);
+        assert!(detail["unified_entry"].is_null());
+    }
+
+    #[tokio::test]
+    async fn fetch_result_enrich_false_uses_only_current_provider() {
+        let (app, calls) = test_app_with_tracking_provider();
+        let (status, body) = post_json(
+            app,
+            "/api/fetch-result",
+            json!({
+                "result": result(Source::Qq, "Base Song", "Artist", None, "base-1"),
+                "format": "json",
+                "enrich": false,
+            }),
+            None,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.get("unified").is_none());
+
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.as_slice(), &["qq:fetch:base-1"]);
+    }
+
+    #[tokio::test]
+    async fn fetch_result_enrich_true_keeps_cross_source_enrichment() {
+        let (app, calls) = test_app_with_tracking_provider();
+        let (status, body) = post_json(
+            app,
+            "/api/fetch-result",
+            json!({
+                "result": result(Source::Qq, "Base Song", "Artist", None, "base-1"),
+                "format": "json",
+                "enrich": true,
+            }),
+            None,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(body["unified"].is_object());
+        assert!(body["unified"]["meta"]["source"]
+            .as_str()
+            .is_some_and(|value| value.starts_with("enriched(")));
+
+        let calls = calls.lock().unwrap();
+        assert!(calls.iter().any(|entry| entry != "qq:fetch:base-1"));
+        assert!(calls.iter().any(|entry| entry.starts_with("qq:fetch:")));
+        assert!(calls.iter().any(|entry| entry.contains(":search:")));
+    }
+
+    #[tokio::test]
+    async fn server_token_auth_accepts_explicit_and_bearer_headers() {
+        let app = test_app(test_cache("server_token_auth"), Some("secret-token"));
+
+        let (missing_status, missing) = get_json(app.clone(), "/api/health", None).await;
+        assert_eq!(missing_status, StatusCode::UNAUTHORIZED);
+        assert_eq!(missing["code"], "auth_missing_or_invalid");
+        assert_eq!(missing["message"], "missing or invalid server token");
+        assert_eq!(missing["retryable"], false);
+
+        let (explicit_status, explicit) = get_json(
+            app.clone(),
+            "/api/health",
+            Some(("x-rosettrism-token", "secret-token")),
+        )
+        .await;
+        assert_eq!(explicit_status, StatusCode::OK);
+        assert_eq!(explicit["ok"], true);
+
+        let (bearer_status, bearer) = get_json(
+            app,
+            "/api/health",
+            Some(("authorization", "Bearer secret-token")),
+        )
+        .await;
+        assert_eq!(bearer_status, StatusCode::OK);
+        assert_eq!(bearer["ok"], true);
+    }
+
+    #[tokio::test]
+    async fn cache_detail_returns_upstream_entry_by_id() {
+        let cache = test_cache("cache_detail_upstream");
+        let id = cache
+            .put(CachePut {
+                key: "upstream-detail",
+                source: Source::Qq,
+                operation: "search",
+                status_code: 200,
+                body: br#"{"results":[]}"#,
+                metadata: &json!({ "query": "track" }),
+                ttl: Duration::from_secs(60),
+            })
+            .unwrap();
+
+        let (status, detail) =
+            get_json(test_app(cache, None), &format!("/api/cache/{id}"), None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(detail["entry"]["id"], id);
+        assert_eq!(detail["entry"]["source"], "qq");
+        assert!(detail["unified_entry"].is_null());
+    }
+
+    #[tokio::test]
+    async fn cache_detail_returns_unified_entry_by_id() {
+        let cache = test_cache("cache_detail_unified");
+        let id = cache
+            .put_unified(
+                "unified-detail",
+                br#"{"metadata":{"title":"Track"},"lines":[]}"#,
+                &["upstream-a".to_string()],
+                Duration::from_secs(60),
+            )
+            .unwrap();
+
+        let (status, detail) =
+            get_json(test_app(cache, None), &format!("/api/cache/{id}"), None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(detail["entry"].is_null());
+        assert_eq!(detail["unified_entry"]["id"], id);
+        assert_eq!(detail["unified_entry"]["dependencies"][0], "upstream-a");
+    }
+
+    #[tokio::test]
+    async fn cache_detail_returns_not_found_for_missing_id() {
+        let (status, detail) = get_json(
+            test_app(test_cache("cache_detail_missing"), None),
+            "/api/cache/9999",
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(detail["code"], "no_lyrics_found");
+        assert_eq!(detail["message"], "cache entry not found");
+    }
+    #[tokio::test]
+    async fn cache_list_splits_upstream_and_unified_entries() {
+        let cache = test_cache("cache_list_split");
+        let upstream_id = cache
+            .put(CachePut {
+                key: "upstream-list",
+                source: Source::Qq,
+                operation: "search",
+                status_code: 200,
+                body: br#"{"results":[]}"#,
+                metadata: &json!({ "query": "track" }),
+                ttl: Duration::from_secs(60),
+            })
+            .unwrap();
+        let unified_id = cache
+            .put_unified(
+                "unified-list",
+                br#"{"metadata":{"title":"Track"},"lines":[]}"#,
+                &["upstream-list".to_string(), "upstream-other".to_string()],
+                Duration::from_secs(60),
+            )
+            .unwrap();
+
+        let (status, list) = get_json(test_app(cache, None), "/api/cache", None).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(list["upstream_entries"][0]["id"], upstream_id);
+        assert_eq!(list["unified_entries"][0]["id"], unified_id);
+        assert_eq!(list["unified_entries"][0]["dependency_count"], 2);
+        assert_eq!(list["entries"][0]["id"], upstream_id);
+    }
+
+    #[tokio::test]
+    async fn deleting_unified_cache_removes_ai_scores() {
+        let cache = test_cache("delete_unified_ai_scores");
+        let unified_id = cache
+            .put_unified(
+                "unified-delete",
+                br#"{"metadata":{"title":"Track"},"lines":[]}"#,
+                &[],
+                Duration::from_secs(60),
+            )
+            .unwrap();
+        cache
+            .put_ai_score(unified_id, &json!({ "candidate_summary_hash": "abc123" }))
+            .unwrap();
+        assert_eq!(cache.stats().unwrap().ai_score_entries, 1);
+
+        let app = test_app(cache.clone(), None);
+        let (status, deleted) = delete_json(
+            app.clone(),
+            &format!("/api/unified-cache/{unified_id}"),
+            None,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(deleted["deleted"], true);
+        assert!(cache.unified_detail(unified_id).unwrap().is_none());
+        assert_eq!(cache.list_ai_scores(unified_id).unwrap().len(), 0);
+        assert_eq!(cache.stats().unwrap().ai_score_entries, 0);
+
+        let (detail_status, detail) =
+            get_json(app, &format!("/api/unified-cache/{unified_id}"), None).await;
+        assert_eq!(detail_status, StatusCode::NOT_FOUND);
+        assert_eq!(detail["code"], "no_lyrics_found");
+        assert_eq!(detail["message"], "unified cache entry not found");
+    }
 
     #[test]
     fn rejects_non_local_host_without_token() {
@@ -1456,6 +2020,110 @@ mod tests {
         assert!(aggregate_members(&results[0]).unwrap().is_some());
     }
 
+    async fn get_json(
+        app: Router,
+        uri: &str,
+        header: Option<(&str, &str)>,
+    ) -> (StatusCode, serde_json::Value) {
+        let mut request = Request::builder().method(Method::GET).uri(uri);
+        if let Some((name, value)) = header {
+            request = request.header(name, value);
+        }
+        let response = app
+            .oneshot(request.body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let value = serde_json::from_slice(&body).unwrap();
+        (status, value)
+    }
+
+    async fn delete_json(
+        app: Router,
+        uri: &str,
+        header: Option<(&str, &str)>,
+    ) -> (StatusCode, serde_json::Value) {
+        let mut request = Request::builder().method(Method::DELETE).uri(uri);
+        if let Some((name, value)) = header {
+            request = request.header(name, value);
+        }
+        let response = app
+            .oneshot(request.body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let value = serde_json::from_slice(&body).unwrap();
+        (status, value)
+    }
+
+    async fn post_json(
+        app: Router,
+        uri: &str,
+        body: serde_json::Value,
+        header: Option<(&str, &str)>,
+    ) -> (StatusCode, serde_json::Value) {
+        let mut request = Request::builder()
+            .method(Method::POST)
+            .uri(uri)
+            .header(axum::http::header::CONTENT_TYPE, "application/json");
+        if let Some((name, value)) = header {
+            request = request.header(name, value);
+        }
+        let response = app
+            .oneshot(request.body(Body::from(body.to_string())).unwrap())
+            .await
+            .unwrap();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let value = serde_json::from_slice(&body).unwrap();
+        (status, value)
+    }
+
+    fn test_app(cache: UpstreamCache, server_token: Option<&str>) -> Router {
+        app(AppState {
+            context: ServiceContext {
+                cache: Some(cache),
+                ..ServiceContext::default()
+            },
+            server_token: server_token.map(str::to_string),
+        })
+    }
+
+    fn test_app_with_tracking_provider() -> (Router, Arc<Mutex<Vec<String>>>) {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let provider_calls = calls.clone();
+        let context = ServiceContext {
+            provider_factory: Some(Arc::new(move |source, _ttl, _force| {
+                Ok(Box::new(TrackingProvider {
+                    source,
+                    calls: provider_calls.clone(),
+                }) as Box<dyn LyricProvider>)
+            })),
+            ..ServiceContext::default()
+        };
+        (
+            app(AppState {
+                context,
+                server_token: None,
+            }),
+            calls,
+        )
+    }
+
+    fn test_cache(name: &str) -> UpstreamCache {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "rosettrism-{name}-{}-{now}.sqlite",
+            std::process::id()
+        ));
+        UpstreamCache::open(path).unwrap()
+    }
+
     fn result(
         source: Source,
         title: &str,
@@ -1471,6 +2139,61 @@ mod tests {
             album: album.map(ToOwned::to_owned),
             duration_ms: Some(240_000),
             extra: json!({ "id": id }),
+        }
+    }
+
+    #[derive(Clone)]
+    struct TrackingProvider {
+        source: Source,
+        calls: Arc<Mutex<Vec<String>>>,
+    }
+
+    #[async_trait]
+    impl LyricProvider for TrackingProvider {
+        async fn search(&self, query: &str) -> Result<Vec<SearchResult>> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("{}:search:{query}", self.source.cli_name()));
+            Ok(vec![SearchResult {
+                source: self.source,
+                id: format!("{}-candidate", self.source.cli_name()),
+                title: format!("{} title", self.source.display_name()),
+                artist: "Artist".into(),
+                album: None,
+                duration_ms: Some(180_000),
+                extra: json!({ "source": self.source.cli_name() }),
+            }])
+        }
+
+        async fn fetch(&self, result: &SearchResult) -> Result<FetchedLyric> {
+            self.calls.lock().unwrap().push(format!(
+                "{}:fetch:{}",
+                self.source.cli_name(),
+                result.id
+            ));
+            Ok(FetchedLyric {
+                input_format: InputFormat::Lrc,
+                raw: b"[00:00.00]Tracked\n".to_vec(),
+                document: Some(LyricDocument {
+                    meta: LyricMeta {
+                        title: Some(format!("{} title", self.source.display_name())),
+                        artist: Some("Artist".into()),
+                        ..Default::default()
+                    },
+                    lines: vec![LyricLine {
+                        start_ms: 0,
+                        duration_ms: None,
+                        text: format!("{} lyric", self.source.cli_name()),
+                        words: Vec::new(),
+                        ruby: Vec::new(),
+                        translation: None,
+                        reading: None,
+                        romanized: None,
+                    }],
+                }),
+                annotations: Vec::new(),
+            })
         }
     }
 }

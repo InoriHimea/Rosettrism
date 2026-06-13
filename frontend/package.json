@@ -2,12 +2,15 @@
   "name": "rosettrism-dashboard",
   "private": true,
   "version": "4.8.18",
+  "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
     "build": "vite build",
     "dev": "vite --host 127.0.0.1",
     "verify:dashboard": "node playwright-verify-dashboard.mjs",
-    "verify:meta-stress": "node playwright-verify-meta-stress.mjs"
+    "verify:meta-stress": "node playwright-verify-meta-stress.mjs",
+    "test": "playwright test tests/dashboard-smoke.spec.js",
+    "test:unit": "node --test src/api/__tests__/*.test.js"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.0",

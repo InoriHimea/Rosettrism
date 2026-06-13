@@ -3,7 +3,7 @@ name = "rosettrism"
 version = "4.8.18"
 edition = "2021"
 description = "Rosettrism CLI, server, and library for fetching, caching, aggregating, and decoding lyrics"
-license = "MIT"
+license = "AGPL-3.0-only"
 
 [lib]
 name = "rosettrism"
@@ -36,12 +36,13 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
 thiserror = "1.0"
-tokio = { version = "1.40", features = ["fs", "macros", "net", "rt-multi-thread", "signal"] }
+tokio = { version = "1.40", features = ["fs", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 
 [dev-dependencies]
 assert_cmd = "2.0"
 predicates = "3.1"
 wiremock = "0.6"
+tower = { version = "0.5", features = ["util"] }
 
 [profile.release]
 opt-level = "z"

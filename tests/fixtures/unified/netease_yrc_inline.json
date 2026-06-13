@@ -1,0 +1,47 @@
+{
+  "schema_version": "1.0",
+  "meta": { "title": "YRC Song", "artist": "Netease Artist", "album": null, "by": null, "offset_ms": null, "source": "netease" },
+  "mode": "inline",
+  "tracks": [
+    {
+      "kind": "original",
+      "source": "netease",
+      "document": {
+        "meta": { "title": "YRC Song", "artist": "Netease Artist", "album": null, "by": null, "offset_ms": null, "source": "netease" },
+        "lines": [
+          {
+            "start_ms": 500,
+            "duration_ms": 1200,
+            "text": "夢を見る",
+            "words": [
+              { "offset_ms": 500, "duration_ms": 300, "text": "夢" },
+              { "offset_ms": 800, "duration_ms": 400, "text": "を見る" }
+            ],
+            "ruby": [
+              { "start_char": 0, "end_char": 1, "text": "夢", "reading": "ゆめ" }
+            ],
+            "reading": "ゆめをみる",
+            "romanized": "yume o miru"
+          }
+        ]
+      },
+      "quality": { "score": 97.0, "line_count": 1, "timed_line_count": 1, "word_timing_count": 2 }
+    }
+  ],
+  "inline_lines": [
+    {
+      "start_ms": 500,
+      "duration_ms": 1200,
+      "text": "夢を見る",
+      "reading": "ゆめをみる",
+      "romanized": "yume o miru",
+      "ruby": [
+        { "start_char": 0, "end_char": 1, "text": "夢", "reading": "ゆめ" }
+      ],
+      "source_refs": ["netease"]
+    }
+  ],
+  "source_refs": ["netease"],
+  "score": { "final_score": 97.0, "timing_score": 97.0, "completeness_score": 100.0, "enrichment_score": 66.6 },
+  "cache_refs": ["netease:789:yrc"]
+}

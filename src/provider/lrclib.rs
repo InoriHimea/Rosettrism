@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use async_trait::async_trait;
 use regex::Regex;
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, USER_AGENT};
@@ -23,11 +21,11 @@ pub struct LrclibProvider {
 }
 
 impl LrclibProvider {
-    pub fn new(_cookie: Option<String>) -> Result<Self> {
-        Self::with_api_base_url("https://lrclib.net/api")
+    pub fn new(_cookie: Option<String>, timeout_ms: u64) -> Result<Self> {
+        Self::with_api_base_url("https://lrclib.net/api", timeout_ms)
     }
 
-    fn with_api_base_url(api_base_url: impl Into<String>) -> Result<Self> {
+    fn with_api_base_url(api_base_url: impl Into<String>, timeout_ms: u64) -> Result<Self> {
         let mut headers = HeaderMap::new();
         headers.insert(USER_AGENT, HeaderValue::from_static(USER_AGENT_VALUE));
         headers.insert(
@@ -35,10 +33,11 @@ impl LrclibProvider {
             HeaderValue::from_static("application/json, text/plain, */*"),
         );
 
-        let client = reqwest::Client::builder()
-            .default_headers(headers)
-            .timeout(Duration::from_secs(12))
-            .build()?;
+        let client = crate::provider::apply_client_timeout(
+            reqwest::Client::builder().default_headers(headers),
+            timeout_ms,
+        )
+        .build()?;
 
         Ok(Self {
             client,
@@ -366,7 +365,7 @@ mod tests {
     use super::*;
 
     fn provider(server: &MockServer) -> LrclibProvider {
-        LrclibProvider::with_api_base_url(format!("{}/api", server.uri())).unwrap()
+        LrclibProvider::with_api_base_url(format!("{}/api", server.uri()), 12_000).unwrap()
     }
 
     #[tokio::test]

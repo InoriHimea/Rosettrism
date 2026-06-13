@@ -58,8 +58,8 @@
 ### 发布
 - [x] 版本号更新到 `4.8.18`。
 - [x] 更新 `frontend/dist`。
-- [ ] 提交、打 tag、推送远端。
-- [ ] GitHub Actions 生成 release/package。
+- [x] 提交、打 tag、推送远端。
+- [x] GitHub Actions 生成 release/package。
 
 ## 阶段 2：v4.8.19 设计 Token 与组件一致性
 
@@ -196,5 +196,5 @@
 - [x] `git diff --check`
 - [x] 版本号同步更新：`Cargo.toml`、`Cargo.lock`、`frontend/package.json`、`frontend/package-lock.json`
 - [x] `frontend/dist` 已重建
-- [ ] commit、tag、push 到配置远端
-- [ ] GitHub Actions release/package 成功
+- [x] commit、tag、push 到配置远端
+- [x] GitHub Actions release/package 成功

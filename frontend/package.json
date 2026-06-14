@@ -1,7 +1,7 @@
 {
   "name": "rosettrism-dashboard",
   "private": true,
-  "version": "4.8.18",
+  "version": "4.8.19",
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
@@ -9,8 +9,9 @@
     "dev": "vite --host 127.0.0.1",
     "verify:dashboard": "node playwright-verify-dashboard.mjs",
     "verify:meta-stress": "node playwright-verify-meta-stress.mjs",
-    "test": "playwright test tests/dashboard-smoke.spec.js",
-    "test:unit": "node --test src/api/__tests__/*.test.js"
+    "test": "playwright test tests/dashboard-smoke.spec.js tests/multilingual-lyrics.spec.js",
+    "test:unit": "node --test src/api/__tests__/*.test.js src/__tests__/*.test.js",
+    "verify:multilingual-live": "node scripts/capture-multilingual-live.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.0",

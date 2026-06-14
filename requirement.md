@@ -300,3 +300,29 @@
 
 ### 关联 plan
 - `.plan/20260612-152430-ui-ux-modernization.md`
+
+
+## v2.1.0 - 2026-06-13 - 质量评分提升到 9 分
+
+### 目标
+- 将当前约 8.4 的综合质量状态提升到 9.0+，优先补齐真实多语言歌词回归覆盖、前端歌词播放可维护性、文档/计划/发布现场整洁度。
+- 覆盖国语、粤语、日语、英语四类歌词播放场景，并用可复现 fixture 固定关键行为。
+- 保留可选 live capture 路径，用于发布前从真实 Provider 拉取《龙战骑士 - 周杰伦》《海阔天空 - Beyond》《ブルーバード - いきものがかり》《Just One Last Dance - Sarah Connor》的最新数据证据。
+
+### 验收条件
+- 新增或更新自动化测试，常规测试使用固定 fixture，不依赖外部网络、版权接口或 Provider 限流。
+- Playwright 覆盖四语种播放视图：能打开播放视图、首屏无遮挡、逐字进度存在、注解不重叠、移动端不横向溢出。
+- `LyricPlaybackView.jsx` 中倒计时、双行 lane、meta line、annotation label、进度计算等复杂纯逻辑拆出为可单测模块。
+- `frontend/test-results/` 不纳入提交；live capture 输出写入被忽略的验证目录；`frontend/playwright-artifacts/*.png` 仅在有意更新视觉基线时提交。
+- 必跑验证通过：`cargo fmt --check`、`cargo test --no-fail-fast`、`npm run build`、`npm run test:unit`、`npm test`、新增多语言回归命令、`git diff --check`。
+- 本轮新增 `requirement.md` 与 `.plan/2026-06-13-quality-to-9.md` 内容保持 UTF-8 中文可读。
+
+### 实作状态
+- [x] 质量提升需求与计划文档建立
+- [x] 歌词播放纯逻辑拆分与单测补充
+- [x] 四语种 fixture 与 Playwright 回归补充
+- [x] live capture 脚本与忽略目录策略补充
+- [x] 必跑验证完成并记录结果
+
+### 关联 plan
+- `.plan/2026-06-13-quality-to-9.md`

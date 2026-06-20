@@ -273,13 +273,13 @@
 .lyric-annotation-mark.annotation-stress .annotation-glyph-text {
   background: color-mix(in srgb, var(--annotation-tint, #ec4899) 92%, #2b160f);
   border-radius: 999px;
-  bottom: -0.24em;
-  box-shadow: 0 4px 10px color-mix(in srgb, var(--annotation-tint, #ec4899) 32%, transparent);
+  bottom: -0.34em;
+  box-shadow: 0 3px 7px color-mix(in srgb, var(--annotation-tint, #ec4899) 24%, transparent);
   color: transparent;
-  font-size: 1em;
-  height: 0.48em;
+  font-size: 0.92em;
+  height: 0.34em;
   top: auto;
-  width: 0.48em;
+  width: 0.34em;
 }
 
 .lyric-annotation-mark.annotation-long-tone .annotation-glyph-text {
@@ -298,11 +298,16 @@
 .lyric-current-strip {
   align-items: center;
   backdrop-filter: blur(18px);
-  background: rgba(255, 255, 255, 0.48);
-  border: 1px solid rgba(82, 67, 26, 0.14);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 248, 212, 0.56)),
+    radial-gradient(circle at 50% 18%, rgba(255, 255, 255, 0.72), transparent 58%);
+  border: 1px solid rgba(82, 67, 26, 0.12);
   border-radius: 999px;
   bottom: 22px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.48), 0 12px 30px rgba(123, 83, 15, 0.14);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.68),
+    0 10px 28px rgba(123, 83, 15, 0.12),
+    0 0 0 1px rgba(255, 255, 255, 0.24);
   color: rgba(33, 27, 10, 0.76);
   display: flex;
   font-size: 14px;
@@ -321,6 +326,15 @@
   transform: translateX(-50%);
   white-space: nowrap;
   z-index: 4;
+}
+
+.lyric-stage-karaoke .lyric-current-strip {
+  bottom: auto;
+  font-size: clamp(28px, 3vw, 36px);
+  left: 50%;
+  min-height: 48px;
+  padding: 9px 20px;
+  top: 118px;
 }
 
 .lyric-stage {
@@ -451,7 +465,8 @@
   filter: none;
   font-size: clamp(30px, 4.4vw, 36px);
   font-weight: 930;
-  letter-spacing: -0.048em;
+  letter-spacing: 0;
+  line-height: 1.22;
   opacity: 1;
   transform: translateX(6px) translateY(-2px) scale(var(--line-scale));
 }
@@ -621,7 +636,7 @@
   color: rgba(47, 39, 19, 0.7);
   font-size: clamp(22px, 3.5vw, 32px);
   font-weight: 860;
-  letter-spacing: -0.04em;
+  letter-spacing: 0;
   max-width: calc(100% - 20px);
   white-space: nowrap;
 }
@@ -651,6 +666,9 @@
   color: rgba(72, 68, 58, 0.54);
   font-size: 13px;
   font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .lyric-line-active small {
@@ -662,11 +680,14 @@
   color: rgba(46, 38, 16, 0.66);
   letter-spacing: 0;
   max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .lyric-translation-primary {
   color: inherit;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
 }
 
 .lyric-translation-toggle.active {
@@ -763,6 +784,7 @@
 .lyric-words {
   display: inline-block;
   padding-top: 0.46em;
+  white-space: nowrap;
 }
 
 .lyric-word {
@@ -770,6 +792,7 @@
   display: inline-grid;
   overflow: visible;
   position: relative;
+  white-space: nowrap;
 }
 
 .lyric-word-has-breath {
@@ -804,6 +827,7 @@
 
 .lyric-karaoke-line {
   min-height: 82px;
+  white-space: nowrap;
 }
 
 .lyric-karaoke-line-right {
@@ -830,10 +854,11 @@
   align-self: start;
   color: rgba(47, 39, 19, 0.72);
   display: grid;
-  gap: 3px;
-  justify-self: start;
+  gap: 4px;
+  justify-self: stretch;
   max-width: min(100%, 760px);
   min-width: 0;
+  text-align: center;
 }
 
 .lyric-karaoke-meta-row,
@@ -841,16 +866,9 @@
   align-items: center;
   display: grid;
   gap: 10px;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
   min-width: 0;
-}
-
-.lyric-karaoke-meta-index {
-  color: rgba(47, 39, 19, 0.42);
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0;
-  min-width: 2.2em;
 }
 
 .lyric-karaoke-meta-title,
@@ -864,16 +882,43 @@
 
 .lyric-karaoke-meta-title {
   color: rgba(18, 15, 7, 0.88);
-  font-size: clamp(22px, 2.6vw, 28px);
-  font-weight: 920;
-  line-height: 1.02;
+  font-size: clamp(20px, 2.3vw, 27px);
+  font-weight: 940;
+  line-height: 1.28;
+  max-width: min(100%, 760px);
+  padding-block: 2px 1px;
 }
 
 .lyric-karaoke-meta-line {
   color: rgba(47, 39, 19, 0.64);
   font-size: clamp(16px, 1.8vw, 20px);
   font-weight: 780;
-  line-height: 1;
+  line-height: 1.18;
+  max-width: min(100%, 760px);
+}
+
+.lyric-karaoke-meta-detail.lyric-karaoke-meta-countdown {
+  align-items: center;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.44), rgba(255, 247, 221, 0.28));
+  border: 1px solid rgba(82, 67, 26, 0.09);
+  border-radius: 999px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.66),
+    0 10px 22px rgba(123, 83, 15, 0.12),
+    0 0 0 1px rgba(255, 255, 255, 0.14);
+  display: inline-flex;
+  justify-self: center;
+  min-height: 38px;
+  padding: 7px 15px;
+}
+
+.lyric-karaoke-meta-detail.lyric-karaoke-meta-countdown .lyric-gap-dots {
+  gap: 0.42em;
+}
+
+.lyric-karaoke-meta-detail.lyric-karaoke-meta-countdown .lyric-gap-dot {
+  height: 0.5em;
+  width: 0.5em;
 }
 
 .lyric-karaoke-line {
@@ -986,7 +1031,7 @@
   gap: 8px;
 }
 
-.field-label span {
+.field-label > span:not(.field-title) {
   color: var(--color-muted);
   font-size: 13px;
   font-weight: 400;
@@ -1229,7 +1274,7 @@
   .lyric-line-active,
   .lyric-line-countdown {
     font-size: 28px;
-    letter-spacing: -0.04em;
+    letter-spacing: 0;
   }
 
   .lyric-line-countdown {

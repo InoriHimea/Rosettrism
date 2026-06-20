@@ -321,22 +321,22 @@ rosettrism search --help
 
 ### 短期
 
-- 为 token 处理、`/api/cache/:id`、`/api/runs` 与 AI score 输出补充 Server/API 端到端测试。
-- 将 API 错误统一为 `{ code, message, details, retryable }`，方便 Dashboard 给出更清晰的恢复动作。
-- 增加轻量 plan / requirement 一致性检查，保证开发流程可追踪。
-- 检查 AI 评分记录的隐私遮罩与 payload 大小限制。
+- 收口当前 `v4.8.20` Dashboard 播放体验：karaoke 元信息、倒计时气泡、移动端溢出检查、来源选择器和视觉证据。
+- 为 Provider 健康度、cache export/prune/vacuum、AI score history 与结构化错误响应补充 HTTP 级 API 测试。
+- 继续保证所有 API 错误都统一为 `{ code, message, details, retryable }`，覆盖 provider warning 等边界路径。
+- 检查 AI 评分记录的隐私遮罩、prompt 大小限制与运维提示。
 
 ### 中期
 
-- 增加 cache 维护命令：prune、export、vacuum、migration status。
-- 基于 `fetch_runs` 建立 Provider 健康度统计，包括成功率、警告率、耗时与最近错误。
 - 支持 AI 评分在不同模型或 prompt 下回放与对比。
 - 维护 schema changelog、golden snapshot 与明确兼容规则。
+- 完成按钮、输入框、badge、弹窗、focus 状态等设计 token 与组件一致性收敛。
+- 将 Settings 升级为语言、安全 token、AI 优选、歌词播放、缓存信息等分组控制面板。
 
 ### 长期
 
 - 深化 Dashboard 视觉系统，加入主题、动效 preset 与更丰富的 karaoke 舞台效果。
-- 探索插件式 Provider / Decoder metadata、rate limit 与能力声明。
+- 正式化插件式 Provider / Decoder metadata、rate limit 策略与能力声明。
 - 从 JSON Schema 生成 TypeScript / Kotlin / Swift 客户端契约包。
 - 增加部署安全能力，例如 token rotation、read-only/admin token、CORS allowlist 与反向代理示例。
 

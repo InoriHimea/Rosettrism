@@ -69,7 +69,9 @@ export function LyricPlaybackView({ lyric, settings, t }) {
   const showCountdown = countdown.visible;
   const visibleFlowLine = activeFlowLine || nextFlowLine || flowLines[flowLines.length - 1];
   const visibleBodyLine = activeBodyLine || nextBodyLine || bodyLines[bodyLines.length - 1];
-  const currentStripText = showCountdown ? '•••' : activeFlowLine?.text || visibleBodyLine?.text;
+  const currentStripText = renderMode === 'karaoke'
+    ? ''
+    : (showCountdown ? '...' : activeFlowLine?.text || visibleBodyLine?.text);
   const focusFlowIndex = activeFlowIndex >= 0 ? activeFlowIndex : nextFlowIndex >= 0 ? nextFlowIndex : flowLines.length - 1;
   const focusBodyIndex = activeBodyIndex >= 0 ? activeBodyIndex : nextBodyIndex >= 0 ? nextBodyIndex : bodyLines.length - 1;
   const initialFlowLine = flowLines[0];
@@ -182,6 +184,7 @@ export function LyricPlaybackView({ lyric, settings, t }) {
             activeBodyLine={activeBodyLine}
             activeMetaLine={activeMetaLine}
             introMetaLines={introMetaLines}
+            introMetaEndMs={introMetaEndMs}
             focusBodyIndex={focusBodyIndex}
             showCountdown={showCountdown}
             countdown={countdown}
@@ -215,9 +218,11 @@ export function LyricPlaybackView({ lyric, settings, t }) {
             })}
           </div>
         )}
-        <div className={`lyric-current-strip${countdown.flashing ? ' lyric-dots-flashing' : ''}`} aria-live="polite">
-          {currentStripText || '•••'}
-        </div>
+        {renderMode !== 'karaoke' ? (
+          <div className={`lyric-current-strip${countdown.flashing ? ' lyric-dots-flashing' : ''}${countdown.exiting ? ' lyric-dots-exiting' : ''}`} aria-live="polite">
+            {currentStripText || '...'}
+          </div>
+        ) : null}
       </div>
 
       <div className="lyric-controls">
@@ -295,7 +300,7 @@ function CountdownRow({ countdown, refCallback, laneClass = '' }) {
 
 function CountdownDots({ count, exiting = false }) {
   return (
-    <span className="lyric-gap-dots" aria-label="•••">
+    <span className="lyric-gap-dots" aria-label="countdown bubbles">
       {[0, 1, 2].map((index) => (
         <span className={countdownDotClass(index, count, exiting)} key={index} />
       ))}
@@ -324,6 +329,7 @@ function KaraokeStage({
   activeBodyLine,
   activeMetaLine,
   introMetaLines,
+  introMetaEndMs,
   focusBodyIndex,
   showCountdown,
   countdown,
@@ -333,7 +339,7 @@ function KaraokeStage({
   linesRef,
   t,
 }) {
-  const laneItems = activeMetaLine ? [] : karaokeLaneItems(bodyLines, activeBodyLine, focusBodyIndex, showCountdown, countdown);
+  const laneItems = activeMetaLine ? [] : karaokeLaneItems(bodyLines, activeBodyLine, focusBodyIndex);
   const placeholderLanes = karaokePlaceholderLanes(laneItems);
   return (
     <div className="lyric-karaoke-lines lyric-karaoke-dual-lines" ref={linesRef} aria-live="polite">
@@ -341,32 +347,11 @@ function KaraokeStage({
         lines={introMetaLines}
         currentMs={currentMs}
         headingTitle={headingTitle}
+        showCountdown={showCountdown}
+        countdown={countdown}
+        introMetaEndMs={introMetaEndMs}
       />
       {laneItems.map((item) => {
-        if (item.kind === 'countdown') {
-          const { targetLine, bodyIndex } = item;
-          const isActive = activeBodyLine?.id === targetLine?.id;
-          return (
-            <div className={`lyric-karaoke-stack ${item.laneClass} ${item.lanePositionClass}`} key={item.key}>
-              <CountdownRow
-                countdown={countdown}
-                laneClass={`lyric-karaoke-line lyric-karaoke-countdown-above ${item.laneClass} ${item.lanePositionClass}`}
-                refCallback={bindLineRef(item.key)}
-              />
-              {targetLine ? (
-                <button
-                  className={`${lineClassName(targetLine, currentMs, isActive, bodyIndex, focusBodyIndex)} lyric-karaoke-line lyric-karaoke-countdown-target ${item.laneClass}`}
-                  type="button"
-                  onClick={() => seek(targetLine.startMs)}
-                  ref={bindLineRef(targetLine.id)}
-                >
-                  <LineText line={targetLine} currentMs={currentMs} active={isActive} translationMode={translationMode} t={t} />
-                  <LineSubtext line={targetLine} translationMode={translationMode} />
-                </button>
-              ) : null}
-            </div>
-          );
-        }
         const { line, bodyIndex } = item;
         const isActive = activeBodyLine?.id === line.id;
         return (
@@ -389,7 +374,7 @@ function KaraokeStage({
   );
 }
 
-function KaraokeMetaPanel({ lines, currentMs, headingTitle }) {
+function KaraokeMetaPanel({ lines, currentMs, headingTitle, showCountdown, countdown, introMetaEndMs }) {
   const titleText = String(headingTitle || '').trim();
   if (!titleText && !lines.length) {
     return null;
@@ -399,19 +384,21 @@ function KaraokeMetaPanel({ lines, currentMs, headingTitle }) {
     const text = String(line.text || '').trim();
     return text && normalizeMetaText(text) !== normalizedTitle && !looksLikeTitleDuplicate(text, titleText);
   });
-  const metaCount = Math.max(1, detailLines.length + 1);
-  const detailIndex = detailLines.length ? Math.floor(Math.max(0, currentMs) / 2400) % detailLines.length : -1;
-  const activeDetailLine = detailIndex >= 0 ? detailLines[detailIndex] : null;
+  const detailText = detailLines.map((line) => String(line.text || '').trim()).filter(Boolean).join(' / ');
+  const showDetail = Boolean(detailText && currentMs < introMetaEndMs);
+  const showBubble = Boolean(showCountdown && currentMs >= introMetaEndMs);
   return (
     <div className="lyric-karaoke-meta-panel" aria-live="polite">
       <span className="lyric-karaoke-meta-row lyric-karaoke-meta-title-row">
-        <span className="lyric-karaoke-meta-index">1/{metaCount}</span>
         <span className="lyric-karaoke-meta-title">{titleText}</span>
       </span>
-      {activeDetailLine ? (
-        <span className="lyric-karaoke-meta-detail" key={activeDetailLine.id}>
-          <span className="lyric-karaoke-meta-index">{detailIndex + 2}/{metaCount}</span>
-          <span className="lyric-karaoke-meta-line">{activeDetailLine.text}</span>
+      {showDetail ? (
+        <span className="lyric-karaoke-meta-detail">
+          <span className="lyric-karaoke-meta-line">{detailText}</span>
+        </span>
+      ) : showBubble ? (
+        <span className={`lyric-karaoke-meta-detail lyric-karaoke-meta-countdown${countdown?.flashing ? ' lyric-dots-flashing' : ''}${countdown?.exiting ? ' lyric-dots-exiting' : ''}`}>
+          <CountdownDots count={countdown?.count || 0} exiting={Boolean(countdown?.exiting)} />
         </span>
       ) : null}
     </div>

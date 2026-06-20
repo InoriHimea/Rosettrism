@@ -326,3 +326,28 @@
 
 ### 关联 plan
 - `.plan/2026-06-13-quality-to-9.md`
+
+## v2.2.0 - 2026-06-21 - 4.8.20 前端播放与来源选择收口
+
+### 目标
+- 将 `v4.8.19` 之后的歌词播放渲染、来源选择器、Playwright 断言和前端构建产物整理为可发布的 `v4.8.20`。
+- 修正旧 UI/UX 计划中与已发布 `v4.8.19` 冲突的版本映射。
+- 清理 README 路线图中已经完成的 Provider 健康度、缓存维护、结构化 API 错误等旧待办表述。
+
+### 验收条件
+- Karaoke 播放页标题、元信息、倒计时气泡、逐字节点和移动端不溢出行为有自动化断言覆盖。
+- Fetch 页来源选择器在 Provider 数量较多时不遮挡操作区，键盘/点击关闭行为可用。
+- `Cargo.toml`、`Cargo.lock`、`frontend/package.json`、`frontend/package-lock.json` 同步为 `4.8.20`。
+- `frontend/dist` 已由当前源码重建。
+- 必跑验证通过，或记录明确环境阻断：`cargo fmt --check`、`cargo test --no-fail-fast`、`npm run build`、`npm run test:unit`、`npm test`、`npm run verify:meta-stress`、`git diff --check`。
+- `frontend/verification/` 继续作为本地证据目录，不纳入本次提交。
+
+### 实作状态
+- [x] 收口计划建立
+- [x] 版本号与路线图同步
+- [x] 前端构建产物重建
+- [x] 自动化验证完成并记录 Windows 策略阻断
+- [x] 提交、打 tag、推送远端
+
+### 关联 plan
+- `.plan/2026-06-21-frontend-playback-source-closure.md`

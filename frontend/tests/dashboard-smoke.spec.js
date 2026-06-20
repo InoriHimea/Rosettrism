@@ -17,10 +17,25 @@ async function mockApi(page) {
     expires_at: '2026-06-14T00:00:00Z',
     metadata: { title: 'Visual Smoke', artist: 'Rosettrism' },
   };
+  const sources = [
+    { source_name: 'qq', display_name: 'QQ Music', capabilities: { search: true, word_timing: true, translation: true } },
+    { source_name: 'netease', display_name: 'NetEase Cloud Music', capabilities: { search: true, direct_id: true, word_timing: true } },
+    { source_name: 'kugou', display_name: 'KuGou Music', capabilities: { search: true, romanized: true } },
+    { source_name: 'lrclib', display_name: 'LRCLIB', capabilities: { search: true, translation: true } },
+    { source_name: 'migu', display_name: 'Migu Music', capabilities: { search: true, requires_cookie: true } },
+    { source_name: 'utaten', display_name: 'UtaTen', capabilities: { search: true, experimental: true } },
+    { source_name: 'joysound', display_name: 'JOYSOUND', capabilities: { search: true, ruby: true } },
+    { source_name: 'uta-net', display_name: 'Uta-Net', capabilities: { search: true } },
+    { source_name: 'lyrical-nonsense', display_name: 'Lyrical Nonsense', capabilities: { search: true, ruby: true, experimental: true } },
+  ];
 
   await page.route('**/api/health', (route) => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({ ok: true, version: 'smoke', cache: true }),
+  }));
+  await page.route('**/api/sources', (route) => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ sources }),
   }));
   await page.route('**/api/stats', (route) => route.fulfill({
     contentType: 'application/json',
@@ -101,6 +116,18 @@ test('Dashboard loads, Settings token input works, and Fetch renders', async ({ 
   await page.getByRole('button', { name: '获取' }).click();
   await expect(page.getByRole('heading', { name: '获取' })).toBeVisible();
   await expect(page.getByPlaceholder('歌曲名、歌手、URL 或平台 ID')).toBeVisible();
+
+  await page.locator('.advanced-options summary').click();
+  await page.locator('.source-picker-trigger').click();
+  const sourceMenu = page.locator('.source-picker-menu');
+  await expect(sourceMenu).toBeVisible();
+  await expect(sourceMenu.locator('.source-picker-option')).toHaveCount(10);
+
+  const menuBox = await sourceMenu.boundingBox();
+  const actionsBox = await page.locator('.form-actions').boundingBox();
+  expect(menuBox).toBeTruthy();
+  expect(actionsBox).toBeTruthy();
+  expect(menuBox.y + menuBox.height).toBeLessThanOrEqual(actionsBox.y);
 });
 
 test('visual smoke captures dashboard, settings, karaoke stage, and cache detail', async ({ page }) => {
@@ -127,7 +154,8 @@ test('visual smoke captures dashboard, settings, karaoke stage, and cache detail
   await page.getByRole('button', { name: '获取 JSON' }).click();
   const stage = page.getByTestId('karaoke-stage');
   await expect(stage).toBeVisible();
-  await expect(stage.locator('.lyric-current-strip')).toHaveText('Visual Smoke - Rosettrism');
+  await expect(stage.locator('.lyric-current-strip')).toHaveCount(0);
+  await expect(stage.locator('.lyric-karaoke-meta-title')).toHaveText('Visual Smoke - Rosettrism');
   await page.screenshot({ path: 'playwright-artifacts/visual-karaoke-stage.png', ...screenshotOptions });
   await page.getByRole('button', { name: '关闭' }).click();
 

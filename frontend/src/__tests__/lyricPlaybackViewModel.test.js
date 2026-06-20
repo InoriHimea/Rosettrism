@@ -53,6 +53,23 @@ test('karaoke lanes keep two alternating rows and countdown on target lane', () 
   assert.equal(countdown[0].targetLine.id, 'c');
 });
 
+test('karaoke title metadata is rendered once and body lines keep one row', () => {
+  const lines = [
+    { id: 'meta-title-1', text: 'Demo Title - Artist', startMs: 0, endMs: 1000, words: [] },
+    { id: 'credit-1', text: 'Lyricist: Sample', startMs: 1000, endMs: 2000, words: [] },
+    { id: 'credit-2', text: 'Composer: Sample', startMs: 2000, endMs: 3000, words: [] },
+    { id: 'body-1', text: 'first line', startMs: 3000, endMs: 5000, words: [{ text: 'first' }, { text: 'line' }] },
+  ];
+
+  const intro = buildIntroMetaLines(lines.slice(0, 3), 6000);
+  assert.equal(intro.length, 3);
+  assert.equal(intro[0].text, 'Demo Title - Artist');
+  assert.equal(intro[1].text, 'Lyricist: Sample');
+  assert.equal(intro[2].text, 'Composer: Sample');
+  assert.equal(intro.every((line) => line.isMeta), true);
+  assert.equal(intro.every((line) => line.words.length === 0), true);
+});
+
 test('countdown distinguishes metadata intro, short gaps, interludes, and exiting bubble', () => {
   const lines = [
     { id: 'first', startMs: 7200, endMs: 9000 },

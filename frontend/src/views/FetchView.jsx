@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { RefreshCw, Search, Sparkles, X } from 'lucide-react';
+import { Check, ChevronDown, RefreshCw, Search, Sparkles, X } from 'lucide-react';
 import { LyricPlaybackView } from '../LyricPlaybackView.jsx';
 import { normalizeLyricPayload } from '../lyricPlayback.js';
 import { apiErrorAdvice, hasProviderWarning, normalizeApiError } from '../api/errors.js';
@@ -87,16 +87,15 @@ export function FetchView({
         <details className="advanced-options">
           <summary>{t.advancedOptions}</summary>
           <div className="controls">
-            <label className="field-label">
-              {t.source}
-              <select value={source} onChange={(event) => setSource(event.target.value)}>
-                {sourceOptions.map((option) => (
-                  <option value={option.value} key={option.value || 'aggregate'} title={option.description}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="field-label">
+              <span className="field-title">{t.source}</span>
+              <SourcePicker
+                value={source}
+                options={sourceOptions}
+                onChange={setSource}
+                label={t.source}
+              />
+            </div>
             <label className="field-label">
               {t.format}
               <select value={format} onChange={(event) => setFormat(event.target.value)} disabled={!source}>
@@ -442,13 +441,96 @@ function buildSourceOptions(providerSources, t) {
           source.auth === 'required_token' ? t.requiresToken : null,
         ].filter(Boolean);
         const suffix = [...caps, ...flags].join(' · ');
+        const displaySuffix = suffix.replace(/\s\u8def\s/g, ' / ');
         return {
           value: source.source_name,
-          label: `${source.display_name || source.source_name}${suffix ? ` (${suffix})` : ''}`,
-          description: `${source.source_name}: ${suffix || t.noSpecialRequirements || 'standard provider'}`,
+          label: `${source.display_name || source.source_name}${displaySuffix ? ` (${displaySuffix})` : ''}`,
+          description: `${source.source_name}: ${displaySuffix || t.noSpecialRequirements || 'standard provider'}`,
         };
       }),
   ];
+}
+
+function SourcePicker({ value, options, onChange, label, disabled = false }) {
+  const wrapperRef = useRef(null);
+  const [open, setOpen] = useState(false);
+  const selectedOption = options.find((option) => option.value === value) || options[0] || null;
+  const menuId = 'source-picker-menu';
+
+  useEffect(() => {
+    if (disabled) {
+      setOpen(false);
+    }
+  }, [disabled]);
+
+  useEffect(() => {
+    function handlePointerDown(event) {
+      if (!wrapperRef.current || wrapperRef.current.contains(event.target)) {
+        return;
+      }
+      setOpen(false);
+    }
+
+    function handleEscape(event) {
+      if (event.key === 'Escape') {
+        setOpen(false);
+      }
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown, true);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown, true);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, []);
+
+  function choose(nextValue) {
+    onChange(nextValue);
+    setOpen(false);
+  }
+
+  return (
+    <div className={`source-picker${open ? ' source-picker-open' : ''}`} ref={wrapperRef}>
+      <button
+        className="source-picker-trigger"
+        type="button"
+        onClick={() => setOpen((state) => !state)}
+        disabled={disabled}
+        aria-expanded={open}
+        aria-controls={menuId}
+        aria-haspopup="listbox"
+        title={selectedOption?.description || label}
+      >
+        <span className="source-picker-trigger-label">{selectedOption?.label || label}</span>
+        <ChevronDown size={16} />
+      </button>
+      {open ? (
+        <div className="source-picker-menu" id={menuId} role="listbox" aria-label={label}>
+          {options.map((option) => {
+            const selected = option.value === value;
+            return (
+              <button
+                key={option.value || 'aggregate'}
+                type="button"
+                className={`source-picker-option${selected ? ' source-picker-option-selected' : ''}`}
+                onClick={() => choose(option.value)}
+                role="option"
+                aria-selected={selected}
+                title={option.description}
+              >
+                <span className="source-picker-option-main">
+                  <span className="source-picker-option-label">{option.label}</span>
+                  <small>{option.description}</small>
+                </span>
+                {selected ? <Check size={14} aria-hidden="true" /> : null}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function capabilityBadges(capabilities, t) {

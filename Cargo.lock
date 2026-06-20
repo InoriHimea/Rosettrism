@@ -1820,7 +1820,7 @@ dependencies = [
 
 [[package]]
 name = "rosettrism"
-version = "4.8.19"
+version = "4.8.20"
 dependencies = [
  "anyhow",
  "assert_cmd",

@@ -59,10 +59,15 @@ for (const fixture of multilingualLyricFixtures) {
     const dialog = page.locator('.result-dialog');
     await expect(dialog).toBeVisible();
     await expect(page.getByTestId('karaoke-stage')).toBeVisible();
-    await expect(dialog.locator('.lyric-current-strip')).toContainText(fixture.title);
+    await expect(dialog.locator('.lyric-current-strip')).toHaveCount(0);
+    await expect(dialog.locator('.lyric-karaoke-meta-index')).toHaveCount(0);
+    await expect(dialog.locator('.lyric-karaoke-meta-title')).toBeVisible();
+    await expect(dialog.locator('.lyric-karaoke-meta-title').first()).toContainText(fixture.title);
+    await expect(dialog.locator('.lyric-karaoke-meta-title').first()).toHaveCSS('text-align', 'center');
     const firstWordLine = fixture.document.lines.find((line) => line.words?.length);
     await seek(dialog, firstWordLine.start_ms + 300);
     await expect(dialog.locator('.lyric-word').first()).toBeVisible();
+    await expect(dialog.locator('.lyric-karaoke-line .lyric-words').first()).toHaveCSS('white-space', 'nowrap');
 
     if (fixture.searchExtra?.singing_annotations?.length) {
       await seek(dialog, 1800);
@@ -110,6 +115,10 @@ test('multilingual lyric playback stays within mobile viewport', async ({ page }
     const box = await controls.nth(index).boundingBox();
     expect(box?.height || 0).toBeGreaterThanOrEqual(32);
   }
+
+  const firstWordLine = fixture.document.lines.find((line) => line.words?.length);
+  await seek(page.locator('.result-dialog'), firstWordLine.start_ms + 300);
+  await expect(page.locator('.lyric-karaoke-line .lyric-words').first()).toHaveCSS('white-space', 'nowrap');
 });
 
 async function seek(dialog, ms) {

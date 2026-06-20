@@ -321,24 +321,24 @@ The project still benefits from feature iteration and optimization. Recommended 
 
 ### Short term
 
-- Add server/API end-to-end tests for token handling, `/api/cache/:id`, `/api/runs`, and AI score output.
-- Standardize API errors as `{ code, message, details, retryable }` so the dashboard can show better recovery actions.
-- Add a lightweight plan/requirement consistency check for development workflow hygiene.
-- Review AI scoring records for privacy, masking, and payload-size limits.
+- Finish the dashboard playback polish now tracked as `v4.8.20`: karaoke metadata, countdown bubbles, mobile overflow checks, source picker ergonomics, and updated visual evidence.
+- Expand HTTP-level API tests around provider health, cache export/prune/vacuum, AI score history, and structured error responses.
+- Keep API errors consistently shaped as `{ code, message, details, retryable }` across all routes and provider warning paths.
+- Review AI scoring records for privacy masking, prompt-size limits, and clearer operator guidance.
 
 ### Medium term
 
-- Add cache maintenance commands for prune, export, vacuum, and migration status.
-- Build provider health metrics from `fetch_runs`, including success rate, warning rate, latency, and recent failures.
 - Support AI scoring replay/comparison across model or prompt changes.
 - Maintain schema changelog, golden snapshots, and explicit compatibility rules.
+- Finish the design-token and component-consistency pass for buttons, fields, badges, dialogs, and focus states.
+- Improve Settings into grouped controls for language, security token, AI selection, lyric playback, and cache information.
 
 ### Long term
 
 - Deepen the dashboard visual system with themes, motion presets, and richer karaoke-stage effects.
-- Explore plugin-style provider/decoder metadata, rate limits, and capability declarations.
+- Formalize plugin-style provider/decoder metadata, rate-limit policy, and capability declarations.
 - Generate client contract packages from JSON Schema for TypeScript, Kotlin, or Swift.
-- Add deployment security features such as token rotation, read-only/admin tokens, CORS allowlists, and reverse-proxy examples.
+- Add deployment security features such as token rotation, read-only/admin token, CORS allowlists, and reverse-proxy examples.
 
 ## Development
 

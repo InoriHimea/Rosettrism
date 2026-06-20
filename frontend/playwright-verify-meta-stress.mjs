@@ -1,4 +1,4 @@
-import { chromium } from '@playwright/test';
+﻿import { chromium } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
@@ -288,18 +288,18 @@ async function activeTextSample(ms) {
   await seek(ms);
   return page.evaluate(() => ({
     active: [...document.querySelectorAll('.lyric-line-active')].map((node) => ({ text: node.textContent.trim(), className: node.className })),
-    countdownRows: [...document.querySelectorAll('.lyric-line-countdown')].map((node) => ({ text: node.textContent.trim(), className: node.className })),
+    countdownRows: [...document.querySelectorAll('.lyric-karaoke-meta-countdown')].map((node) => ({ text: node.textContent.trim(), className: node.className })),
     karaokeItems: [...document.querySelectorAll('.lyric-karaoke-lines .lyric-karaoke-line')].map((node) => ({ text: node.textContent.trim(), className: node.className })),
     directKaraokeItems: [...document.querySelectorAll('.lyric-karaoke-lines > .lyric-karaoke-line')].map((node) => ({ text: node.textContent.trim(), className: node.className })),
     metaPanels: [...document.querySelectorAll('.lyric-karaoke-meta-panel')].map((node) => ({ text: node.textContent.trim(), className: node.className })),
-    countdownCount: document.querySelectorAll('.lyric-line-countdown .lyric-gap-dot-active').length,
-    poppingCount: document.querySelectorAll('.lyric-line-countdown .lyric-gap-dot-popping').length,
-    goneCount: document.querySelectorAll('.lyric-line-countdown .lyric-gap-dot-gone').length,
-    exitingCount: document.querySelectorAll('.lyric-line-countdown.lyric-dots-exiting').length,
-    dotBackgrounds: [...document.querySelectorAll('.lyric-line-countdown .lyric-gap-dot-active, .lyric-line-countdown .lyric-gap-dot-popping')].map((dot) => getComputedStyle(dot).backgroundImage),
-    dotAnimations: [...document.querySelectorAll('.lyric-line-countdown .lyric-gap-dot-popping')].map((dot) => getComputedStyle(dot).animationName),
-    ringAnimations: [...document.querySelectorAll('.lyric-line-countdown .lyric-gap-dot-popping')].map((dot) => getComputedStyle(dot, '::before').animationName),
-    fragmentAnimations: [...document.querySelectorAll('.lyric-line-countdown .lyric-gap-dot-popping')].map((dot) => getComputedStyle(dot, '::after').animationName),
+    countdownCount: document.querySelectorAll('.lyric-karaoke-meta-countdown .lyric-gap-dot-active').length,
+    poppingCount: document.querySelectorAll('.lyric-karaoke-meta-countdown .lyric-gap-dot-popping').length,
+    goneCount: document.querySelectorAll('.lyric-karaoke-meta-countdown .lyric-gap-dot-gone').length,
+    exitingCount: document.querySelectorAll('.lyric-karaoke-meta-countdown.lyric-dots-exiting').length,
+    dotBackgrounds: [...document.querySelectorAll('.lyric-karaoke-meta-countdown .lyric-gap-dot-active, .lyric-karaoke-meta-countdown .lyric-gap-dot-popping')].map((dot) => getComputedStyle(dot).backgroundImage),
+    dotAnimations: [...document.querySelectorAll('.lyric-karaoke-meta-countdown .lyric-gap-dot-popping')].map((dot) => getComputedStyle(dot).animationName),
+    ringAnimations: [...document.querySelectorAll('.lyric-karaoke-meta-countdown .lyric-gap-dot-popping')].map((dot) => getComputedStyle(dot, '::before').animationName),
+    fragmentAnimations: [...document.querySelectorAll('.lyric-karaoke-meta-countdown .lyric-gap-dot-popping')].map((dot) => getComputedStyle(dot, '::after').animationName),
   }));
 }
 
@@ -329,8 +329,18 @@ async function activeMetaSample(ms) {
       clientWidth: node.clientWidth,
       whiteSpace: textNode ? getComputedStyle(textNode).whiteSpace : getComputedStyle(node).whiteSpace,
       title: node.querySelector('.lyric-karaoke-meta-title')?.textContent?.trim() || '',
-      detail: node.querySelector('.lyric-karaoke-meta-detail')?.textContent?.trim() || '',
+      detail: node.querySelector('.lyric-karaoke-meta-line')?.textContent?.trim() || '',
+      countdownVisible: Boolean(node.querySelector('.lyric-karaoke-meta-countdown')),
+      titleCentered: (() => {
+        const title = node.querySelector('.lyric-karaoke-meta-title');
+        if (!title) return false;
+        const titleRect = title.getBoundingClientRect();
+        const panelRect = node.getBoundingClientRect();
+        return Math.abs((titleRect.left + titleRect.width / 2) - (panelRect.left + panelRect.width / 2)) <= 3;
+      })(),
+      hasMetaIndex: Boolean(node.querySelector('.lyric-karaoke-meta-index')),
       directKaraokeItems: document.querySelectorAll('.lyric-karaoke-lines > .lyric-karaoke-line').length,
+      detailRows: [...document.querySelectorAll('.lyric-karaoke-meta-line')].map((item) => item.textContent.trim()),
     };
   }, ms);
 }
@@ -344,12 +354,13 @@ for (const sample of metaSamples) {
   requirePass(!sample.className.includes('lyric-karaoke-line'), 'META_SHOULD_NOT_JOIN_KARAOKE_LANES', sample);
   requirePass(sample.directKaraokeItems === 0, 'META_SHOULD_NOT_RENDER_IN_DUAL_LANES', sample);
   requirePass(sample.whiteSpace === 'nowrap', 'META_LINE_WRAPPED', sample);
-  requirePass(sample.height <= 60, 'META_LINE_TOO_TALL', sample);
+  requirePass(sample.height <= 76, 'META_LINE_TOO_TALL', sample);
   requirePass(sample.title.includes(MOCK_SEARCH.results[0].title), 'META_TITLE_SHOULD_STAY_VISIBLE', sample);
+  requirePass(sample.titleCentered, 'META_TITLE_SHOULD_BE_CENTERED', sample);
+  requirePass(!sample.hasMetaIndex, 'META_INDEX_SHOULD_BE_REMOVED', sample);
 }
-requirePass(metaSamples.some((sample) => sample.detail.includes('作词')), 'META_LYRICIST_LINE_MISSING', { metaSamples });
-requirePass(metaSamples.some((sample) => sample.detail.includes('作曲')), 'META_COMPOSER_LINE_MISSING', { metaSamples });
-requirePass(metaSamples.some((sample) => sample.detail.includes('编曲')), 'META_ARRANGER_LINE_MISSING', { metaSamples });
+requirePass(metaSamples.some((sample) => sample.detail.includes('作词') && sample.detail.includes('作曲') && sample.detail.includes('编曲')), 'META_COMBINED_LINE_MISSING', { metaSamples });
+requirePass(metaSamples.every((sample) => sample.detailRows.length <= 1), 'META_DETAIL_SHOULD_RENDER_ONCE', { metaSamples });
 requirePass(metaSamples.every((sample) => !sample.detail.includes('海 阔 天 空')), 'BODY_SHOULD_NOT_RENDER_DURING_METADATA', { metaSamples });
 const titleOccurrences = metaSamples.filter((sample) => sample.title.includes(MOCK_SEARCH.results[0].title)).length;
 requirePass(titleOccurrences === metaSamples.length, 'TITLE_SHOULD_REMAIN_VISIBLE_DURING_METADATA', { titleOccurrences, metaSamples });
@@ -357,15 +368,15 @@ requirePass(titleOccurrences === metaSamples.length, 'TITLE_SHOULD_REMAIN_VISIBL
 const introCountdownSample = await activeTextSample(200);
 requirePass(introCountdownSample.countdownCount === 0, 'INTRO_COUNTDOWN_SHOULD_NOT_APPEAR_DURING_METADATA', introCountdownSample);
 requirePass(introCountdownSample.metaPanels.length === 1 && introCountdownSample.directKaraokeItems.length === 0, 'METADATA_SHOULD_STAY_ABOVE_KARAOKE_LANES', introCountdownSample);
-const countdownSample = await activeTextSample(6200);
+const countdownSample = await activeTextSample(6500);
 requirePass(countdownSample.countdownCount === 1, 'COUNTDOWN_AFTER_META_WRONG', countdownSample);
-requirePass(countdownSample.countdownRows[0]?.className.includes('lyric-karaoke-lane-top') && countdownSample.countdownRows[0]?.className.includes('lyric-karaoke-line-left'), 'INTRO_COUNTDOWN_SHOULD_FOLLOW_TARGET_LANE', countdownSample);
+requirePass(countdownSample.countdownRows[0]?.className.includes('lyric-karaoke-meta-countdown'), 'INTRO_COUNTDOWN_SHOULD_USE_META_ROW', countdownSample);
 requirePass(countdownSample.dotBackgrounds.some((background) => background.includes('47, 158, 132') || background.includes('242, 211, 111')), 'COUNTDOWN_BUBBLE_COLOR_NOT_REFRESHED', countdownSample);
 const shortGapSample = await activeTextSample(10200);
 requirePass(shortGapSample.countdownCount === 0, 'SHORT_GAP_SHOULD_NOT_SHOW_COUNTDOWN', shortGapSample);
 const interludeSample = await activeTextSample(17000);
 requirePass(interludeSample.countdownCount === 3 && interludeSample.poppingCount === 0, 'INTERLUDE_COUNTDOWN_MISSING', interludeSample);
-requirePass(interludeSample.karaokeItems.length <= 2 && interludeSample.countdownRows[0]?.className.includes('lyric-karaoke-lane-bottom') && interludeSample.countdownRows[0]?.className.includes('lyric-karaoke-line-right'), 'COUNTDOWN_SHOULD_FOLLOW_TARGET_KARAOKE_LANE', interludeSample);
+requirePass(interludeSample.karaokeItems.length <= 2 && interludeSample.countdownRows[0]?.className.includes('lyric-karaoke-meta-countdown'), 'COUNTDOWN_SHOULD_USE_META_ROW', interludeSample);
 const twoDotSample = await activeTextSample(18000);
 requirePass(twoDotSample.countdownCount === 2 && twoDotSample.poppingCount === 1 && twoDotSample.goneCount === 0, 'COUNTDOWN_THIRD_DOT_SHOULD_POP_ALONE', twoDotSample);
 const oneDotSample = await activeTextSample(19000);

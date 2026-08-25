@@ -51,7 +51,7 @@
 ### Task Checklist
 
 - [x] `cargo fmt --check`
-- [ ] `cargo test --no-fail-fast`
+- [x] `cargo test --no-fail-fast`（2026-08-25 复核通过：165/165，当年 os error 4551 策略阻塞已消失）
 - [x] `npm run build`
 - [x] `npm run test:unit`
 - [x] `npm test`

@@ -1,3 +1,5 @@
+import { assessLyricQuality } from './lyricQuality.js';
+
 export const defaultLyricSettings = {
   colorMode: 'gradient',
   colorPreset: 'qq-prism',
@@ -6,7 +8,8 @@ export const defaultLyricSettings = {
   stageBackgroundColor: '#fff0a6',
   motionPreset: 'cinematic',
   lowDistraction: false,
-  ambientEffects: true,
+  ambientEffects: false,
+  stage3D: false,
 };
 
 const gradients = {
@@ -46,11 +49,11 @@ export function resolveLyricGradient(preset) {
 
 export function normalizeLyricPayload(payload) {
   if (!payload || typeof payload !== 'object') {
-    return { playable: false, lines: [], annotations: [], warnings: [] };
+    return buildUnplayableLyric();
   }
 
   if (payload.raw || payload.format === 'raw') {
-    return { playable: false, raw: payload.raw || '', lines: [], annotations: [], warnings: [] };
+    return buildUnplayableLyric(payload.raw || '');
   }
 
   const unified = payload.unified || (isUnifiedLyric(payload) ? payload : null) || (isUnifiedLyric(payload.document) ? payload.document : null);
@@ -72,7 +75,7 @@ function isUnifiedLyric(value) {
 
 function normalizeEntryPreview(entry) {
   if (!entry || typeof entry !== 'object') {
-    return { playable: false, lines: [], annotations: [], warnings: [] };
+    return buildUnplayableLyric();
   }
   const unified = entry.unified || entry.extra?.unified || (isUnifiedLyric(entry.document) ? entry.document : null);
   if (unified) {
@@ -82,7 +85,22 @@ function normalizeEntryPreview(entry) {
   if (document?.lines) {
     return normalizeLyricDocument(document, { selectedEntry: entry, result: entry });
   }
-  return { playable: false, lines: [], annotations: normalizeAnnotations(collectAnnotationSources({ selectedEntry: entry, result: entry })), warnings: [] };
+  return buildUnplayableLyric('', normalizeAnnotations(
+    collectAnnotationSources({ selectedEntry: entry, result: entry }),
+  ));
+}
+
+function buildUnplayableLyric(raw = '', annotations = []) {
+  const quality = assessLyricQuality({ lines: [], annotations, raw });
+  return {
+    playable: false,
+    raw,
+    lines: [],
+    annotations,
+    warnings: [],
+    quality,
+    capabilities: quality.capabilities,
+  };
 }
 
 export function normalizeUnifiedLyric(unified, context = {}) {
@@ -201,7 +219,10 @@ function isAnnotationLike(value, forced = false) {
 }
 
 function buildNormalizedLyric(base, lines, annotations) {
-  const playableLines = lines.filter((line) => Number.isFinite(line.startMs));
+  const quality = assessLyricQuality({ lines, annotations });
+  const playableLines = lines.filter((line) => (
+    line.timingExplicit !== false && Number.isFinite(line.startMs)
+  ));
   const titleParts = inferTitleParts(base, playableLines[0]);
   const displayTitle = titleParts.displayTitle || formatDisplayTitle(titleParts.title, titleParts.artist, titleParts.artistAlias);
   const lastLine = playableLines[playableLines.length - 1];
@@ -213,7 +234,9 @@ function buildNormalizedLyric(base, lines, annotations) {
 
   return {
     ...base,
-    playable: playableLines.length > 0,
+    playable: quality.playable && playableLines.length > 0,
+    quality,
+    capabilities: quality.capabilities,
     source: formatSourceName(base.source),
     inputFormat: formatInputFormat(base.inputFormat || inferInputFormatFromLines(playableLines)),
     title: titleParts.title,
@@ -511,13 +534,16 @@ function nearestTimedLine(lines, startMs) {
 }
 
 function normalizeLine(line, index, trackId) {
-  const startMs = Number(line.start_ms ?? line.startMs ?? 0);
+  const rawStartMs = line.start_ms ?? line.startMs;
+  const timingExplicit = Number.isFinite(Number(rawStartMs));
+  const startMs = timingExplicit ? Number(rawStartMs) : Number.NaN;
   const durationMs = optionalNumber(line.duration_ms ?? line.durationMs);
   const text = line.text || '';
   const words = normalizeWords(line.words || line.chars || line.characters || line.extra?.words || [], startMs, index);
   return {
-    id: `${trackId}-${index}-${startMs}`,
+    id: `${trackId}-${index}-${timingExplicit ? startMs : 'untimed'}`,
     startMs,
+    timingExplicit,
     durationMs,
     endMs: durationMs ? startMs + durationMs : startMs,
     text,
@@ -593,8 +619,14 @@ function normalizeWords(words, lineStartMs, lineIndex) {
 
 export function deriveLineEndTimes(lines) {
   return lines.map((line, index) => {
+    if (line.timingExplicit === false || !Number.isFinite(line.startMs)) {
+      return { ...line, endMs: Number.NaN };
+    }
     const next = lines[index + 1];
-    const fallbackEnd = next?.startMs && next.startMs > line.startMs ? next.startMs : line.startMs + 4200;
+    const nextStart = Number.isFinite(next?.startMs) ? next.startMs : null;
+    const fallbackEnd = nextStart !== null && nextStart > line.startMs
+      ? nextStart
+      : line.startMs + 4200;
     const endMs = line.durationMs ? line.startMs + line.durationMs : fallbackEnd;
     return { ...line, endMs };
   });

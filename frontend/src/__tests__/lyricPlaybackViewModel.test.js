@@ -3,11 +3,17 @@ import assert from 'node:assert/strict';
 import {
   annotationLabelState,
   buildIntroMetaLines,
+  buildPlaybackFrameState,
+  findActiveTimedLineIndex,
+  findLineAtOrBeforeIndex,
+  findNextTimedLineIndex,
   formatArtistLabel,
   karaokeLaneItems,
   karaokePlaceholderLanes,
+  lineAnnotationLabelIds,
   lyricCountdown,
   lyricLineProgress,
+  lyricProgressStyle,
   shouldReserveBreathGap,
   translationModeLabel,
   visibleWordAnnotations,
@@ -43,14 +49,21 @@ test('karaoke lanes keep two alternating rows and countdown on target lane', () 
     { id: 'c', startMs: 10000, endMs: 12000 },
   ];
 
-  const lanes = karaokeLaneItems(bodyLines, bodyLines[1], 1, false, {});
+  const handoff = karaokeLaneItems(bodyLines, bodyLines[1], 1, false, {}, 3200, 'singing');
+  assert.deepEqual(handoff.map((item) => item.key), ['karaoke-lane-top', 'karaoke-lane-bottom']);
+  assert.deepEqual(handoff.map((item) => item.role), ['leaving', 'active']);
+
+  const lanes = karaokeLaneItems(bodyLines, bodyLines[1], 1, false, {}, 3500, 'singing');
   assert.deepEqual(lanes.map((item) => item.lanePositionClass), ['lyric-karaoke-lane-top', 'lyric-karaoke-lane-bottom']);
+  assert.deepEqual(lanes.map((item) => item.role), ['upcoming', 'active']);
   assert.deepEqual(karaokePlaceholderLanes(lanes), []);
 
-  const countdown = karaokeLaneItems(bodyLines, null, 1, true, { targetLineId: 'c' });
+  const countdown = karaokeLaneItems(bodyLines, null, 2, true, { targetLineId: 'c' }, 7000, 'interlude');
   assert.equal(countdown[0].kind, 'countdown');
+  assert.equal(countdown[0].role, 'countdown');
   assert.equal(countdown[0].lanePositionClass, 'lyric-karaoke-lane-top');
   assert.equal(countdown[0].targetLine.id, 'c');
+  assert.equal(countdown[1].role, 'leaving');
 });
 
 test('karaoke title metadata is rendered once and body lines keep one row', () => {
@@ -102,6 +115,21 @@ test('annotation label selection suppresses duplicates by anchor and priority', 
   assert.equal(state.rows.get('long'), 1);
 });
 
+test('dense line annotations degrade to three separated labels by priority', () => {
+  const words = [
+    { annotations: [{ id: 'stress-a', type: 'stress', anchorPercent: 50 }] },
+    { annotations: [{ id: 'breath-a', type: 'breath', anchorPercent: 10 }] },
+    { annotations: [{ id: 'long-a', type: 'long_tone', anchorPercent: 50 }] },
+    { annotations: [{ id: 'slide-a', type: 'portamento_up', anchorPercent: 90 }] },
+    { annotations: [{ id: 'breath-b', type: 'breath', anchorPercent: 50 }] },
+  ];
+
+  assert.deepEqual(
+    [...lineAnnotationLabelIds(words)],
+    ['stress-a', 'breath-a', 'breath-b'],
+  );
+});
+
 test('word annotation visibility, breath spacing, and progress are deterministic', () => {
   const shared = { id: 'same-marker', type: 'stress', anchorPercent: 50 };
   const words = [
@@ -113,6 +141,80 @@ test('word annotation visibility, breath spacing, and progress are deterministic
   assert.equal(shouldReserveBreathGap(words, 1, words[1].annotations), true);
   assert.equal(wordProgress(words[1], 2000), 0.5);
   assert.equal(lyricLineProgress({ startMs: 1000, endMs: 3000 }, 2500), 0.75);
+  assert.deepEqual(lyricProgressStyle(0.5), {
+    '--lyric-progress': '0.5',
+    '--lyric-fill-end': '50%',
+  });
+});
+
+test('timed line lookup uses stable boundaries before, during, between, and after lines', () => {
+  const lines = [
+    { id: 'a', startMs: 1000, endMs: 2000 },
+    { id: 'b', startMs: 3000, endMs: 4000 },
+    { id: 'c', startMs: 5000, endMs: 6000 },
+  ];
+
+  assert.equal(findLineAtOrBeforeIndex(lines, 500), -1);
+  assert.equal(findLineAtOrBeforeIndex(lines, 3500), 1);
+  assert.equal(findNextTimedLineIndex(lines, 3500), 2);
+  assert.equal(findNextTimedLineIndex(lines, 6000), -1);
+  assert.equal(findActiveTimedLineIndex(lines, 1000), 0);
+  assert.equal(findActiveTimedLineIndex(lines, 2000), -1);
+  assert.equal(findActiveTimedLineIndex(lines, 3999), 1);
+});
+
+test('playback frame state is deterministic across metadata, countdown, singing, interlude, seek, and end', () => {
+  const introMetaLines = [
+    { id: 'intro-title', text: 'Title', startMs: 0, endMs: 2000, words: [], annotations: [], isMeta: true },
+    { id: 'intro-credit', text: 'Credit', startMs: 2000, endMs: 4000, words: [], annotations: [], isMeta: true },
+  ];
+  const annotation = { id: 'stress-a', type: 'stress', anchorPercent: 50 };
+  const bodyLines = [
+    {
+      id: 'a',
+      startMs: 7200,
+      endMs: 9200,
+      annotations: [],
+      words: [
+        { id: 'a-1', text: 'A', startMs: 7200, endMs: 8200, annotations: [annotation] },
+        { id: 'a-2', text: 'B', startMs: 8200, endMs: 9200, annotations: [] },
+      ],
+    },
+    { id: 'b', startMs: 15000, endMs: 17000, annotations: [], words: [] },
+  ];
+  const input = { bodyLines, introMetaLines, durationMs: 18000, introMetaEndMs: 4000 };
+
+  assert.equal(buildPlaybackFrameState({ ...input, currentMs: 1000 }).phase, 'metadata');
+  assert.equal(buildPlaybackFrameState({ ...input, currentMs: 5000 }).phase, 'countdown');
+
+  const firstLineBoundary = buildPlaybackFrameState({ ...input, currentMs: 7200 });
+  assert.equal(firstLineBoundary.phase, 'singing');
+  assert.equal(firstLineBoundary.countdown.kind, 'intro');
+  assert.equal(firstLineBoundary.countdown.exiting, true);
+
+  const singing = buildPlaybackFrameState({ ...input, currentMs: 7700 });
+  assert.equal(singing.phase, 'singing');
+  assert.equal(singing.activeBodyIndex, 0);
+  assert.equal(singing.activeLineProgress, 0.25);
+  assert.deepEqual(singing.activeWordProgress, [0.5, 0]);
+  assert.deepEqual(singing.visibleAnnotations.map((item) => item.id), ['stress-a']);
+  assert.deepEqual(singing.laneItems.map((item) => item.bodyIndex), [0, 1]);
+
+  const handoff = buildPlaybackFrameState({ ...input, currentMs: 15080 });
+  assert.deepEqual(handoff.laneItems.map((item) => item.key), ['karaoke-lane-top', 'karaoke-lane-bottom']);
+  assert.deepEqual(handoff.laneItems.map((item) => item.role), ['leaving', 'active']);
+
+  const interlude = buildPlaybackFrameState({ ...input, currentMs: 12000 });
+  assert.equal(interlude.phase, 'interlude');
+  assert.equal(interlude.nextBodyIndex, 1);
+  assert.equal(interlude.countdown.kind, 'interlude');
+  assert.deepEqual(interlude.laneItems.map((item) => item.role), ['leaving', 'countdown']);
+
+  const seekA = buildPlaybackFrameState({ ...input, currentMs: 16000 });
+  const seekB = buildPlaybackFrameState({ ...input, currentMs: 16000 });
+  assert.deepEqual(seekA, seekB);
+  assert.equal(seekA.activeBodyIndex, 1);
+  assert.equal(buildPlaybackFrameState({ ...input, currentMs: 18000 }).phase, 'ended');
 });
 
 function pickCountdownFields(countdown) {

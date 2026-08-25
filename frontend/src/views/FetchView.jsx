@@ -410,7 +410,10 @@ function ResultDialog({ t, entry, detail, detailData, busy, lyricSettings, scrol
             <LyricPlaybackView lyric={lyricPlayback} settings={lyricSettings} t={t} />
           </div>
         ) : detailData ? (
-          <p className="hint">{t.lyricPreviewUnavailable}</p>
+          <div className="lyric-quality-fallback" role="status">
+            <strong>{t.lyricPreviewUnavailable}</strong>
+            <p>{qualityFallbackMessage(lyricPlayback.quality, t)}</p>
+          </div>
         ) : null}
         <details className="detail-section raw-json-section" open={!lyricPlayback.playable}>
           <summary>{busy ? t.fetching : t.rawJson}</summary>
@@ -422,6 +425,16 @@ function ResultDialog({ t, entry, detail, detailData, busy, lyricSettings, scrol
   );
 }
 
+
+function qualityFallbackMessage(quality, t) {
+  const messages = {
+    unsynced: t.lyricQualityUnsyncedHint,
+    invalid: t.lyricQualityInvalidHint,
+  };
+  return messages[quality?.timingLevel]
+    || t.lyricQualityUnavailableHint
+    || '当前数据不包含可信的同步时间轴。';
+}
 
 function buildSourceOptions(providerSources, t) {
   const aggregate = { value: '', label: t.aggregate, description: t.aggregate };

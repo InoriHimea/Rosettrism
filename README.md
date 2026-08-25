@@ -25,6 +25,8 @@ See [docs/completion-audit-2026-06-06.md](docs/completion-audit-2026-06-06.md) f
 - **Aggregation and AI traceability**: Aggregated fetches prefer high-quality timed or word-timed lyrics; optional OpenAI-compatible AI selection records model, endpoint, candidate hash, scores, reason, and selected source.
 - **Observability**: Fetch runs record recent queries, sources, modes, statuses, messages, cache hits/stores, provider warnings, AI skips, and no-lyrics outcomes.
 - **Local dashboard**: `rosettrism server` serves an embedded dashboard and HTTP API. Non-local bindings require `ROSETTRISM_SERVER_TOKEN`.
+- **Lyric quality diagnostics**: Playback normalization classifies word-synced, line-synced, unsynced, and invalid timelines, exposes word/multilingual/ruby/annotation capabilities and explainable degradation reasons, and never treats text without timestamps as a fake 0ms synchronized lyric.
+- **Player sessions**: The real-media wrapper supports a play queue, order/repeat-one/repeat-all/shuffle modes, volume and mute, Media Session system controls, retry, and trusted refresh recovery; only explicitly durable, unexpired sources may be persisted.
 
 Rosettrism does **not** implement CAPTCHA bypass, credential harvesting, SSL pinning bypass, private app signing, or non-public protocol automation.
 
@@ -321,7 +323,7 @@ The project still benefits from feature iteration and optimization. Recommended 
 
 ### Short term
 
-- Finish the dashboard playback polish now tracked as `v4.8.20`: karaoke metadata, countdown bubbles, mobile overflow checks, source picker ergonomics, and updated visual evidence.
+- Keep expanding the `v4.8.20` dashboard lyric-playback regression matrix with real QRC data, multilingual fixtures, browser coverage, and reviewed visual baselines.
 - Expand HTTP-level API tests around provider health, cache export/prune/vacuum, AI score history, and structured error responses.
 - Keep API errors consistently shaped as `{ code, message, details, retryable }` across all routes and provider warning paths.
 - Review AI scoring records for privacy masking, prompt-size limits, and clearer operator guidance.

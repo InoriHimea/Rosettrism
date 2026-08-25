@@ -1,7 +1,7 @@
 {
   "name": "rosettrism-dashboard",
   "private": true,
-  "version": "4.8.20",
+  "version": "4.9.0",
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
@@ -9,7 +9,12 @@
     "dev": "vite --host 127.0.0.1",
     "verify:dashboard": "node playwright-verify-dashboard.mjs",
     "verify:meta-stress": "node playwright-verify-meta-stress.mjs",
-    "test": "playwright test tests/dashboard-smoke.spec.js tests/multilingual-lyrics.spec.js",
+    "test": "playwright test tests/dashboard-smoke.spec.js tests/multilingual-lyrics.spec.js tests/lyric-playback-core.spec.js tests/lyric-playback-benchmark.spec.js tests/lyric-playback-release.spec.js tests/media-playback-phase7.spec.js tests/media-playback-phase9.spec.js",
+    "test:playback": "playwright test tests/lyric-playback-core.spec.js tests/multilingual-lyrics.spec.js",
+    "test:playback-benchmark": "playwright test tests/lyric-playback-benchmark.spec.js",
+    "test:playback-release": "playwright test tests/lyric-playback-release.spec.js",
+    "test:media-playback": "playwright test tests/media-playback-phase7.spec.js",
+    "test:media-session": "playwright test tests/media-playback-phase9.spec.js",
     "test:unit": "node --test src/api/__tests__/*.test.js src/__tests__/*.test.js",
     "verify:multilingual-live": "node scripts/capture-multilingual-live.mjs"
   },
@@ -17,11 +22,13 @@
     "@tailwindcss/vite": "^4.1.0",
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "three": "^0.185.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
+    "postcss": "^8.5.25",
     "tailwindcss": "^4.1.0",
-    "vite": "^6.0.0"
+    "vite": "^6.4.3"
   }
 }

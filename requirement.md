@@ -351,3 +351,57 @@
 
 ### 关联 plan
 - `.plan/2026-06-21-frontend-playback-source-closure.md`
+
+## v2.3.0 — 2026-07-28 — QQ 音乐式歌词渲染方向性改进
+
+### 目标
+- 在不复制 QQ 音乐品牌素材、专有资源或私有接口的前提下，对标其成熟歌词播放的通用交互规律。
+- 将当前播放器从“功能齐全的独立预览”升级为可由真实媒体时钟驱动、状态确定、双行稳定接力、逐字贴音的歌词舞台。
+- 收敛背景、粒子、渐变、阴影、活动竖线和标注图例的视觉竞争，确保活动歌词始终是第一视觉焦点。
+- 固化中文、粤语、日语、英语长句，以及翻译、读音、ruby、助唱标注、长空拍和响应式场景的行为契约。
+- 建立专用 playback harness、固定时间点行为断言、人工确认截图 baseline 和性能采样组成的验收闭环。
+
+### 验收条件
+- 播放层提供统一 clock adapter，preview clock 与 audio/media clock 可替换；seek、暂停恢复、后台恢复和重播均从 clock 真值重新计算状态。
+- deterministic playback frame state 统一输出 phase、active/next line、lane、逐字/整行进度、倒计时和可见标注；连续播放 10 分钟无累计时钟漂移。
+- 逐字边界偏差不超过一帧预算或 50ms（取较大值）；seek 后 100ms 内活动行、进度、倒计时和标注一致。
+- 双行 lane 物理位置稳定，下一句提前就位，切行无左右跳位、闪烁或布局塌缩；旧行退场时间控制在 180–320ms。
+- 中文、粤语、日语、英语长句在 390x844、768x1024、1280x720、1440x900 下无横向溢出；移动端主要触控目标不小于 44×44px。
+- 助唱标注贴字但不压字；同锚点和高密度场景按优先级降级；翻译、读音、ruby 和罗马音不导致活动 lane 跳动。
+- 默认舞台为低噪声的 Rosettrism 自有视觉，不以大面积蓝紫或 QQ 音乐皮肤复制作为对标结果；`prefers-reduced-motion` 下歌词状态语义保持完整。
+- 新增歌词专项自动化，不依赖 URL hash 假设导航；截图按 fixture、viewport、固定时间点冻结，并在更新 baseline 前人工审阅。
+- 60 秒自动播放采样无持续掉帧趋势，测试环境内无由歌词渲染造成的 >100ms 长任务；连续进度更新不重渲染无关 Header、Legend 和 Controls。
+
+### 实作状态
+- [x] 当前实现复核与 QQ 音乐式体验差距矩阵
+- [x] P0 播放内核 → P1 舞台行为 → P2 视觉产品化路线确定
+- [x] 阶段任务、量化验收、场景矩阵、风险和改动落点规划
+- [ ] Phase 0：参考证据与 before baseline 冻结
+- [x] Phase 1：clock adapter、状态机与高频渲染解耦
+- [x] Phase 2：稳定双行 lane、逐字边界与长句适配
+- [x] Phase 3：前奏、空拍、助唱标注与多语副行（运行时代码、18/18 单测、隔离构建与 Firefox 浏览器专项分段验收通过，覆盖 12 个场景）
+- [x] Phase 4：低噪声舞台与播放器控件产品化（默认低噪声、文字层级 token、控件主次重排；18/18 单测、Firefox 默认态/移动端/reduced-motion 专项与隔离构建通过）
+- [x] Phase 5：专用自动化、截图 baseline 与性能验收（固定时钟 harness、四 viewport baseline、200 行与 60 时间点性能采样；21/21 单测、Firefox benchmark 7/7、隔离构建通过，Three.js 按需分包）
+- [ ] Phase 6：真实 QQ/QRC 数据 A/B、完整构建与发布收口（真实/逐行/raw 回归、Windows Edge 4/4、Firefox 4/4、Chrome 四项断言、Rust 165/165、正式 dist 重建均通过；待产品负责人确认截图/录屏后签字关闭）
+- [ ] Phase 7：真实媒体播放闭环（media clock、HTMLAudioElement 包装层、本地 WAV harness、Edge/Chrome 各 4/4 通过；Firefox 业务场景完成但 runner 回收异常；正式 Provider 暂无合法音频 URL）
+- [x] Phase 8：歌词质量与数据可信度（`word_timed`/`line_timed`/`unsynced`/`invalid` 分级、能力矩阵、结构诊断、可解释降级和 UI 状态已落地；25/25 单测、Chrome 发布专项 5/5、多语与播放核心 13/13、正式 dist、依赖审计 0 漏洞通过）
+- [x] Phase 9：播放器产品会话能力（会话内核 35/35 单测、Chrome 专项 5/5、歌词核心 13 项全执行完成但 runner 回收返回 1、Rust 165/165、正式 dist、依赖 0 漏洞、格式与文档一致性通过）
+
+### Phase 9 验收追加
+
+- 播放队列和顺序/单曲循环/列表循环/随机模式必须由独立纯函数内核管理，不侵入媒体 clock 和歌词 frame state。
+- 状态恢复只接受当前队列中的 durable 音源；临时签名 URL、过期状态和缺失队列项不得被持久化复活。
+- 音量、静音、倍速、当前歌曲和播放位置可恢复；系统媒体键与页面控件必须映射到同一状态真值。
+- 媒体结束自动切歌、错误重试和组件卸载清理必须有真实音频浏览器回归；歌词质量错误与音频错误分开呈现。
+- 正式 Provider 合法音频 URL 仍为独立前置条件，测试只使用本地 WAV fixture，不接入私有音频接口。
+
+### Phase 8 验收追加
+
+- 质量报告必须区分 `word_timed`、`line_timed`、`unsynced`、`invalid`，并提供稳定诊断码和上下文。
+- 逐行 timing 可降级播放但不得声明逐字能力；raw 或缺失显式时间戳的文本不得伪造同步播放。
+- 检测行倒序/重叠、空文本、逐字倒序/重叠/越界/零时长、标注越界；阻断性问题影响可信度和可播放判断。
+- 真实 QQ/QRC、普通 LRC、raw、多语和异常 timing 自动化通过，现有确定性播放状态机不得回归。
+- 本阶段先在前端 normalization 后建立稳定诊断契约，不立即升级 Unified JSON Schema；协议升级需另行评审兼容性。
+
+### 关联 plan
+- `.plan/2026-07-28-qq-music-lyric-rendering-benchmark.md`

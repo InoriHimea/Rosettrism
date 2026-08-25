@@ -1,53 +1,62 @@
 @import "tailwindcss";
 
 :root {
-  --color-text: #202829;
-  --color-muted: #68736f;
-  --color-bg: #f2f0e8;
-  --color-surface: rgba(255, 253, 248, 0.92);
-  --color-surface-soft: rgba(248, 246, 238, 0.82);
-  --color-border: rgba(83, 93, 87, 0.2);
-  --color-border-soft: rgba(83, 93, 87, 0.13);
-  --color-primary: #d95864;
-  --color-primary-hover: #b9414c;
-  --color-secondary: #edf3ec;
-  --color-accent: #2f9e84;
-  --color-accent-neon: #41b99a;
+  --color-text: #3d4f5c;
+  --color-muted: #8b9caa;
+  --color-bg: #f9f5f9;
+  --color-surface: rgba(255, 250, 255, 0.94);
+  --color-surface-soft: rgba(252, 247, 255, 0.86);
+  --color-border: rgba(150, 130, 180, 0.18);
+  --color-border-soft: rgba(150, 130, 180, 0.1);
+  --color-primary: #ff9ac1;
+  --color-primary-hover: #ff7aab;
+  --color-secondary: #e8f3ff;
+  --color-accent: #7ec8e3;
+  --color-accent-neon: #5fb8d8;
+  --color-code-bg: #101713;
 
-  --color-accent-neon-strong: #54c8a6;
-  --color-accent-neon-soft: rgba(47, 158, 132, 0.16);
-  --color-accent-neon-glow: 0 0 18px rgba(47, 158, 132, 0.28), 0 0 36px rgba(211, 154, 47, 0.14);
-  --glass-panel-strong: linear-gradient(180deg, rgba(255, 253, 248, 0.97), rgba(246, 243, 234, 0.88));
-  --glass-panel-soft: linear-gradient(180deg, rgba(255, 253, 248, 0.74), rgba(239, 245, 234, 0.56));
-  --glass-border: rgba(83, 93, 87, 0.16);
-  --shadow-depth-low: 0 10px 26px rgba(45, 56, 51, 0.1);
-  --shadow-depth-medium: 0 18px 46px rgba(45, 56, 51, 0.14);
-  --shadow-depth-high: 0 30px 78px rgba(45, 56, 51, 0.18);
+  --color-accent-neon-strong: #4eadd1;
+  --color-accent-neon-soft: rgba(126, 200, 227, 0.14);
+  --color-accent-neon-glow: 0 0 18px rgba(126, 200, 227, 0.32), 0 0 36px rgba(255, 182, 193, 0.18);
+  --glass-panel-strong: linear-gradient(180deg, rgba(255, 250, 255, 0.98), rgba(252, 247, 255, 0.92));
+  --glass-panel-soft: linear-gradient(180deg, rgba(255, 250, 255, 0.76), rgba(248, 240, 255, 0.58));
+  --glass-border: rgba(150, 130, 180, 0.14);
+  --shadow-depth-low: 0 8px 24px rgba(150, 130, 180, 0.08);
+  --shadow-depth-medium: 0 16px 40px rgba(150, 130, 180, 0.12);
+  --shadow-depth-high: 0 24px 64px rgba(150, 130, 180, 0.16);
   --motion-instant: 80ms;
   --motion-standard: 280ms;
   --motion-emphasis: 620ms;
-  --status-success: #2f9e75;
-  --status-success-soft: rgba(47, 158, 117, 0.14);
-  --status-warning: #d39a2f;
-  --status-warning-soft: rgba(211, 154, 47, 0.16);
-  --status-danger: #c43c4b;
-  --status-danger-soft: rgba(196, 60, 75, 0.14);
-  --status-info: #2f9e84;
-  --status-info-soft: rgba(47, 158, 132, 0.14);
-  --color-hot: #d39a2f;
-  --color-success: #2f9e75;
-  --color-danger: #c43c4b;
-  --color-danger-soft: #fff0f1;
-  --color-warning-soft: #fff7e8;
-  --gradient-cyber: linear-gradient(135deg, #d95864 0%, #d39a2f 48%, #2f9e84 100%);
-  --gradient-orbital: linear-gradient(rgba(38, 51, 46, 0.045) 1px, transparent 1px), linear-gradient(90deg, rgba(38, 51, 46, 0.04) 1px, transparent 1px), linear-gradient(135deg, #f8f5ed 0%, #edf4ef 48%, #f8eef1 100%);
-  --glass-panel: linear-gradient(180deg, rgba(255, 253, 248, 0.9), rgba(246, 243, 234, 0.72));
+  --status-success: #7ec88a;
+  --status-success-soft: rgba(126, 200, 138, 0.14);
+  --status-warning: #ffb347;
+  --status-warning-soft: rgba(255, 179, 71, 0.16);
+  --status-danger: #ff7b9c;
+  --status-danger-soft: rgba(255, 123, 156, 0.14);
+  --status-info: #7ec8e3;
+  --status-info-soft: rgba(126, 200, 227, 0.14);
+  --color-hot: #ffb6d9;
+  --color-success: #7ec88a;
+  --color-danger: #ff7b9c;
+  --color-danger-soft: #fff0f5;
+  --color-warning-soft: #fff8f0;
+  --gradient-cyber: linear-gradient(135deg, #ff9ac1 0%, #ffb6d9 48%, #7ec8e3 100%);
+  --gradient-orbital: linear-gradient(rgba(150, 130, 180, 0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(150, 130, 180, 0.03) 1px, transparent 1px), linear-gradient(135deg, #faf5ff 0%, #e8f3ff 48%, #fff0f5 100%);
+  --glass-panel: linear-gradient(180deg, rgba(255, 250, 255, 0.92), rgba(252, 247, 255, 0.74));
   --glass-blur: blur(18px);
-  --shadow-glow: 0 18px 46px rgba(45, 56, 51, 0.11), 0 0 0 1px rgba(255, 255, 255, 0.48);
-  --focus-ring: 0 0 0 4px rgba(217, 88, 100, 0.14), 0 0 0 1px rgba(217, 88, 100, 0.62);
+  --shadow-glow: 0 16px 40px rgba(150, 130, 180, 0.1), 0 0 0 1px rgba(255, 255, 255, 0.54);
+  --focus-ring: 0 0 0 4px rgba(255, 154, 193, 0.16), 0 0 0 1px rgba(255, 154, 193, 0.68);
   --motion-fast: 160ms;
   --motion-medium: 240ms;
   --motion-slow: 420ms;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+
   color: var(--color-text);
   background: var(--color-bg);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -67,9 +76,15 @@
   --color-accent: #49b897;
   --color-accent-neon: #6fd4b5;
   --color-hot: #d8a13b;
+  --color-code-bg: #0f1814;
   --gradient-cyber: linear-gradient(135deg, #e05f6b 0%, #d8a13b 52%, #49b897 100%);
   --gradient-orbital: linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px), linear-gradient(135deg, #111916 0%, #1d2a24 58%, #2a2118 100%);
   --glass-panel: linear-gradient(180deg, rgba(24, 34, 30, 0.9), rgba(32, 45, 39, 0.72));
+  --glass-panel-strong: linear-gradient(180deg, rgba(24, 34, 30, 0.95), rgba(32, 45, 39, 0.84));
+  --glass-panel-soft: linear-gradient(180deg, rgba(24, 34, 30, 0.72), rgba(32, 45, 39, 0.54));
+  --shadow-depth-low: 0 10px 26px rgba(12, 18, 15, 0.14);
+  --shadow-depth-medium: 0 18px 46px rgba(12, 18, 15, 0.18);
+  --shadow-depth-high: 0 30px 78px rgba(12, 18, 15, 0.22);
 }
 
 :root.theme-minimal-light {
@@ -119,7 +134,7 @@ button {
   display: inline-flex;
   gap: 8px;
   justify-content: center;
-  min-height: 40px;
+  min-height: 44px;
   padding: 0 14px;
   transition: background var(--motion-fast) ease, box-shadow var(--motion-fast) ease, color var(--motion-fast) ease, transform var(--motion-fast) ease;
 }
@@ -153,7 +168,7 @@ select {
   border: 1px solid var(--color-border);
   border-radius: 12px;
   color: var(--color-text);
-  min-height: 40px;
+  min-height: 44px;
   padding: 0 12px;
   transition: border-color var(--motion-fast) ease, box-shadow var(--motion-fast) ease, background var(--motion-fast) ease;
 }
@@ -188,7 +203,8 @@ select:focus-visible {
 }
 
 .button-icon {
-  min-width: 40px;
+  min-width: 44px;
+  min-height: 44px;
   padding: 0 8px;
 }
 
@@ -199,4 +215,14 @@ select:focus-visible {
 
 .button-danger:hover:not(:disabled) {
   background: #ffdeda;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

@@ -25,6 +25,8 @@ Rosettrism 是一个 Rust 单二进制歌词工具集，可解码本地歌词文
 - **聚合与 AI 可追踪性**：聚合 fetch 会优先选择高质量 timed / word-timed 歌词；可选 OpenAI-compatible AI 优选会记录 model、endpoint、候选 hash、评分、原因与最终来源。
 - **可观测性**：fetch run 会记录近期 query、source、mode、status、message、cache hit/store、provider warning、AI skip 与 no-lyrics 结果。
 - **本地仪表盘**：`rosettrism server` 提供内嵌 Dashboard 与 HTTP API。非本地绑定必须设置 `ROSETTRISM_SERVER_TOKEN`。
+- **歌词质量诊断**：播放 normalization 会区分逐字同步、逐行同步、无同步时间和异常时间轴，并显式报告逐字、多语、ruby、助唱标注能力及可解释降级原因；缺失时间戳的文本不会被伪装为 0ms 可播放歌词。
+- **播放器会话**：真实媒体包装层支持播放队列、顺序/单曲循环/列表循环/随机模式、音量与静音、Media Session 系统控制、错误重试和可信刷新恢复；只有显式标记为 durable 且未过期的音源才允许持久化。
 
 Rosettrism **不实现** CAPTCHA 绕过、凭证收集、SSL pinning 绕过、私有 App 签名或非公开协议自动化。
 
@@ -321,7 +323,7 @@ rosettrism search --help
 
 ### 短期
 
-- 收口当前 `v4.8.20` Dashboard 播放体验：karaoke 元信息、倒计时气泡、移动端溢出检查、来源选择器和视觉证据。
+- 持续扩充 `v4.8.20` Dashboard 歌词播放的真实 QRC、多语种、浏览器矩阵与视觉基线回归。
 - 为 Provider 健康度、cache export/prune/vacuum、AI score history 与结构化错误响应补充 HTTP 级 API 测试。
 - 继续保证所有 API 错误都统一为 `{ code, message, details, retryable }`，覆盖 provider warning 等边界路径。
 - 检查 AI 评分记录的隐私遮罩、prompt 大小限制与运维提示。

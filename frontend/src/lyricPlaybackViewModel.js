@@ -84,28 +84,45 @@ export function uniqueAnnotations(annotations) {
   return [...unique.values()];
 }
 
-export function annotationLabelState(annotations) {
-  const groups = new Map();
-  annotations.forEach((annotation, index) => {
-    if (annotation.suppressLabel) {
-      return;
+export function annotationLabelState(
+  annotations,
+  { maxLabels = 3, minSeparationPercent = 14 } = {},
+) {
+  const candidates = annotations
+    .map((annotation, index) => ({
+      annotation,
+      index,
+      priority: annotationLabelPriority(annotation.type),
+      anchor: annotationAnchorPercent(annotation),
+    }))
+    .filter((entry) => !entry.annotation.suppressLabel)
+    .sort((left, right) => left.priority - right.priority || left.index - right.index);
+  const selected = [];
+  for (const candidate of candidates) {
+    const collides = selected.some((entry) => Math.abs(entry.anchor - candidate.anchor) < minSeparationPercent);
+    if (!collides && selected.length < maxLabels) {
+      selected.push(candidate);
     }
-    const key = annotationAnchorKey(annotation);
-    const candidate = { annotation, index, priority: annotationLabelPriority(annotation.type) };
-    const current = groups.get(key);
-    if (!current || candidate.priority < current.priority || (candidate.priority === current.priority && index < current.index)) {
-      groups.set(key, candidate);
-    }
-  });
-
-  const labels = [...groups.values()].sort((left, right) => {
-    const percent = annotationAnchorPercent(left.annotation) - annotationAnchorPercent(right.annotation);
-    return Math.abs(percent) > 0.01 ? percent : left.index - right.index;
-  });
+  }
+  selected.sort((left, right) => left.anchor - right.anchor || left.index - right.index);
   return {
-    ids: new Set(labels.map((entry) => entry.annotation.id)),
-    rows: new Map(labels.map((entry, row) => [entry.annotation.id, row])),
+    ids: new Set(selected.map((entry) => entry.annotation.id)),
+    rows: new Map(selected.map((entry, index) => [entry.annotation.id, index % 2])),
   };
+}
+
+export function lineAnnotationLabelIds(words, lineAnnotations = []) {
+  const wordCount = Math.max(1, words.length);
+  const wordAnnotations = words.flatMap((word, wordIndex) => (
+    (word.annotations || []).map((annotation) => ({
+      ...annotation,
+      anchorPercent: ((wordIndex + annotationAnchorPercent(annotation) / 100) / wordCount) * 100,
+    }))
+  ));
+  return annotationLabelState(
+    uniqueAnnotations([...wordAnnotations, ...lineAnnotations]),
+    { maxLabels: 3, minSeparationPercent: 11 },
+  ).ids;
 }
 
 export function annotationAnchorKey(annotation) {
@@ -130,14 +147,11 @@ export function annotationLabelPriority(type) {
   }
 }
 
-export function lyricProgressStyle(progress, exact = false) {
+export function lyricProgressStyle(progress) {
   const safeProgress = clampProgress(progress);
-  const fillEnd = exact || safeProgress === 0 || safeProgress === 1
-    ? safeProgress * 100
-    : Math.min(100, safeProgress * 100 + 2.4);
   return {
     '--lyric-progress': String(safeProgress),
-    '--lyric-fill-end': `${fillEnd}%`,
+    '--lyric-fill-end': `${safeProgress * 100}%`,
   };
 }
 
@@ -164,7 +178,150 @@ export function lineClassName(line, currentMs, active, bodyIndex, focusBodyIndex
 }
 
 export function findActiveTimedLineIndex(lines, currentMs) {
-  return lines.findIndex((line) => currentMs >= line.startMs && currentMs < line.endMs);
+  const candidateIndex = findLineAtOrBeforeIndex(lines, currentMs);
+  if (candidateIndex < 0) {
+    return -1;
+  }
+  const candidate = lines[candidateIndex];
+  return currentMs < candidate.endMs ? candidateIndex : -1;
+}
+
+export function findLineAtOrBeforeIndex(lines, currentMs) {
+  let low = 0;
+  let high = lines.length - 1;
+  let result = -1;
+  while (low <= high) {
+    const middle = low + Math.floor((high - low) / 2);
+    if (lines[middle].startMs <= currentMs) {
+      result = middle;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+  return result;
+}
+
+export function findNextTimedLineIndex(lines, currentMs) {
+  let low = 0;
+  let high = lines.length - 1;
+  let result = -1;
+  while (low <= high) {
+    const middle = low + Math.floor((high - low) / 2);
+    if (lines[middle].startMs > currentMs) {
+      result = middle;
+      high = middle - 1;
+    } else {
+      low = middle + 1;
+    }
+  }
+  return result;
+}
+
+export function buildPlaybackFrameState({
+  bodyLines,
+  introMetaLines = [],
+  currentMs,
+  durationMs,
+  introMetaEndMs = 0,
+}) {
+  const activeBodyIndex = findActiveTimedLineIndex(bodyLines, currentMs);
+  const activeBodyLine = activeBodyIndex >= 0 ? bodyLines[activeBodyIndex] : null;
+  const activeMetaIndex = activeBodyLine ? -1 : findActiveTimedLineIndex(introMetaLines, currentMs);
+  const activeMetaLine = activeMetaIndex >= 0 ? introMetaLines[activeMetaIndex] : null;
+  const nextBodyIndex = findNextTimedLineIndex(bodyLines, currentMs);
+  const nextBodyLine = nextBodyIndex >= 0 ? bodyLines[nextBodyIndex] : null;
+  const flowLines = introMetaLines.length ? [...introMetaLines, ...bodyLines] : bodyLines;
+  const activeFlowIndex = activeMetaIndex >= 0
+    ? activeMetaIndex
+    : activeBodyIndex >= 0 ? introMetaLines.length + activeBodyIndex : -1;
+  const nextFlowIndex = findNextTimedLineIndex(flowLines, currentMs);
+  const nextFlowLine = nextFlowIndex >= 0 ? flowLines[nextFlowIndex] : null;
+  const countdown = lyricCountdown(bodyLines, currentMs, { introMetaEndMs });
+  const focusBodyIndex = activeBodyIndex >= 0
+    ? activeBodyIndex
+    : nextBodyIndex >= 0 ? nextBodyIndex : bodyLines.length - 1;
+  const focusFlowIndex = activeFlowIndex >= 0
+    ? activeFlowIndex
+    : nextFlowIndex >= 0 ? nextFlowIndex : flowLines.length - 1;
+  const activeLineProgress = activeBodyLine ? lyricLineProgress(activeBodyLine, currentMs) : 0;
+  const activeWordProgress = activeBodyLine
+    ? (activeBodyLine.words || []).map((word) => wordProgress(word, currentMs))
+    : [];
+
+  const phase = playbackPhase({
+    activeBodyLine,
+    activeMetaLine,
+    countdown,
+    currentMs,
+    durationMs,
+    introMetaEndMs,
+    nextBodyLine,
+  });
+
+  return {
+    phase,
+    activeBodyIndex,
+    activeBodyLine,
+    activeMetaIndex,
+    activeMetaLine,
+    activeFlowIndex,
+    activeFlowLine: activeBodyLine || activeMetaLine,
+    nextBodyIndex,
+    nextBodyLine,
+    nextFlowIndex,
+    nextFlowLine,
+    focusBodyIndex,
+    focusFlowIndex,
+    countdown,
+    showCountdown: countdown.visible,
+    laneItems: phase === 'metadata'
+      ? karaokeEmptyLaneItems('metadata')
+      : karaokeLaneItems(
+        bodyLines,
+        activeBodyLine,
+        focusBodyIndex,
+        !activeBodyLine && countdown.visible,
+        countdown,
+        currentMs,
+        phase,
+      ),
+    activeLineProgress,
+    activeWordProgress,
+    visibleAnnotations: activeBodyLine
+      ? uniqueAnnotations([
+        ...(activeBodyLine.annotations || []),
+        ...(activeBodyLine.words || []).flatMap((word) => word.annotations || []),
+      ])
+      : [],
+  };
+}
+
+export function playbackPhase({
+  activeBodyLine,
+  activeMetaLine,
+  countdown,
+  currentMs,
+  durationMs,
+  introMetaEndMs,
+  nextBodyLine,
+}) {
+  if (currentMs >= durationMs) {
+    return 'ended';
+  }
+  if (activeMetaLine || (introMetaEndMs > 0 && currentMs < introMetaEndMs)) {
+    return 'metadata';
+  }
+  if (activeBodyLine) {
+    return 'singing';
+  }
+  if (countdown.visible && countdown.kind === 'intro') {
+    return 'countdown';
+  }
+  if (nextBodyLine || countdown.visible) {
+    return 'interlude';
+  }
+  return 'ended';
 }
 
 export function buildIntroMetaLines(lines, firstBodyStartMs = 0) {
@@ -230,54 +387,140 @@ export function looksLikeTitleDuplicate(text, titleText) {
   return Boolean(title && (normalized === title || title.includes(normalized) || normalized.includes(title)));
 }
 
-export function karaokeLaneItems(bodyLines, activeBodyLine, focusBodyIndex, showCountdown, countdown) {
+export function karaokeLaneItems(
+  bodyLines,
+  activeBodyLine,
+  focusBodyIndex,
+  showCountdown = false,
+  countdown = {},
+  currentMs = 0,
+  phase = 'singing',
+) {
   if (!bodyLines.length) {
-    return [];
+    return karaokeEmptyLaneItems(phase);
   }
+
   if (showCountdown) {
     const targetIndex = bodyLines.findIndex((line) => line.id === countdown.targetLineId);
-    const targetLine = targetIndex >= 0 ? bodyLines[targetIndex] : null;
-    const targetLane = targetLine
-      ? karaokeLineLaneItem(targetLine, targetIndex)
-      : karaokeLineLaneItem(bodyLines[Math.max(0, Math.min(bodyLines.length - 1, focusBodyIndex))], Math.max(0, focusBodyIndex));
-    return [
-      {
-        kind: 'countdown',
-        key: countdown.targetLineId ? `countdown-${countdown.targetLineId}` : 'countdown-gap',
-        targetLine,
-        bodyIndex: targetIndex,
-        laneClass: targetLane.laneClass,
-        lanePositionClass: targetLane.lanePositionClass,
-      },
-    ];
+    const safeTargetIndex = targetIndex >= 0
+      ? targetIndex
+      : Math.max(0, Math.min(bodyLines.length - 1, focusBodyIndex));
+    const targetLine = bodyLines[safeTargetIndex] || null;
+    const targetItem = targetLine
+      ? karaokeLineLaneItem(targetLine, safeTargetIndex, 'countdown')
+      : null;
+    const previousIndex = safeTargetIndex - 1;
+    const previousLine = previousIndex >= 0 ? bodyLines[previousIndex] : null;
+    const previousItem = previousLine
+      ? karaokeLineLaneItem(previousLine, previousIndex, 'leaving')
+      : null;
+    return karaokeFillLaneSlots([
+      targetItem ? { ...targetItem, kind: 'countdown', targetLine, countdown } : null,
+      previousItem,
+    ], phase);
   }
 
   const primaryIndex = Math.max(0, Math.min(bodyLines.length - 1, focusBodyIndex));
-  const secondaryIndex = primaryIndex + 1 < bodyLines.length ? primaryIndex + 1 : primaryIndex - 1;
-  const indexes = [primaryIndex, secondaryIndex].filter((index, position, list) => index >= 0 && index < bodyLines.length && list.indexOf(index) === position);
-  return indexes
-    .map((index) => karaokeLineLaneItem(bodyLines[index], index))
-    .sort((left, right) => laneSortIndex(left.lanePositionClass) - laneSortIndex(right.lanePositionClass));
+  const handoffWindowMs = 260;
+  const keepPreviousLine = Boolean(
+    primaryIndex > 0
+    && (
+      phase === 'interlude'
+      || (
+        activeBodyLine
+        && currentMs >= activeBodyLine.startMs
+        && currentMs < activeBodyLine.startMs + handoffWindowMs
+      )
+    ),
+  );
+  const secondaryIndex = keepPreviousLine
+    ? primaryIndex - 1
+    : primaryIndex + 1 < bodyLines.length ? primaryIndex + 1 : primaryIndex - 1;
+  const indexes = [primaryIndex, secondaryIndex].filter(
+    (index, position, list) => index >= 0 && index < bodyLines.length && list.indexOf(index) === position,
+  );
+  const items = indexes.map((index) => {
+    const line = bodyLines[index];
+    return karaokeLineLaneItem(
+      line,
+      index,
+      karaokeLineRole(line, activeBodyLine, currentMs, phase),
+    );
+  });
+  return karaokeFillLaneSlots(items, phase);
 }
 
-export function karaokeLineLaneItem(line, bodyIndex) {
+export function karaokeLineLaneItem(line, bodyIndex, role = 'upcoming') {
   const topLane = bodyIndex % 2 === 0;
+  const slot = topLane ? 'top' : 'bottom';
   return {
     kind: 'line',
+    key: `karaoke-lane-${slot}`,
+    slot,
+    role,
+    transition: karaokeLaneTransition(role),
     line,
     bodyIndex,
     laneClass: topLane ? 'lyric-karaoke-line-left' : 'lyric-karaoke-line-right',
-    lanePositionClass: topLane ? 'lyric-karaoke-lane-top' : 'lyric-karaoke-lane-bottom',
+    lanePositionClass: `lyric-karaoke-lane-${slot}`,
   };
 }
 
+export function karaokeEmptyLaneItems(context = 'empty') {
+  return ['top', 'bottom'].map((slot) => karaokeEmptyLaneItem(slot, context));
+}
+
 export function karaokePlaceholderLanes(items) {
-  const occupied = new Set(items.map((item) => item.lanePositionClass).filter(Boolean));
-  return ['lyric-karaoke-lane-top', 'lyric-karaoke-lane-bottom'].filter((laneClass) => !occupied.has(laneClass));
+  return items
+    .filter((item) => item.kind === 'empty')
+    .map((item) => item.lanePositionClass);
 }
 
 export function laneSortIndex(lanePositionClass) {
   return lanePositionClass === 'lyric-karaoke-lane-top' ? 0 : 1;
+}
+
+function karaokeLineRole(line, activeBodyLine, currentMs, phase) {
+  if (activeBodyLine?.id === line.id) {
+    return 'active';
+  }
+  if (line.startMs > currentMs) {
+    return 'upcoming';
+  }
+  return phase === 'ended' ? 'completed' : 'leaving';
+}
+
+function karaokeLaneTransition(role) {
+  if (role === 'active') {
+    return 'steady';
+  }
+  if (role === 'upcoming' || role === 'countdown') {
+    return 'entering';
+  }
+  if (role === 'leaving' || role === 'completed') {
+    return 'leaving';
+  }
+  return 'dormant';
+}
+
+function karaokeFillLaneSlots(items, context) {
+  const bySlot = new Map(items.filter(Boolean).map((item) => [item.slot, item]));
+  return ['top', 'bottom'].map((slot) => bySlot.get(slot) || karaokeEmptyLaneItem(slot, context));
+}
+
+function karaokeEmptyLaneItem(slot, context) {
+  return {
+    kind: 'empty',
+    key: `karaoke-lane-${slot}`,
+    slot,
+    role: 'empty',
+    transition: 'dormant',
+    context,
+    line: null,
+    bodyIndex: -1,
+    laneClass: slot === 'top' ? 'lyric-karaoke-line-left' : 'lyric-karaoke-line-right',
+    lanePositionClass: `lyric-karaoke-lane-${slot}`,
+  };
 }
 
 export function lyricCountdown(lines, currentMs, { introMetaEndMs = 0 } = {}) {

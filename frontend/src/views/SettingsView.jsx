@@ -125,10 +125,19 @@ export function SettingsView({ t, language, setLanguage, lyricSettings, setLyric
           <label className="field-label settings-checkbox-row">
             <input
               type="checkbox"
-              checked={lyricSettings.ambientEffects !== false}
+              checked={lyricSettings.ambientEffects === true}
               onChange={(event) => setLyricSettings({ ...lyricSettings, ambientEffects: event.target.checked })}
             />
             {t.lyricAmbientEffects}
+          </label>
+          <label className="field-label settings-checkbox-row">
+            <input
+              type="checkbox"
+              checked={lyricSettings.stage3D === true}
+              onChange={(event) => setLyricSettings({ ...lyricSettings, stage3D: event.target.checked })}
+            />
+            {t.lyricStage3D}
+            <span>{t.lyricStage3DHint}</span>
           </label>
           <label className="field-label settings-checkbox-row">
             <input

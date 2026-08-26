@@ -832,7 +832,15 @@
 }
 
 .lyric-line-active .lyric-progress-base {
-  background: linear-gradient(90deg, var(--lyric-active-fill-start) 0%, var(--lyric-active-fill-end) var(--lyric-fill-end, 0%), #15120a var(--lyric-fill-end, 0%) 100%);
+  --lyric-fill-edge: 12%;
+  background: linear-gradient(
+    90deg,
+    var(--lyric-active-fill-start) 0%,
+    var(--lyric-active-fill-end) calc(var(--lyric-fill-end, 0%) - var(--lyric-fill-edge)),
+    color-mix(in srgb, var(--lyric-active-fill-end) 55%, #15120a) var(--lyric-fill-end, 0%),
+    #15120a calc(var(--lyric-fill-end, 0%) + var(--lyric-fill-edge)),
+    #15120a 100%
+  );
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -841,6 +849,24 @@
 
 .lyric-line-active .lyric-progress-fill {
   display: none;
+}
+
+.lyric-word {
+  transition: transform 200ms cubic-bezier(0.2, 0.72, 0.22, 1), filter 200ms ease;
+}
+
+.lyric-line-active .lyric-word-current {
+  animation: lyric-word-emphasis 420ms cubic-bezier(0.2, 0.72, 0.22, 1) both;
+}
+
+.lyric-line-active .lyric-word-current .lyric-progress-base {
+  filter: drop-shadow(0 2px 8px color-mix(in srgb, var(--lyric-active-fill-end) 38%, transparent));
+}
+
+@keyframes lyric-word-emphasis {
+  0% { transform: scale(1); filter: brightness(1); }
+  35% { transform: scale(1.06); filter: brightness(1.18); }
+  100% { transform: scale(1.015); filter: brightness(1); }
 }
 
 .lyric-color-solid .lyric-line-active .lyric-progress-base {
@@ -1377,11 +1403,7 @@
   justify-content: center;
 }
 
-.sidebar-collapsed .brand-copy,
-.sidebar-collapsed nav button span,
-.sidebar-collapsed .language-button span {
-  opacity: 0;
-  pointer-events: none;
+.sidebar-collapsed .brand-copy {
   position: absolute;
   transform: translateX(-8px);
 }
@@ -1405,10 +1427,12 @@
   }
 
   .lyric-karaoke-transition-entering,
-  .lyric-karaoke-transition-leaving {
+  .lyric-karaoke-transition-leaving,
+  .lyric-line-active .lyric-word-current {
     animation: none !important;
   }
 }
+
 
 @media (max-width: 840px) {
   .app-shell {

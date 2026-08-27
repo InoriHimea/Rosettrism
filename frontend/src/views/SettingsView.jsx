@@ -147,6 +147,16 @@ export function SettingsView({ t, language, setLanguage, lyricSettings, setLyric
             />
             {t.lyricLowDistraction}
           </label>
+          <label className="field-label settings-checkbox-row">
+            <input
+              type="checkbox"
+              checked={lyricSettings.stageGloss === true}
+              disabled={Boolean(lyricSettings.lowDistraction)}
+              onChange={(event) => setLyricSettings({ ...lyricSettings, stageGloss: event.target.checked })}
+            />
+            {t.lyricStageGloss}
+            <span>{t.lyricStageGlossHint}</span>
+          </label>
           <label className="field-label settings-color-row">
             {t.lyricStageBackground}
             <input

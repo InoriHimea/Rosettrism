@@ -208,6 +208,7 @@ export function LyricPlaybackView({ lyric, settings, t, clock: externalClock }) 
   const lowDistraction = Boolean(settings.lowDistraction);
   const ambientEffects = settings.ambientEffects === true;
   const stage3D = settings.stage3D === true;
+  const stageGloss = settings.stageGloss === true;
 
   const style = {
     '--lyric-solid-color': settings.solidColor,
@@ -241,8 +242,7 @@ export function LyricPlaybackView({ lyric, settings, t, clock: externalClock }) 
           {mediaError || t.mediaBuffering || '正在缓冲音频…'}
         </div>
       ) : null}
-
-      <div className={`lyric-stage lyric-stage-qq lyric-stage-${renderMode} lyric-motion-${motionPreset}${lowDistraction ? ' lyric-low-distraction' : ''}${ambientEffects ? ' lyric-ambient-on' : ' lyric-ambient-off'}${stage3D ? ' lyric-stage-3d-on' : ''}`} data-testid="karaoke-stage">
+      <div className={`lyric-stage lyric-stage-qq lyric-stage-${renderMode} lyric-motion-${motionPreset}${lowDistraction ? ' lyric-low-distraction' : ''}${ambientEffects ? ' lyric-ambient-on' : ' lyric-ambient-off'}${stage3D ? ' lyric-stage-3d-on' : ''}${stageGloss ? ' lyric-stage-gloss-on' : ''}`} data-testid="karaoke-stage">
         {stage3D ? (
           <Suspense fallback={null}>
             <LazyLyricStage3D

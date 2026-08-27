@@ -918,6 +918,44 @@
   opacity: 0.26;
 }
 
+/* 舞台光泽(opt-in):QQ 级扫光/高光,仅作用于填充前沿与正唱字 */
+.lyric-stage-gloss-on .lyric-line-active .lyric-progress-base::after {
+  background: linear-gradient(105deg, transparent 0%, rgba(255, 255, 255, 0.7) 40%, #ffffff 50%, rgba(255, 255, 255, 0.7) 60%, transparent 100%);
+  content: '';
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  -webkit-mask-image: linear-gradient(90deg, transparent calc(var(--lyric-fill-end, 0%) - 9%), #000 var(--lyric-fill-end, 0%), transparent calc(var(--lyric-fill-end, 0%) + 9%));
+  mask-image: linear-gradient(90deg, transparent calc(var(--lyric-fill-end, 0%) - 9%), #000 var(--lyric-fill-end, 0%), transparent calc(var(--lyric-fill-end, 0%) + 9%));
+  mix-blend-mode: screen;
+}
+
+.lyric-stage-gloss-on .lyric-line-active .lyric-word-current .lyric-progress-base {
+  filter: drop-shadow(0 2px 12px color-mix(in srgb, var(--lyric-active-fill-end) 62%, transparent));
+}
+
+.lyric-stage-gloss-on .lyric-line-active::after {
+  background: linear-gradient(90deg, transparent 8%, color-mix(in srgb, var(--lyric-active-fill-start) 22%, transparent) 30%, color-mix(in srgb, var(--lyric-active-fill-end) 22%, transparent) 70%, transparent 92%);
+  border-radius: 999px;
+  content: '';
+  filter: blur(16px);
+  height: 0.46em;
+  inset: auto 6% -0.3em 6%;
+  pointer-events: none;
+  position: absolute;
+  z-index: -1;
+}
+
+.lyric-stage-gloss-on .lyric-line-active .lyric-word-current {
+  animation: lyric-word-gloss-pulse 460ms cubic-bezier(0.2, 0.72, 0.22, 1) infinite alternate;
+}
+
+@keyframes lyric-word-gloss-pulse {
+  from { filter: brightness(1.12); }
+  to { filter: brightness(1.4); }
+}
+
+
 .lyric-words {
   display: inline-block;
   padding-top: 0.46em;
@@ -1470,6 +1508,11 @@
   .lyric-karaoke-transition-leaving,
   .lyric-line-active .lyric-word-current {
     animation: none !important;
+  }
+
+  .lyric-stage-gloss-on .lyric-line-active .lyric-progress-base::after,
+  .lyric-stage-gloss-on .lyric-line-active::after {
+    content: none !important;
   }
 }
 

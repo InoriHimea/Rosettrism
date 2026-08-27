@@ -10,6 +10,7 @@ export const defaultLyricSettings = {
   lowDistraction: false,
   ambientEffects: false,
   stage3D: false,
+  stageGloss: false,
 };
 
 const gradients = {

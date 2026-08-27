@@ -157,6 +157,17 @@ export function SettingsView({ t, language, setLanguage, lyricSettings, setLyric
             {t.lyricStageGloss}
             <span>{t.lyricStageGlossHint}</span>
           </label>
+          <label className="field-label">
+            {t.audioUrl}
+            <input
+              type="url"
+              className="settings-input"
+              placeholder="https://…"
+              value={lyricSettings.audioUrl || ''}
+              onChange={(event) => setLyricSettings({ ...lyricSettings, audioUrl: event.target.value.trim() || null })}
+            />
+            <span>{t.audioUrlHint}</span>
+          </label>
           <label className="field-label settings-color-row">
             {t.lyricStageBackground}
             <input

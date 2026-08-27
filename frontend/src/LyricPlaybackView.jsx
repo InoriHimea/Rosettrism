@@ -2,7 +2,7 @@ import React, { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, u
 import { Pause, Play, RotateCcw } from 'lucide-react';
 import { extractAlbumColors } from './albumColor.js';
 import { formatPlaybackTime, resolveLyricGradient } from './lyricPlayback.js';
-import { createPreviewClock } from './playbackClock.js';
+import { createMediaClock, createPreviewClock } from './playbackClock.js';
 import {
   annotationAnchorPercent,
   annotationGlyphText,
@@ -31,9 +31,12 @@ const LazyLyricStage3D = lazy(() => import('./LyricStage3D.jsx').then((module) =
 
 export function LyricPlaybackView({ lyric, settings, t, clock: externalClock }) {
   const durationMs = Math.max(lyric.durationMs || 0, 1000);
+  const audioUrl = settings.audioUrl || null;
+  const [audioElement, setAudioElement] = useState(null);
   const clock = useMemo(
-    () => externalClock || createPreviewClock({ durationMs }),
-    [externalClock, durationMs],
+    () => externalClock
+      || (audioUrl && audioElement ? createMediaClock(audioElement) : createPreviewClock({ durationMs })),
+    [externalClock, audioUrl, audioElement, durationMs],
   );
   const [playback, setPlayback] = useState(() => (
     clock.snapshot?.() || {
@@ -227,6 +230,9 @@ export function LyricPlaybackView({ lyric, settings, t, clock: externalClock }) 
       data-media-buffering={isBuffering ? 'true' : 'false'}
       data-media-rate={String(playbackRate)}
     >
+      {audioUrl ? (
+        <audio ref={setAudioElement} src={audioUrl} preload="metadata" className="lyric-optional-audio" />
+      ) : null}
       <PlaybackHeader
         headingTitle={headingTitle}
         artistLabel={artistLabel}

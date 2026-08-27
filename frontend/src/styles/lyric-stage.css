@@ -678,12 +678,12 @@
 .lyric-line-past {
   color: var(--lyric-text-past);
   filter: none;
-  opacity: 0.72;
+  opacity: 0.58;
 }
 
 .lyric-line-future {
   color: var(--lyric-text-upcoming);
-  opacity: 0.82;
+  opacity: 0.66;
 }
 
 .lyric-line-meta {
@@ -954,6 +954,15 @@
   from { filter: brightness(1.12); }
   to { filter: brightness(1.4); }
 }
+
+.lyric-optional-audio {
+  display: none;
+}
+
+.lyric-line-active {
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.35);
+}
+
 
 
 .lyric-words {

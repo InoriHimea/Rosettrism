@@ -1,5 +1,6 @@
 import React, { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Pause, Play, RotateCcw } from 'lucide-react';
+import { extractAlbumColors } from './albumColor.js';
 import { formatPlaybackTime, resolveLyricGradient } from './lyricPlayback.js';
 import { createPreviewClock } from './playbackClock.js';
 import {
@@ -51,6 +52,31 @@ export function LyricPlaybackView({ lyric, settings, t, clock: externalClock }) 
   const mediaError = playback.error || null;
   const playbackRate = Number(playback.playbackRate) || 1;
   const renderMode = settings.renderMode === 'vertical' ? 'vertical' : 'karaoke';
+  const artworkUrl = settings.artwork || null;
+  const [albumColors, setAlbumColors] = useState(null);
+
+  useEffect(() => {
+    if (settings.colorMode !== 'album' || !artworkUrl) {
+      setAlbumColors(null);
+      return undefined;
+    }
+    let cancelled = false;
+    extractAlbumColors(artworkUrl)
+      .then((colors) => {
+        if (!cancelled) {
+          setAlbumColors(colors);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAlbumColors(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [settings.colorMode, artworkUrl]);
+
   const annotationTypes = useMemo(
     () => [...new Map(lyric.annotations.map((annotation) => [annotation.type, annotation])).values()],
     [lyric.annotations],
@@ -187,6 +213,8 @@ export function LyricPlaybackView({ lyric, settings, t, clock: externalClock }) 
     '--lyric-solid-color': settings.solidColor,
     '--lyric-gradient': resolveLyricGradient(settings.colorPreset),
     '--lyric-stage-background': settings.stageBackgroundColor || '#ffe58b',
+    '--lyric-album-fill-start': albumColors?.start,
+    '--lyric-album-fill-end': albumColors?.end,
   };
 
   return (

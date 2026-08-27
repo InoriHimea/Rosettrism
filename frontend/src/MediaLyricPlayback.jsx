@@ -349,7 +349,7 @@ export function MediaLyricPlayback({
         t={t}
       />
       {clock ? (
-        <LyricPlaybackView lyric={currentLyric} settings={settings} t={t} clock={clock} />
+        <LyricPlaybackView lyric={currentLyric} settings={currentTrack?.artwork ? { ...settings, artwork: currentTrack.artwork } : settings} t={t} clock={clock} />
       ) : (
         <p className="lyric-media-notice" role="status">{t.mediaInitializing || '正在初始化音频…'}</p>
       )}

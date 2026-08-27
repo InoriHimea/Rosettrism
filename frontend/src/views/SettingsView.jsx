@@ -163,7 +163,19 @@ export function SettingsView({ t, language, setLanguage, lyricSettings, setLyric
             >
               <option value="gradient">{t.gradient}</option>
               <option value="solid">{t.solid}</option>
+              <option value="album">{t.albumColor}</option>
             </select>
+          </label>
+          <label className="field-label">
+            {t.albumArtworkUrl}
+            <input
+              type="url"
+              className="settings-input"
+              placeholder="https://…"
+              value={lyricSettings.artwork || ''}
+              disabled={lyricSettings.colorMode !== 'album'}
+              onChange={(event) => setLyricSettings({ ...lyricSettings, artwork: event.target.value.trim() || null })}
+            />
           </label>
           <label className="field-label">
             {t.lyricColorPreset}

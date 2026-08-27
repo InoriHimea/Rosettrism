@@ -874,8 +874,48 @@
   --lyric-active-fill-end: var(--lyric-solid-color);
 }
 
+.lyric-color-album .lyric-line-active .lyric-progress-base {
+  --lyric-active-fill-start: var(--lyric-album-fill-start, #10c8a0);
+  --lyric-active-fill-end: var(--lyric-album-fill-end, #f1c84b);
+}
+
 .lyric-line:not(.lyric-line-active) .lyric-progress-fill {
   display: none;
+}
+
+.lyric-color-album.lyric-color-preview {
+  background: linear-gradient(90deg, var(--lyric-album-fill-start, #10c8a0), var(--lyric-album-fill-end, #f1c84b));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* 竖向滚动模式(QQ 列表形态):上缘/下缘 mask 渐隐 + 强对比层级 */
+.lyric-stage-vertical .lyric-lines {
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 9%, #000 78%, transparent 100%);
+  mask-image: linear-gradient(180deg, transparent 0, #000 9%, #000 78%, transparent 100%);
+}
+
+.lyric-stage-vertical .lyric-line-active {
+  font-size: clamp(26px, 3.6vw, 32px);
+}
+
+.lyric-stage-vertical .lyric-line-past,
+.lyric-stage-vertical .lyric-line-future {
+  opacity: 0.55;
+}
+
+.lyric-stage-vertical .lyric-line-distance-1 {
+  opacity: 0.72;
+}
+
+.lyric-stage-vertical .lyric-line-distance-2 {
+  opacity: 0.46;
+}
+
+.lyric-stage-vertical .lyric-line-distance-3,
+.lyric-stage-vertical .lyric-line-distance-4 {
+  opacity: 0.26;
 }
 
 .lyric-words {

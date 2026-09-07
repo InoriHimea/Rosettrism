@@ -405,3 +405,26 @@
 
 ### 关联 plan
 - `.plan/2026-07-28-qq-music-lyric-rendering-benchmark.md`
+
+## v2.4.0 — 2026-09-07 — API 端到端测试补强
+
+### 目标
+- 补齐 v4.9.0–v4.13.0 期间新增但未同步测试的 API 路由 handler 级测试，覆盖完成度复查报告短期优化第 1 项。
+- 固化 `/api/cache/:id/revalidate`、`/api/unified-cache/:id/revalidate`、`/api/cache/:id` DELETE、`/api/ai/replay` 四条路由的行为契约，避免后续重构时静默回归。
+
+### 验收条件
+- `cache_revalidate_deletes_upstream_entry`：POST `/api/cache/:id/revalidate` 返回 `deleted_cached_entry` 并实际删除条目。
+- `unified_cache_revalidate_deletes_unified_entry`：POST `/api/unified-cache/:id/revalidate` 返回 `deleted_unified_cached_entry` 并实际删除 unified 条目。
+- `cache_delete_removes_upstream_entry_and_reports_404_after`：DELETE `/api/cache/:id` 首次 `deleted=true`，二次幂等 `deleted=false`。
+- `ai_replay_returns_service_error_when_ai_scoring_not_configured`：未配置 AI scoring 时 `/api/ai/replay` 返回非 200 + 结构化 `{code,message}` 错误体。
+- 既有 Rust 测试全部保持通过。
+
+### 实作状态
+- [x] 缺口盘点与测试设计
+- [x] upstream/unified revalidate 路由测试
+- [x] cache DELETE 幂等测试
+- [x] ai_replay 未配置错误路径测试
+- [x] 全量 Rust 测试与格式检查通过
+
+### 关联 plan
+- `.plan/2026-09-07-api-e2e-tests.md`

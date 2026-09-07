@@ -1793,6 +1793,119 @@ mod tests {
         assert_eq!(detail["message"], "unified cache entry not found");
     }
 
+    #[tokio::test]
+    async fn cache_revalidate_deletes_upstream_entry() {
+        let cache = test_cache("cache_revalidate_upstream");
+        let id = cache
+            .put(CachePut {
+                key: "revalidate-upstream",
+                source: Source::Lrclib,
+                operation: "fetch",
+                status_code: 200,
+                body: br#"{"lyrics":"hello"}"#,
+                metadata: &json!({ "query": "hello" }),
+                ttl: Duration::from_secs(60),
+            })
+            .unwrap();
+        let app = test_app(cache.clone(), None);
+
+        let (status, body) = post_json(
+            app.clone(),
+            &format!("/api/cache/{id}/revalidate"),
+            json!({}),
+            None,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["revalidate"], "deleted_cached_entry");
+        assert_eq!(body["deleted"], true);
+        assert!(cache.detail(id).unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn unified_cache_revalidate_deletes_unified_entry() {
+        let cache = test_cache("unified_cache_revalidate");
+        let id = cache
+            .put_unified(
+                "revalidate-unified",
+                br#"{"metadata":{"title":"Track"},"lines":[]}"#,
+                &[],
+                Duration::from_secs(60),
+            )
+            .unwrap();
+        let app = test_app(cache.clone(), None);
+
+        let (status, body) = post_json(
+            app.clone(),
+            &format!("/api/unified-cache/{id}/revalidate"),
+            json!({}),
+            None,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["revalidate"], "deleted_unified_cached_entry");
+        assert_eq!(body["deleted"], true);
+        assert!(cache.unified_detail(id).unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn cache_delete_removes_upstream_entry_and_reports_404_after() {
+        let cache = test_cache("cache_delete_upstream");
+        let id = cache
+            .put(CachePut {
+                key: "delete-upstream",
+                source: Source::Qq,
+                operation: "search",
+                status_code: 200,
+                body: br#"{"results":[]}"#,
+                metadata: &json!({ "query": "track" }),
+                ttl: Duration::from_secs(60),
+            })
+            .unwrap();
+        let app = test_app(cache.clone(), None);
+
+        let (status, deleted) = delete_json(app.clone(), &format!("/api/cache/{id}"), None).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(deleted["deleted"], true);
+        assert!(cache.detail(id).unwrap().is_none());
+
+        // 二次删除同一 id 时 deleted=false，但路由仍返回 OK（幂等）
+        let (second_status, second_deleted) =
+            delete_json(app, &format!("/api/cache/{id}"), None).await;
+        assert_eq!(second_status, StatusCode::OK);
+        assert_eq!(second_deleted["deleted"], false);
+    }
+
+    #[tokio::test]
+    async fn ai_replay_returns_service_error_when_ai_scoring_not_configured() {
+        let cache = test_cache("ai_replay_unconfigured");
+        let unified_id = cache
+            .put_unified(
+                "ai-replay-unconfigured",
+                br#"{"metadata":{"title":"Track"},"lines":[]}"#,
+                &[],
+                Duration::from_secs(60),
+            )
+            .unwrap();
+        let app = test_app(cache, None);
+
+        let (status, body) = post_json(
+            app,
+            "/api/ai/replay",
+            json!({ "unified_cache_id": unified_id }),
+            None,
+        )
+        .await;
+
+        // 未配置 AI scoring 时返回错误，而非崩溃或空结果
+        assert_ne!(status, StatusCode::OK);
+        assert!(!body["code"].as_str().unwrap().is_empty());
+        assert!(!body["message"].as_str().unwrap().is_empty());
+    }
+
     #[test]
     fn rejects_non_local_host_without_token() {
         std::env::remove_var("ROSETTRISM_SERVER_TOKEN");

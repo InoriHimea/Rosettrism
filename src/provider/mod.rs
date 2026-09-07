@@ -293,10 +293,8 @@ impl Source {
 }
 
 pub fn builtin_provider_registry() -> Vec<ProviderManifest> {
-    Source::value_variants()
-        .iter()
-        .map(|source| source.manifest())
-        .collect()
+    // 语义升级（M1）：由内置插件注册表导出；输出形状与「枚举遍历」一致。
+    ProviderRegistry::builtin().manifests()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -401,7 +399,7 @@ pub fn apply_client_timeout(
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderManifest {
     pub manifest_version: u8,
     pub source: Source,
@@ -463,6 +461,105 @@ pub trait LyricProvider: Send + Sync {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ProviderOptions {
     pub allow_experimental: bool,
+}
+
+/// 一个 provider 插件 = manifest 声明 + 凭据感知的构造工厂。
+///
+/// 内置插件走编译期闭包包装的 match；外部插件走 WASM/进程 ABI（后续里程碑）。
+/// 设计见 `docs/provider-plugin-manifest.md` §3.1。
+pub trait ProviderPlugin: Send + Sync {
+    fn manifest(&self) -> ProviderManifest;
+
+    /// 凭据解析后的 provider 实例工厂。
+    /// `allow_experimental` 门禁由调用方（`provider_for_with_options`）统一执行，
+    /// 插件本身不做 experimental 门禁。
+    fn create_provider(
+        &self,
+        cookie: Option<String>,
+        options: &ProviderOptions,
+    ) -> Result<Box<dyn LyricProvider>>;
+}
+
+/// 注册表：按 `source_name` 查找 provider 插件。
+pub struct ProviderRegistry {
+    plugins: Vec<std::sync::Arc<dyn ProviderPlugin>>,
+    by_source_name: std::collections::HashMap<String, usize>,
+}
+
+impl ProviderRegistry {
+    /// 由插件序列构建；`source_name` 重复时返回错误。
+    pub fn new(plugins: Vec<std::sync::Arc<dyn ProviderPlugin>>) -> Result<Self> {
+        let mut by_source_name = std::collections::HashMap::new();
+        for (index, plugin) in plugins.iter().enumerate() {
+            if by_source_name
+                .insert(plugin.manifest().source_name, index)
+                .is_some()
+            {
+                return Err(crate::Error::Service(format!(
+                    "duplicate provider plugin source_name: {}",
+                    plugin.manifest().source_name
+                )));
+            }
+        }
+        Ok(Self {
+            plugins,
+            by_source_name,
+        })
+    }
+
+    /// 内置 provider 注册表（覆盖全部 `Source` 变体）。
+    pub fn builtin() -> Self {
+        // 构造失败属编程错误（重复 source_name），CI 立即暴露。
+        Self::new(builtin_provider_plugins())
+            .expect("builtin provider registry has unique source names")
+    }
+
+    pub fn lookup(&self, source_name: &str) -> Option<std::sync::Arc<dyn ProviderPlugin>> {
+        self.by_source_name
+            .get(source_name)
+            .map(|&index| std::sync::Arc::clone(&self.plugins[index]))
+    }
+
+    /// 全部插件 manifest（与 `builtin_provider_registry()` 等价）。
+    pub fn manifests(&self) -> Vec<ProviderManifest> {
+        self.plugins.iter().map(|p| p.manifest()).collect()
+    }
+
+    pub fn len(&self) -> usize {
+        self.plugins.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.plugins.is_empty()
+    }
+}
+
+/// 单个内置 Source 的薄插件包装：manifest 由 `Source::manifest()` 提供，
+/// 构造委托给 `provider_for_with_options`（match 形态保留至 M2）。
+struct BuiltinSourcePlugin {
+    source: Source,
+}
+
+impl ProviderPlugin for BuiltinSourcePlugin {
+    fn manifest(&self) -> ProviderManifest {
+        self.source.manifest()
+    }
+
+    fn create_provider(
+        &self,
+        cookie: Option<String>,
+        options: &ProviderOptions,
+    ) -> Result<Box<dyn LyricProvider>> {
+        provider_for_with_options(self.source, cookie, options.clone())
+    }
+}
+
+fn builtin_provider_plugins() -> Vec<std::sync::Arc<dyn ProviderPlugin>> {
+    use std::sync::Arc;
+    Source::value_variants()
+        .iter()
+        .map(|&source| Arc::new(BuiltinSourcePlugin { source }) as Arc<dyn ProviderPlugin>)
+        .collect()
 }
 
 pub fn provider_for(source: Source, cookie: Option<String>) -> Result<Box<dyn LyricProvider>> {
@@ -632,5 +729,48 @@ mod tests {
 
         assert!(err.contains("experimental source"));
         assert!(err.contains("not implemented yet"));
+    }
+
+    #[test]
+    fn provider_registry_covers_all_sources_and_manifests_match_legacy() {
+        let registry = ProviderRegistry::builtin();
+        assert_eq!(registry.len(), Source::value_variants().len());
+
+        for source in Source::value_variants() {
+            let plugin = registry
+                .lookup(source.cli_name())
+                .unwrap_or_else(|| panic!("missing plugin for {}", source.cli_name()));
+            assert_eq!(plugin.manifest(), source.manifest());
+        }
+    }
+
+    #[test]
+    fn provider_registry_manifests_equal_builtin_registry_output() {
+        // M1 验收锚点：注册表导出与旧「枚举遍历」输出逐条一致。
+        let registry = ProviderRegistry::builtin();
+        let legacy: Vec<ProviderManifest> = Source::value_variants()
+            .iter()
+            .map(|source| source.manifest())
+            .collect();
+        assert_eq!(registry.manifests(), legacy);
+    }
+
+    #[test]
+    fn provider_registry_lookup_rejects_unknown_source_name() {
+        let registry = ProviderRegistry::builtin();
+        assert!(registry.lookup("definitely-not-a-source").is_none());
+    }
+
+    #[test]
+    fn duplicate_source_name_is_rejected() {
+        let result = ProviderRegistry::new(vec![
+            std::sync::Arc::new(BuiltinSourcePlugin {
+                source: Source::Lrclib,
+            }),
+            std::sync::Arc::new(BuiltinSourcePlugin {
+                source: Source::Lrclib,
+            }),
+        ]);
+        assert!(result.is_err());
     }
 }

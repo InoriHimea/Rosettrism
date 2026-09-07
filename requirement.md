@@ -477,3 +477,28 @@
 
 ### 关联 plan
 - `.plan/2026-09-07-plugin-architecture-plan.md`
+
+## v3.1.0 — 2026-09-07 — M1 注册表化重构
+
+### 目标
+- 落地插件化路线图 M1（`docs/provider-plugin-manifest.md` §4）：建立 `DecoderPlugin`/`ProviderPlugin` trait 与注册表，match 臂收敛为注册表查找，全部行为不变。
+- decoder 侧：7 个内置格式迁移为插件实现，`decode_bytes`/`decode_raw_bytes` 改为注册表分发，嗅探按置信度裁决并复刻旧 `detect.rs` 优先级。
+- provider 侧：24 个内置 provider 经薄包装注册，`builtin_provider_registry()` 改走注册表导出，输出逐字段不变。
+
+### 验收条件
+- `DecoderRegistry`：lookup/detect/builtin 可用；`decode_bytes`/`decode_raw_bytes` 旧签名保留且分发语义与旧 match 一致（sample.qrc 文本头、TTML 优先级均有测试固化）。
+- `ProviderRegistry`：每个 `Source` 有插件，`registry.manifests()` 与旧「枚举遍历」输出逐条相等（`PartialEq` 断言）。
+- `/api/sources` 行为不变：`api_routes_return_json_with_cache_enabled` 等既有断言通过。
+- 现有测试全绿；wiremock 串行失败视为环境限制（端口/缓冲耗尽，单跑全过），需记录非回归证据。
+
+### 实作状态
+- [x] `DecoderPlugin` trait + `DecoderRegistry` + 7 个内置 decoder 插件 + 5 条测试
+- [x] 嗅探优先级复刻（TTML=95 > XML-QRC=90 > 文本头 QRC=80 > LRC）
+- [x] `decode_bytes`/`decode_raw_bytes` registry 分发
+- [x] `ProviderPlugin` trait + `ProviderRegistry` + 薄包装 + 4 条测试
+- [x] `ProviderManifest` 加 `PartialEq, Eq`
+- [x] `builtin_provider_registry()` 注册表化
+- [x] 分组回归全绿 + baseline worktree 对比一致
+
+### 关联 plan
+- `.plan/2026-09-07-m1-registry-refactor.md`

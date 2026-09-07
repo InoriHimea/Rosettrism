@@ -16,6 +16,8 @@
     "test:media-playback": "playwright test tests/media-playback-phase7.spec.js",
     "test:media-session": "playwright test tests/media-playback-phase9.spec.js",
     "test:unit": "node --test src/api/__tests__/*.test.js src/__tests__/*.test.js",
+    "test:firefox-check": "node scripts/check-firefox-playwright.mjs",
+    "cleanup:firefox": "node scripts/cleanup-firefox-zombies.mjs",
     "verify:multilingual-live": "node scripts/capture-multilingual-live.mjs"
   },
   "dependencies": {

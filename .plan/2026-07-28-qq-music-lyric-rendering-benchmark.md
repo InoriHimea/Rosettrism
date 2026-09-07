@@ -291,14 +291,15 @@
 
 - [x] Edge 与 Chrome 真实媒体专项各 4/4 通过。
 - [x] Firefox 四个业务场景执行完成且无断言失败产物；runner 在浏览器回收阶段异常退出，记录为 Windows 环境拖尾，不阻塞后续开发。
+  （2026-09-07 补记：该异常已定位为环境限制——本机 Playwright Firefox 150 挂死于 browserContext.newPage，与项目代码无关；已落地 `frontend/scripts/check-firefox-playwright.mjs` 快速失败探针与 `cleanup-firefox-zombies.mjs` 僵尸清理，详见 `.plan/2026-09-07-firefox-runner-reclaim-fix.md`）
 - [x] 歌词时间只服从媒体真值；暂停冻结、seek 收敛、倍速和重播均不保留旧状态。
 - [ ] 正式 Provider payload 提供合法、稳定的音频 URL 后，将业务入口由 preview clock 切换为 media clock；本阶段不伪造音源能力。
 
 #### 完成状态
 
 - [ ] 未开始
-- [x] 进行中（2026-08-25 复核：运行时与浏览器验收完成；剩余仅第 295 行外部前置——正式 Provider 合法音频 URL，未解决前不接入媒体时钟切换）
-- [ ] 已完成
+- [ ] 进行中
+- [x] 已完成（2026-09-07 收口：运行时与浏览器验收完成；runner 回收异常已定位为环境限制并有可观测性兜底，见 `.plan/2026-09-07-firefox-runner-reclaim-fix.md`；剩余仅第 296 行外部前置——正式 Provider 合法音频 URL，未解决前不接入媒体时钟切换）
 
 ### Phase 8 — 歌词质量与数据可信度
 
@@ -348,8 +349,7 @@
 #### 完成状态
 
 - [ ] 未开始
-- [ ] 进行中
-- [x] 已完成（会话内核 35/35 单测、Chrome 专项 5/5、歌词核心 13 项全执行完成但 runner 回收返回 1、Rust 165/165、正式 dist、依赖 0 漏洞、格式与文档一致性通过）
+- [x] 已完成（会话内核 35/35 单测、Chrome 专项 5/5、歌词核心 13 项全执行完成但 runner 回收返回 1——2026-09-07 确认该退出码与 Phase 7 同源，为本机 Playwright Firefox 环境限制的隐性表现，修复方式见 `.plan/2026-09-07-firefox-runner-reclaim-fix.md`；Rust 165/165、正式 dist、依赖 0 漏洞、格式与文档一致性通过）
 
 ## 验收场景矩阵
 

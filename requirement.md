@@ -383,9 +383,9 @@
 - [x] Phase 4：低噪声舞台与播放器控件产品化（默认低噪声、文字层级 token、控件主次重排；18/18 单测、Firefox 默认态/移动端/reduced-motion 专项与隔离构建通过）
 - [x] Phase 5：专用自动化、截图 baseline 与性能验收（固定时钟 harness、四 viewport baseline、200 行与 60 时间点性能采样；21/21 单测、Firefox benchmark 7/7、隔离构建通过，Three.js 按需分包）
 - [x] Phase 6：真实 QQ/QRC 数据 A/B、完整构建与发布收口（真实/逐行/raw 回归、Windows Edge 4/4、Firefox 4/4、Chrome 四项断言、Rust 165/165、正式 dist 重建均通过；v4.9.0 已发布，GitHub Release 三平台产物与容器已产出）
-- [ ] Phase 7：真实媒体播放闭环（media clock、HTMLAudioElement 包装层、本地 WAV harness、Edge/Chrome 各 4/4 通过；剩余：Firefox runner 回收异常待修；正式 Provider 合法音频 URL 为外部前置条件，未解决前不接入）
+- [x] Phase 7：真实媒体播放闭环（media clock、HTMLAudioElement 包装层、本地 WAV harness、Edge/Chrome 各 4/4 通过；Firefox runner 回收异常已于 2026-09-07 定位为环境限制——Playwright Firefox 150 在本机挂死于 browserContext.newPage，与项目代码无关，已落地 `frontend/scripts/check-firefox-playwright.mjs` 快速失败探针与 `cleanup-firefox-zombies.mjs` 僵尸清理（详见 `.plan/2026-09-07-firefox-runner-reclaim-fix.md`）；正式 Provider 合法音频 URL 仍为外部前置条件，未解决前不接入）
 - [x] Phase 8：歌词质量与数据可信度（`word_timed`/`line_timed`/`unsynced`/`invalid` 分级、能力矩阵、结构诊断、可解释降级和 UI 状态已落地；25/25 单测、Chrome 发布专项 5/5、多语与播放核心 13/13、正式 dist、依赖审计 0 漏洞通过）
-- [x] Phase 9：播放器产品会话能力（会话内核 35/35 单测、Chrome 专项 5/5、歌词核心 13 项全执行完成但 runner 回收返回 1、Rust 165/165、正式 dist、依赖 0 漏洞、格式与文档一致性通过）
+- [x] Phase 9：播放器产品会话能力（会话内核 35/35 单测、Chrome 专项 5/5、歌词核心 13 项全执行完成但 runner 回收返回 1——该退出码 1 已确认与 Phase 7 同源，为本机 Playwright Firefox 环境限制的隐性表现，修复方式同上；Rust 165/165、正式 dist、依赖 0 漏洞、格式与文档一致性通过）
 
 ### Phase 9 验收追加
 

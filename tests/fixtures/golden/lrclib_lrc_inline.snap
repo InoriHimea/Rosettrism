@@ -1,0 +1,97 @@
+{
+  "cache_refs": [
+    "lrclib:101:lrc"
+  ],
+  "inline_lines": [
+    {
+      "duration_ms": null,
+      "romanized": "We sing together",
+      "source_refs": [
+        "lrclib"
+      ],
+      "start_ms": 10000,
+      "text": "We sing together"
+    }
+  ],
+  "meta": {
+    "album": "Album",
+    "artist": "LRCLIB Artist",
+    "by": null,
+    "offset_ms": 0,
+    "source": "lrclib",
+    "title": "LRC Song"
+  },
+  "mode": "inline",
+  "schema_version": "1.0",
+  "score": {
+    "completeness_score": 100.0,
+    "enrichment_score": 33.29999923706055,
+    "final_score": 86.5999984741211,
+    "timing_score": 80.0
+  },
+  "source_refs": [
+    "lrclib"
+  ],
+  "tracks": [
+    {
+      "document": {
+        "lines": [
+          {
+            "duration_ms": null,
+            "start_ms": 10000,
+            "text": "We sing together",
+            "words": []
+          }
+        ],
+        "meta": {
+          "album": "Album",
+          "artist": "LRCLIB Artist",
+          "by": null,
+          "offset_ms": 0,
+          "source": "lrclib",
+          "title": "LRC Song"
+        }
+      },
+      "kind": "original",
+      "quality": {
+        "line_count": 1,
+        "score": 80.0,
+        "timed_line_count": 1,
+        "word_timing_count": 0
+      },
+      "source": "lrclib"
+    },
+    {
+      "document": {
+        "lines": [
+          {
+            "duration_ms": null,
+            "start_ms": 10000,
+            "text": "We sing together",
+            "words": []
+          }
+        ],
+        "meta": {
+          "album": "Album",
+          "artist": "LRCLIB Artist",
+          "by": null,
+          "offset_ms": 0,
+          "source": "lrclib",
+          "title": "LRC Song"
+        }
+      },
+      "kind": "romanized",
+      "language": "und-Latn",
+      "quality": {
+        "line_count": 1,
+        "score": 50.0,
+        "timed_line_count": 1,
+        "word_timing_count": 0
+      },
+      "source": "lrclib"
+    }
+  ],
+  "warnings": [
+    "plain timed line without word timing"
+  ]
+}

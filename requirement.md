@@ -428,3 +428,28 @@
 
 ### 关联 plan
 - `.plan/2026-09-07-api-e2e-tests.md`
+
+## v2.5.0 — 2026-09-07 — Unified JSON Schema 兼容性治理
+
+### 目标
+- 建立 Unified Lyric Schema 的兼容性治理基线（完成度复查报告中期优化第 4 项），让客户端契约变更可追溯、可检测。
+- 新增 `SCHEMA_CHANGELOG.md`，定义主/次版本升级规则、golden snapshot 工作流，并登记 1.0 基线。
+- 新增序列化 golden snapshot 测试与三方一致性测试（model 常量 = schema 文件 const = 全部 fixture 值），捕获契约漂移。
+- 在 `docs/unified-json.md` 补充 Schema governance 说明。
+
+### 验收条件
+- `SCHEMA_CHANGELOG.md` 明确主版本（破坏性：删字段/改名/收窄类型/改必填集）与次版本（兼容性新增：可选字段/新枚举/放宽校验）的处理规则。
+- `golden_serialization_snapshots_match_model_round_trip`：4 个 fixture 的序列化输出与 `tests/fixtures/golden/*.snap` 一致，意图内变更可用 `UPDATE_GOLDEN=1` 重新生成。
+- `schema_version_constant_matches_schema_file_and_fixtures`：任何单边漂移（model const、schema 文件 const、fixture 值不一致）即测试失败，报错指向 `SCHEMA_CHANGELOG.md`。
+- 既有 `tests/unified_schema.rs` 测试全部保持通过。
+
+### 实作状态
+- [x] schema 现状盘点与治理设计
+- [x] `SCHEMA_CHANGELOG.md`（规则 + 工作流 + 1.0 基线）
+- [x] golden snapshot 测试（4 个 fixture）
+- [x] 三方一致性测试（含漂移捕获回归验证）
+- [x] `docs/unified-json.md` governance 章节
+- [x] 全量 Rust 测试与格式检查通过
+
+### 关联 plan
+- `.plan/2026-09-07-schema-governance.md`

@@ -67,3 +67,12 @@ Recommended clients should:
 3. If a newer major version is encountered, fall back to displaying `tracks[0].document.lines` or `inline_lines` when those fields are present.
 4. Treat optional enrichment and annotations as additive; do not block base lyric display if they are missing or malformed.
 5. Preserve provider/source labels when exposing diagnostics or user source selection.
+
+## Schema governance
+
+Schema 变更受 `SCHEMA_CHANGELOG.md` 与 golden snapshot 测试治理，规则与工作流见该文件。简述：
+
+- **主版本**（如 1.x → 2.0）对应破坏性变更（删除/重命名字段、收窄类型、改必填集）；客户端应降级到保守展示。
+- **次版本**（如 1.0 → 1.1）对应向后兼容的新增（可选字段、新枚举值、放宽校验）；老客户端忽略未知字段即可。
+- 三方一致性测试（model 常量 = schema 文件 const = 全部 fixture 值）在 `tests/unified_schema.rs` 中强制，漂移即 CI 失败。
+- 序列化 golden snapshot 固化字段顺序与空集合省略行为；意图内变更用 `UPDATE_GOLDEN=1` 重新生成并登记 changelog。

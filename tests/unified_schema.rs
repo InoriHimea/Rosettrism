@@ -31,6 +31,31 @@ fn unified_schema_is_valid_json_and_declares_version() {
     assert!(schema["$defs"]["Annotation"].is_object());
 }
 
+/// `schema_version` 三方一致性：model 常量 = schema 文件 const = 所有 fixture 值。
+/// model 常量单独漂移（如 bump 未同步 schema 文件）时在此失败。
+#[test]
+fn schema_version_constant_matches_schema_file_and_fixtures() {
+    let schema: Value = serde_json::from_str(SCHEMA).unwrap();
+    let schema_const = schema["properties"]["schema_version"]["const"]
+        .as_str()
+        .expect("schema declares a const schema_version");
+    assert_eq!(
+        rosettrism::UNIFIED_LYRIC_SCHEMA_VERSION,
+        schema_const,
+        "model UNIFIED_LYRIC_SCHEMA_VERSION drifted from schema file const; \
+         update both together and record the change in SCHEMA_CHANGELOG.md"
+    );
+
+    for (name, fixture) in FIXTURES {
+        let value: Value = serde_json::from_str(fixture).unwrap();
+        assert_eq!(
+            value["schema_version"],
+            rosettrism::UNIFIED_LYRIC_SCHEMA_VERSION,
+            "{name} fixture schema_version drifted from model constant"
+        );
+    }
+}
+
 #[test]
 fn unified_fixtures_validate_against_schema_and_model() {
     let schema: Value = serde_json::from_str(SCHEMA).unwrap();
@@ -182,4 +207,62 @@ fn value_matches_type(value: &Value, type_name: &str) -> bool {
         "string" => value.is_string(),
         _ => false,
     }
+}
+
+const GOLDEN_DIR: &str = "tests/fixtures/golden";
+const GOLDEN_CASES: &[(&str, &str)] = &[
+    ("qq_qrc_tracks", "QQ/QRC tracks"),
+    ("kugou_krc_tracks", "Kugou/KRC tracks"),
+    ("netease_yrc_inline", "Netease/YRC inline"),
+    ("lrclib_lrc_inline", "LRCLIB/LRC inline"),
+];
+
+/// Golden snapshot of the `UnifiedLyric` serialization contract.
+///
+/// 每个 fixture 反序列化为 `UnifiedLyric` 后重新序列化，输出与
+/// `tests/fixtures/golden/<case>.snap` 对比。该快照固化了 model 的
+/// 字段顺序、`skip_serializing_if` 空集合省略行为和 `schema_version`
+/// 常量。任何破坏性序列化变更都会在 CI 上失败，迫使维护者在
+/// `SCHEMA_CHANGELOG.md` 中登记并按主/次版本规则处理。
+#[test]
+fn golden_serialization_snapshots_match_model_round_trip() {
+    let update = std::env::var("UPDATE_GOLDEN").as_deref() == Ok("1");
+    std::fs::create_dir_all(GOLDEN_DIR).unwrap();
+
+    for (case, fixture_name) in GOLDEN_CASES {
+        let fixture_src = FIXTURES
+            .iter()
+            .find(|(name, _)| *name == *fixture_name)
+            .map(|(_, src)| *src)
+            .unwrap_or_else(|| {
+                panic!("golden case {case} references missing fixture {fixture_name}")
+            });
+        let input: Value = serde_json::from_str(fixture_src).unwrap();
+        let lyric: UnifiedLyric = serde_json::from_value(input).unwrap();
+        let actual = serde_json::to_value(&lyric).unwrap();
+        let actual_text = serde_json::to_string_pretty(&actual).unwrap();
+
+        let snap_path = format!("{GOLDEN_DIR}/{case}.snap");
+        if update {
+            std::fs::write(&snap_path, &actual_text).unwrap();
+            continue;
+        }
+
+        let expected_text = std::fs::read_to_string(&snap_path)
+            .unwrap_or_else(|err| panic!(
+                "golden snapshot {snap_path} missing: {err}\n\
+                 Run `UPDATE_GOLDEN=1 cargo test --test unified_schema golden_serialization` to create it."
+            ));
+        assert_eq!(
+            actual_text, expected_text,
+            "serialization golden mismatch for {case}.\n\
+             If this is intentional, update the snapshot:\n  \
+             UPDATE_GOLDEN=1 cargo test --test unified_schema golden_serialization\n\
+             and document the breaking change in SCHEMA_CHANGELOG.md."
+        );
+    }
+    assert!(
+        !update,
+        "golden snapshots were regenerated; re-run without UPDATE_GOLDEN=1 to verify."
+    );
 }

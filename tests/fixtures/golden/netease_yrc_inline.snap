@@ -1,0 +1,95 @@
+{
+  "cache_refs": [
+    "netease:789:yrc"
+  ],
+  "inline_lines": [
+    {
+      "duration_ms": 1200,
+      "reading": "ゆめをみる",
+      "romanized": "yume o miru",
+      "ruby": [
+        {
+          "end_char": 1,
+          "reading": "ゆめ",
+          "start_char": 0,
+          "text": "夢"
+        }
+      ],
+      "source_refs": [
+        "netease"
+      ],
+      "start_ms": 500,
+      "text": "夢を見る"
+    }
+  ],
+  "meta": {
+    "album": null,
+    "artist": "Netease Artist",
+    "by": null,
+    "offset_ms": null,
+    "source": "netease",
+    "title": "YRC Song"
+  },
+  "mode": "inline",
+  "schema_version": "1.0",
+  "score": {
+    "completeness_score": 100.0,
+    "enrichment_score": 66.5999984741211,
+    "final_score": 97.0,
+    "timing_score": 97.0
+  },
+  "source_refs": [
+    "netease"
+  ],
+  "tracks": [
+    {
+      "document": {
+        "lines": [
+          {
+            "duration_ms": 1200,
+            "reading": "ゆめをみる",
+            "romanized": "yume o miru",
+            "ruby": [
+              {
+                "end_char": 1,
+                "reading": "ゆめ",
+                "start_char": 0,
+                "text": "夢"
+              }
+            ],
+            "start_ms": 500,
+            "text": "夢を見る",
+            "words": [
+              {
+                "duration_ms": 300,
+                "offset_ms": 500,
+                "text": "夢"
+              },
+              {
+                "duration_ms": 400,
+                "offset_ms": 800,
+                "text": "を見る"
+              }
+            ]
+          }
+        ],
+        "meta": {
+          "album": null,
+          "artist": "Netease Artist",
+          "by": null,
+          "offset_ms": null,
+          "source": "netease",
+          "title": "YRC Song"
+        }
+      },
+      "kind": "original",
+      "quality": {
+        "line_count": 1,
+        "score": 97.0,
+        "timed_line_count": 1,
+        "word_timing_count": 2
+      },
+      "source": "netease"
+    }
+  ]
+}

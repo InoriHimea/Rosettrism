@@ -453,3 +453,27 @@
 
 ### 关联 plan
 - `.plan/2026-09-07-schema-governance.md`
+
+## v3.0.0 — 2026-09-07 — Provider/Decoder 插件化架构规划
+
+### 目标
+- 将 provider metadata、rate-limit、健康度与能力宣告抽象为插件契约，让新来源（含私有来源）可在不改核心代码的前提下接入（完成度复查报告长期优化第 2 项）。
+- 产出完整设计文档与四里程碑落地路线图，作为后续实作批次的唯一事实源；本轮为规划批次，不写运行时代码。
+
+### 验收条件
+- `docs/provider-plugin-manifest.md` v2 包含：现状盘点（已有 `ProviderManifest`/`builtin_provider_registry`/`LyricProvider` trait/decoder 封闭 match）、目标架构（`ProviderPlugin`/`DecoderPlugin` trait + 字符串键注册表）、manifest v2 扩展（`runtime`/`permissions`/`entry` 可选字段，缺省安全值）、安全模型（默认关闭、显式 opt-in、宿主强制权限、凭据注入、崩溃隔离）。
+- 路线图含四个可独立发布的里程碑：M1 注册表化（行为不变重构）→ M2 manifest 驱动配置 → M3 外部 provider 插件（WASM 优先）→ M4 外部 decoder 插件 + 治理收口；每个里程碑有任务清单、验收标准、规模估计、依赖关系。
+- 明确非目标：不做热重载/插件市场/自动更新，不移除 `Source`/`InputFormat` 枚举兼容层，process 模式不承诺强沙箱隔离。
+- v1 draft 的 manifest 字段全部有继承处置，无静默丢弃。
+- 本轮无代码变更；现有测试与 `/api/sources` 行为不受影响。
+
+### 实作状态
+- [x] 现状架构盘点（Source 枚举 24 变体 + match 散落 + decoder 封闭 match）
+- [x] 范围确认（设计文档 + 路线图；Provider + Decoder 双轨）
+- [x] 目标架构与安全模型设计
+- [x] 四里程碑路线图与验收标准
+- [x] 风险缓解与非目标
+- [x] 文档与 requirement 交叉引用
+
+### 关联 plan
+- `.plan/2026-09-07-plugin-architecture-plan.md`

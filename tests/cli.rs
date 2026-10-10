@@ -249,13 +249,13 @@ fn temp_cli_cache_dir(prefix: &str) -> (PathBuf, PathBuf) {
     (dir, db)
 }
 
-fn seed_cache_for_maintenance(db: &PathBuf) {
+async fn seed_cache_for_maintenance(db: &PathBuf) {
     use rosettrism::cache::{now_unix, CachePut, FetchRunMetadata, UpstreamCache};
     use rosettrism::provider::Source;
     use serde_json::json;
     use std::time::Duration;
 
-    let cache = UpstreamCache::open(db).unwrap();
+    let cache = UpstreamCache::open(db).await.unwrap();
     cache
         .put(CachePut {
             key: "expired-upstream",
@@ -266,6 +266,7 @@ fn seed_cache_for_maintenance(db: &PathBuf) {
             metadata: &json!({"query":"expired"}),
             ttl: Duration::from_secs(60),
         })
+        .await
         .unwrap();
     cache
         .put(CachePut {
@@ -277,6 +278,7 @@ fn seed_cache_for_maintenance(db: &PathBuf) {
             metadata: &json!({"query":"fresh"}),
             ttl: Duration::from_secs(3600),
         })
+        .await
         .unwrap();
     let expired_unified_id = cache
         .put_unified(
@@ -285,6 +287,7 @@ fn seed_cache_for_maintenance(db: &PathBuf) {
             &[],
             Duration::from_secs(60),
         )
+        .await
         .unwrap();
     let fresh_unified_id = cache
         .put_unified(
@@ -293,19 +296,24 @@ fn seed_cache_for_maintenance(db: &PathBuf) {
             &[],
             Duration::from_secs(3600),
         )
+        .await
         .unwrap();
     cache
         .put_ai_score(expired_unified_id, &json!({"score":"expired"}))
+        .await
         .unwrap();
     cache
         .put_ai_score(fresh_unified_id, &json!({"score":"old"}))
+        .await
         .unwrap();
     cache
         .put_ai_score(fresh_unified_id, &json!({"score":"new"}))
+        .await
         .unwrap();
     for query in ["old run", "new run"] {
         let run_id = cache
             .start_fetch_run(query, Some(Source::Lrclib), "test")
+            .await
             .unwrap();
         cache
             .finish_fetch_run(
@@ -318,6 +326,7 @@ fn seed_cache_for_maintenance(db: &PathBuf) {
                     cache_event: None,
                 },
             )
+            .await
             .unwrap();
     }
     drop(cache);
@@ -362,10 +371,10 @@ fn seed_cache_for_maintenance(db: &PathBuf) {
         .unwrap();
 }
 
-#[test]
-fn cache_stats_prints_json() {
+#[tokio::test]
+async fn cache_stats_prints_json() {
     let (dir, db) = temp_cli_cache_dir("rosettrism-cli-cache-stats");
-    seed_cache_for_maintenance(&db);
+    seed_cache_for_maintenance(&db).await;
 
     let mut cmd = Command::cargo_bin("rosettrism").unwrap();
     cmd.arg("--db").arg(&db).args(["cache", "stats"]);
@@ -378,10 +387,10 @@ fn cache_stats_prints_json() {
     fs::remove_dir_all(dir).unwrap();
 }
 
-#[test]
-fn cache_prune_is_dry_run_unless_yes() {
+#[tokio::test]
+async fn cache_prune_is_dry_run_unless_yes() {
     let (dir, db) = temp_cli_cache_dir("rosettrism-cli-cache-prune");
-    seed_cache_for_maintenance(&db);
+    seed_cache_for_maintenance(&db).await;
 
     let mut dry_run = Command::cargo_bin("rosettrism").unwrap();
     dry_run.arg("--db").arg(&db).args([
@@ -444,10 +453,10 @@ fn cache_prune_is_dry_run_unless_yes() {
     fs::remove_dir_all(dir).unwrap();
 }
 
-#[test]
-fn cache_export_supports_jsonl_and_pretty_json() {
+#[tokio::test]
+async fn cache_export_supports_jsonl_and_pretty_json() {
     let (dir, db) = temp_cli_cache_dir("rosettrism-cli-cache-export");
-    seed_cache_for_maintenance(&db);
+    seed_cache_for_maintenance(&db).await;
 
     let mut jsonl = Command::cargo_bin("rosettrism").unwrap();
     jsonl.arg("--db").arg(&db).args([

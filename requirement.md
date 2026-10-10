@@ -502,3 +502,35 @@
 
 ### 关联 plan
 - `.plan/2026-09-07-m1-registry-refactor.md`
+
+## v5.0.0 — 2026-10-10 — SQLite 异步化与工程质量收口
+
+### 目标
+- `UpstreamCache` 全部 DB 相关方法 async 化（`spawn_blocking` offload + 私有 `*_sync` 孪生），锁守卫不跨 await，消除同步磁盘 I/O 对 tokio executor 线程的占用。
+- SQLite 连接启用 WAL + `busy_timeout=5000ms`，改善 server 与 CLI 管理跨进程并发访问。
+- 移除 `[profile.release] panic = "abort"`：恢复 unwind，server 模式下单请求 panic 只杀该 task，进程存活（接受二进制体积小幅增加）。
+- `service.rs`（约 2475 行）拆分为 `src/service/` 目录：`mod.rs` / `ai_scoring.rs` / `unified_build.rs` / `fetch_runs.rs` / `tests.rs`，公共 API 不变。
+- 补单测：`model.rs`（sort_and_fill_durations、serde 契约）、`error.rs`（display/`#[from]`/Task）、前端 i18n 字典（zh/en 键奇偶、placeholder 一致）。
+- 流程收口：新建根目录 `TODO.md`/`feature.md`；AGENTS.md 过时架构描述修正。
+- 版本 4.13.0 → 5.0.0：`UpstreamCache` 公共方法 sync→async 属库 API 破坏性变更，按仓库规则升 major。
+
+### 验收条件
+- `cargo test`（NO_PROXY 环境下）全绿：lib 175 / cli 14 / decode_fixture 1 / unified_schema 5。
+- `cargo fmt --check` 干净；`cargo build --release --locked` 通过。
+- `cd frontend && npm run test:unit` 42/42（新增 i18n 3 项）。
+- server 冒烟：`/api/health`、`/api/stats`、`/api/cache` 行为与 4.x 一致。
+- `scripts/check-plan-requirement.sh` 覆盖通过。
+
+### 实作状态
+- [x] cache.rs async 化（公共 async + 私有 sync + 通用 spawn_blocking 助手）+ WAL/busy_timeout
+- [x] error.rs `Task(JoinError)` 变体 + offline_db.rs spawn_blocking 包装
+- [x] Cargo.toml 移除 `panic = "abort"`；version 5.0.0（frontend/package.json 同步）
+- [x] 全部调用点 `.await` 更新（cached_provider/service/server/cli + 测试）
+- [x] service.rs → src/service/ 目录（mod/ai_scoring/unified_build/fetch_runs/tests）
+- [x] model.rs 单测（7 项）、error.rs 单测（4 项）、i18n dictionaries.test.js（3 项）
+- [x] AGENTS.md "Async with tokio"/"SQLite persistence" 描述修正
+- [x] TODO.md / feature.md 创建
+- [x] 全量验证（cargo test / fmt / build / npm test:unit / server 冒烟）
+
+### 关联 plan
+- `.plan/2026-10-10-sqlite-async-and-quality.md`

@@ -122,7 +122,7 @@ async fn providers_health(
     let limit = query.limit.unwrap_or(20).clamp(1, 500);
     Ok(Json(json!({
         "sample_size": limit,
-        "providers": enrich_provider_health(cache.provider_health(limit)?),
+        "providers": enrich_provider_health(cache.provider_health(limit).await?),
     })))
 }
 
@@ -454,8 +454,8 @@ async fn cache_list(
 ) -> ApiResult<Json<serde_json::Value>> {
     authorize(&state, &headers)?;
     let cache = require_cache(&state)?;
-    let upstream_entries = cache.list(100)?;
-    let unified_entries = cache.list_unified(100)?;
+    let upstream_entries = cache.list(100).await?;
+    let unified_entries = cache.list_unified(100).await?;
     Ok(Json(json!({
         "upstream_entries": upstream_entries,
         "unified_entries": unified_entries,
@@ -470,19 +470,19 @@ async fn cache_detail(
 ) -> ApiResult<Json<serde_json::Value>> {
     authorize(&state, &headers)?;
     let cache = require_cache(&state)?;
-    let entry = cache.detail(id)?;
-    let unified_entry = cache.unified_detail(id)?;
+    let entry = cache.detail(id).await?;
+    let unified_entry = cache.unified_detail(id).await?;
     if entry.is_none() && unified_entry.is_none() {
         return Err(ApiError::not_found("cache entry not found"));
     }
+    let ai_scores = match unified_entry.as_ref() {
+        Some(entry) => cache.list_ai_scores(entry.id).await?,
+        None => Vec::new(),
+    };
     Ok(Json(json!({
         "entry": entry,
         "unified_entry": unified_entry,
-        "ai_scores": unified_entry
-            .as_ref()
-            .map(|entry| cache.list_ai_scores(entry.id))
-            .transpose()?
-            .unwrap_or_default()
+        "ai_scores": ai_scores
     })))
 }
 
@@ -493,14 +493,14 @@ async fn unified_cache_detail(
 ) -> ApiResult<Json<serde_json::Value>> {
     authorize(&state, &headers)?;
     let cache = require_cache(&state)?;
-    let unified_entry = cache.unified_detail(id)?;
+    let unified_entry = cache.unified_detail(id).await?;
     if unified_entry.is_none() {
         return Err(ApiError::not_found("unified cache entry not found"));
     }
     Ok(Json(json!({
         "entry": null,
         "unified_entry": unified_entry,
-        "ai_scores": cache.list_ai_scores(id)?
+        "ai_scores": cache.list_ai_scores(id).await?
     })))
 }
 
@@ -511,7 +511,7 @@ async fn cache_delete(
 ) -> ApiResult<Json<serde_json::Value>> {
     authorize(&state, &headers)?;
     let cache = require_cache(&state)?;
-    let deleted = cache.delete(id)?;
+    let deleted = cache.delete(id).await?;
     Ok(Json(json!({ "deleted": deleted })))
 }
 
@@ -522,7 +522,7 @@ async fn cache_revalidate(
 ) -> ApiResult<Json<serde_json::Value>> {
     authorize(&state, &headers)?;
     let cache = require_cache(&state)?;
-    let deleted = cache.delete(id)?;
+    let deleted = cache.delete(id).await?;
     Ok(Json(json!({
         "revalidate": "deleted_cached_entry",
         "deleted": deleted
@@ -536,7 +536,7 @@ async fn unified_cache_delete(
 ) -> ApiResult<Json<serde_json::Value>> {
     authorize(&state, &headers)?;
     let cache = require_cache(&state)?;
-    let deleted = cache.delete_unified(id)?;
+    let deleted = cache.delete_unified(id).await?;
     Ok(Json(json!({ "deleted": deleted })))
 }
 
@@ -547,7 +547,7 @@ async fn unified_cache_revalidate(
 ) -> ApiResult<Json<serde_json::Value>> {
     authorize(&state, &headers)?;
     let cache = require_cache(&state)?;
-    let deleted = cache.delete_unified(id)?;
+    let deleted = cache.delete_unified(id).await?;
     Ok(Json(json!({
         "revalidate": "deleted_unified_cached_entry",
         "deleted": deleted
@@ -561,8 +561,8 @@ async fn fetch_runs(
     authorize(&state, &headers)?;
     let cache = require_cache(&state)?;
     Ok(Json(json!({
-        "runs": cache.list_fetch_runs(100)?,
-        "status_counts": cache.fetch_run_status_counts()?
+        "runs": cache.list_fetch_runs(100).await?,
+        "status_counts": cache.fetch_run_status_counts().await?
     })))
 }
 
@@ -583,7 +583,7 @@ async fn stats(
     authorize(&state, &headers)?;
     let cache = require_cache(&state)?;
     Ok(Json(json!({
-        "cache": cache.stats()?,
+        "cache": cache.stats().await?,
         "ai_scores": cache.query_ai_scores(AiScoreQuery {
             query_hash: query.query_hash,
             model: query.model,
@@ -591,10 +591,11 @@ async fn stats(
             created_at_start: query.created_at_start,
             created_at_end: query.created_at_end,
             limit: 20,
-        })?,
-        "fetch_runs": cache.list_fetch_runs(20)?,
-        "fetch_run_status_counts": cache.fetch_run_status_counts()?,
-        "provider_health": enrich_provider_health(cache.provider_health(20)?)
+        })
+        .await?,
+        "fetch_runs": cache.list_fetch_runs(20).await?,
+        "fetch_run_status_counts": cache.fetch_run_status_counts().await?,
+        "provider_health": enrich_provider_health(cache.provider_health(20).await?)
     })))
 }
 
@@ -1437,6 +1438,7 @@ impl From<Error> for ApiError {
             Error::Storage(_) | Error::Sqlite(_) | Error::Io(_) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "internal_error", false)
             }
+            Error::Task(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal_error", false),
         };
         Self::new(
             status,
@@ -1486,6 +1488,7 @@ fn error_details(value: &Error) -> Value {
             Error::Sqlite(_) => "sqlite",
             Error::Io(_) => "io",
             Error::Json(_) => "json",
+            Error::Task(_) => "task",
         }
     })
 }
@@ -1536,7 +1539,7 @@ mod tests {
 
     #[tokio::test]
     async fn api_routes_return_json_with_cache_enabled() {
-        let cache = test_cache("api_routes_return_json_with_cache_enabled");
+        let cache = test_cache("api_routes_return_json_with_cache_enabled").await;
         let cache_id = cache
             .put(CachePut {
                 key: "upstream-route",
@@ -1547,9 +1550,11 @@ mod tests {
                 metadata: &json!({ "query": "hello", "item_id": "lrclib-1" }),
                 ttl: Duration::from_secs(60),
             })
+            .await
             .unwrap();
         let run_id = cache
             .start_fetch_run("hello", Some(Source::Lrclib), "fetch")
+            .await
             .unwrap();
         cache
             .finish_fetch_run(
@@ -1562,6 +1567,7 @@ mod tests {
                     cache_event: None,
                 },
             )
+            .await
             .unwrap();
         let app = test_app(cache, None);
 
@@ -1642,7 +1648,7 @@ mod tests {
 
     #[tokio::test]
     async fn server_token_auth_accepts_explicit_and_bearer_headers() {
-        let app = test_app(test_cache("server_token_auth"), Some("secret-token"));
+        let app = test_app(test_cache("server_token_auth").await, Some("secret-token"));
 
         let (missing_status, missing) = get_json(app.clone(), "/api/health", None).await;
         assert_eq!(missing_status, StatusCode::UNAUTHORIZED);
@@ -1671,7 +1677,7 @@ mod tests {
 
     #[tokio::test]
     async fn cache_detail_returns_upstream_entry_by_id() {
-        let cache = test_cache("cache_detail_upstream");
+        let cache = test_cache("cache_detail_upstream").await;
         let id = cache
             .put(CachePut {
                 key: "upstream-detail",
@@ -1682,6 +1688,7 @@ mod tests {
                 metadata: &json!({ "query": "track" }),
                 ttl: Duration::from_secs(60),
             })
+            .await
             .unwrap();
 
         let (status, detail) =
@@ -1694,7 +1701,7 @@ mod tests {
 
     #[tokio::test]
     async fn cache_detail_returns_unified_entry_by_id() {
-        let cache = test_cache("cache_detail_unified");
+        let cache = test_cache("cache_detail_unified").await;
         let id = cache
             .put_unified(
                 "unified-detail",
@@ -1702,6 +1709,7 @@ mod tests {
                 &["upstream-a".to_string()],
                 Duration::from_secs(60),
             )
+            .await
             .unwrap();
 
         let (status, detail) =
@@ -1715,7 +1723,7 @@ mod tests {
     #[tokio::test]
     async fn cache_detail_returns_not_found_for_missing_id() {
         let (status, detail) = get_json(
-            test_app(test_cache("cache_detail_missing"), None),
+            test_app(test_cache("cache_detail_missing").await, None),
             "/api/cache/9999",
             None,
         )
@@ -1726,7 +1734,7 @@ mod tests {
     }
     #[tokio::test]
     async fn cache_list_splits_upstream_and_unified_entries() {
-        let cache = test_cache("cache_list_split");
+        let cache = test_cache("cache_list_split").await;
         let upstream_id = cache
             .put(CachePut {
                 key: "upstream-list",
@@ -1737,6 +1745,7 @@ mod tests {
                 metadata: &json!({ "query": "track" }),
                 ttl: Duration::from_secs(60),
             })
+            .await
             .unwrap();
         let unified_id = cache
             .put_unified(
@@ -1745,6 +1754,7 @@ mod tests {
                 &["upstream-list".to_string(), "upstream-other".to_string()],
                 Duration::from_secs(60),
             )
+            .await
             .unwrap();
 
         let (status, list) = get_json(test_app(cache, None), "/api/cache", None).await;
@@ -1758,7 +1768,7 @@ mod tests {
 
     #[tokio::test]
     async fn deleting_unified_cache_removes_ai_scores() {
-        let cache = test_cache("delete_unified_ai_scores");
+        let cache = test_cache("delete_unified_ai_scores").await;
         let unified_id = cache
             .put_unified(
                 "unified-delete",
@@ -1766,11 +1776,13 @@ mod tests {
                 &[],
                 Duration::from_secs(60),
             )
+            .await
             .unwrap();
         cache
             .put_ai_score(unified_id, &json!({ "candidate_summary_hash": "abc123" }))
+            .await
             .unwrap();
-        assert_eq!(cache.stats().unwrap().ai_score_entries, 1);
+        assert_eq!(cache.stats().await.unwrap().ai_score_entries, 1);
 
         let app = test_app(cache.clone(), None);
         let (status, deleted) = delete_json(
@@ -1782,9 +1794,9 @@ mod tests {
 
         assert_eq!(status, StatusCode::OK);
         assert_eq!(deleted["deleted"], true);
-        assert!(cache.unified_detail(unified_id).unwrap().is_none());
-        assert_eq!(cache.list_ai_scores(unified_id).unwrap().len(), 0);
-        assert_eq!(cache.stats().unwrap().ai_score_entries, 0);
+        assert!(cache.unified_detail(unified_id).await.unwrap().is_none());
+        assert_eq!(cache.list_ai_scores(unified_id).await.unwrap().len(), 0);
+        assert_eq!(cache.stats().await.unwrap().ai_score_entries, 0);
 
         let (detail_status, detail) =
             get_json(app, &format!("/api/unified-cache/{unified_id}"), None).await;
@@ -1795,7 +1807,7 @@ mod tests {
 
     #[tokio::test]
     async fn cache_revalidate_deletes_upstream_entry() {
-        let cache = test_cache("cache_revalidate_upstream");
+        let cache = test_cache("cache_revalidate_upstream").await;
         let id = cache
             .put(CachePut {
                 key: "revalidate-upstream",
@@ -1806,6 +1818,7 @@ mod tests {
                 metadata: &json!({ "query": "hello" }),
                 ttl: Duration::from_secs(60),
             })
+            .await
             .unwrap();
         let app = test_app(cache.clone(), None);
 
@@ -1820,12 +1833,12 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["revalidate"], "deleted_cached_entry");
         assert_eq!(body["deleted"], true);
-        assert!(cache.detail(id).unwrap().is_none());
+        assert!(cache.detail(id).await.unwrap().is_none());
     }
 
     #[tokio::test]
     async fn unified_cache_revalidate_deletes_unified_entry() {
-        let cache = test_cache("unified_cache_revalidate");
+        let cache = test_cache("unified_cache_revalidate").await;
         let id = cache
             .put_unified(
                 "revalidate-unified",
@@ -1833,6 +1846,7 @@ mod tests {
                 &[],
                 Duration::from_secs(60),
             )
+            .await
             .unwrap();
         let app = test_app(cache.clone(), None);
 
@@ -1847,12 +1861,12 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["revalidate"], "deleted_unified_cached_entry");
         assert_eq!(body["deleted"], true);
-        assert!(cache.unified_detail(id).unwrap().is_none());
+        assert!(cache.unified_detail(id).await.unwrap().is_none());
     }
 
     #[tokio::test]
     async fn cache_delete_removes_upstream_entry_and_reports_404_after() {
-        let cache = test_cache("cache_delete_upstream");
+        let cache = test_cache("cache_delete_upstream").await;
         let id = cache
             .put(CachePut {
                 key: "delete-upstream",
@@ -1863,6 +1877,7 @@ mod tests {
                 metadata: &json!({ "query": "track" }),
                 ttl: Duration::from_secs(60),
             })
+            .await
             .unwrap();
         let app = test_app(cache.clone(), None);
 
@@ -1870,7 +1885,7 @@ mod tests {
 
         assert_eq!(status, StatusCode::OK);
         assert_eq!(deleted["deleted"], true);
-        assert!(cache.detail(id).unwrap().is_none());
+        assert!(cache.detail(id).await.unwrap().is_none());
 
         // 二次删除同一 id 时 deleted=false，但路由仍返回 OK（幂等）
         let (second_status, second_deleted) =
@@ -1881,7 +1896,7 @@ mod tests {
 
     #[tokio::test]
     async fn ai_replay_returns_service_error_when_ai_scoring_not_configured() {
-        let cache = test_cache("ai_replay_unconfigured");
+        let cache = test_cache("ai_replay_unconfigured").await;
         let unified_id = cache
             .put_unified(
                 "ai-replay-unconfigured",
@@ -1889,6 +1904,7 @@ mod tests {
                 &[],
                 Duration::from_secs(60),
             )
+            .await
             .unwrap();
         let app = test_app(cache, None);
 
@@ -2225,7 +2241,7 @@ mod tests {
         )
     }
 
-    fn test_cache(name: &str) -> UpstreamCache {
+    async fn test_cache(name: &str) -> UpstreamCache {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -2234,7 +2250,7 @@ mod tests {
             "rosettrism-{name}-{}-{now}.sqlite",
             std::process::id()
         ));
-        UpstreamCache::open(path).unwrap()
+        UpstreamCache::open(path).await.unwrap()
     }
 
     fn result(

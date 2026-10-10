@@ -9,7 +9,7 @@ use crate::model::LyricDocument;
 use crate::provider::{FetchedLyric, LyricProvider, SearchResult, Source};
 use crate::{Error, Result};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct OfflineDbProvider {
     db_path: PathBuf,
 }
@@ -100,7 +100,11 @@ impl OfflineDbProvider {
 #[async_trait]
 impl LyricProvider for OfflineDbProvider {
     async fn search(&self, query: &str) -> Result<Vec<SearchResult>> {
-        self.search_db(query)
+        let provider = self.clone();
+        let query = query.to_string();
+        tokio::task::spawn_blocking(move || provider.search_db(&query))
+            .await
+            .map_err(Error::from)?
     }
 
     async fn fetch(&self, result: &SearchResult) -> Result<FetchedLyric> {
@@ -108,8 +112,12 @@ impl LyricProvider for OfflineDbProvider {
             .extra
             .get("offline_db_id")
             .and_then(|value| value.as_str())
-            .unwrap_or(result.id.as_str());
-        self.fetch_db(id)
+            .unwrap_or(result.id.as_str())
+            .to_string();
+        let provider = self.clone();
+        tokio::task::spawn_blocking(move || provider.fetch_db(&id))
+            .await
+            .map_err(Error::from)?
     }
 }
 

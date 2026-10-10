@@ -188,3 +188,155 @@ impl Default for UnifiedLyric {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn line(start_ms: u32, duration_ms: Option<u32>, text: &str) -> LyricLine {
+        LyricLine {
+            start_ms,
+            duration_ms,
+            text: text.into(),
+            ..LyricLine::default()
+        }
+    }
+
+    #[test]
+    fn sort_and_fill_durations_sorts_and_fills_missing() {
+        let mut document = LyricDocument {
+            meta: LyricMeta::default(),
+            lines: vec![
+                line(2_000, None, "second"),
+                line(1_000, None, "first"),
+                line(3_500, None, "third"),
+            ],
+        };
+        document.sort_and_fill_durations();
+        let starts: Vec<u32> = document.lines.iter().map(|l| l.start_ms).collect();
+        assert_eq!(starts, vec![1_000, 2_000, 3_500]);
+        assert_eq!(document.lines[0].duration_ms, Some(1_000));
+        assert_eq!(document.lines[1].duration_ms, Some(1_500));
+        assert_eq!(document.lines[2].duration_ms, None);
+    }
+
+    #[test]
+    fn sort_and_fill_durations_keeps_existing_duration() {
+        let mut document = LyricDocument {
+            meta: LyricMeta::default(),
+            lines: vec![line(1_000, Some(250), "a"), line(2_000, None, "b")],
+        };
+        document.sort_and_fill_durations();
+        assert_eq!(document.lines[0].duration_ms, Some(250));
+        assert_eq!(document.lines[1].duration_ms, None);
+    }
+
+    #[test]
+    fn sort_and_fill_durations_handles_empty_document() {
+        let mut document = LyricDocument::default();
+        document.sort_and_fill_durations();
+        assert!(document.lines.is_empty());
+    }
+
+    #[test]
+    fn serde_roundtrip_unified_lyric_is_equivalent() {
+        let unified = UnifiedLyric {
+            tracks: vec![LyricTrack {
+                kind: LyricTrackKind::Original,
+                language: Some("zh-Hans".into()),
+                source: "kugou".into(),
+                document: LyricDocument {
+                    meta: LyricMeta {
+                        title: Some("Song".into()),
+                        artist: Some("Artist".into()),
+                        ..LyricMeta::default()
+                    },
+                    lines: vec![LyricLine {
+                        start_ms: 1_000,
+                        duration_ms: Some(900),
+                        text: "hello".into(),
+                        words: vec![LyricWord {
+                            offset_ms: 1_000,
+                            duration_ms: 500,
+                            text: "he".into(),
+                        }],
+                        ruby: vec![LyricRubySpan {
+                            start_char: 0,
+                            end_char: 2,
+                            text: "he".into(),
+                            reading: "ヒ".into(),
+                        }],
+                        ..LyricLine::default()
+                    }],
+                },
+                quality: LyricTrackQuality {
+                    score: 0.5,
+                    line_count: 1,
+                    timed_line_count: 1,
+                    word_timing_count: 1,
+                },
+                ..LyricTrack::default()
+            }],
+            annotations: vec![Annotation {
+                annotation_type: AnnotationType::Breath,
+                start_ms: 1_200,
+                duration_ms: 80,
+                text: "^".into(),
+            }],
+            ..UnifiedLyric::default()
+        };
+        let json = serde_json::to_string(&unified).unwrap();
+        let parsed: UnifiedLyric = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, unified);
+    }
+
+    #[test]
+    fn enums_serialize_as_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&AnnotationType::LongTone).unwrap(),
+            r#""long_tone""#
+        );
+        assert_eq!(
+            serde_json::to_string(&AnnotationType::PortamentoDown).unwrap(),
+            r#""portamento_down""#
+        );
+        assert_eq!(
+            serde_json::to_string(&LyricTrackKind::PlainFallback).unwrap(),
+            r#""plain_fallback""#
+        );
+        assert_eq!(
+            serde_json::to_string(&UnifiedLyricMode::Inline).unwrap(),
+            r#""inline""#
+        );
+        let kind: LyricTrackKind = serde_json::from_str(r#""translation""#).unwrap();
+        assert_eq!(kind, LyricTrackKind::Translation);
+    }
+
+    #[test]
+    fn default_serialization_injects_schema_version_and_omits_empty_fields() {
+        let json = serde_json::to_value(UnifiedLyric::default()).unwrap();
+        assert_eq!(json["schema_version"], "1.0");
+        assert_eq!(json["mode"], "tracks");
+        for key in [
+            "tracks",
+            "inline_lines",
+            "source_refs",
+            "cache_refs",
+            "warnings",
+            "annotations",
+        ] {
+            assert!(
+                json.get(key).is_none(),
+                "expected key `{key}` to be omitted when empty"
+            );
+        }
+    }
+
+    #[test]
+    fn missing_schema_version_parses_with_default_backfill() {
+        let mut json = serde_json::to_value(UnifiedLyric::default()).unwrap();
+        json.as_object_mut().unwrap().remove("schema_version");
+        let parsed: UnifiedLyric = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.schema_version, UNIFIED_LYRIC_SCHEMA_VERSION);
+    }
+}

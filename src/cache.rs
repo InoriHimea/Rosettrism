@@ -50,6 +50,16 @@ pub struct CachePut<'a> {
     pub ttl: Duration,
 }
 
+struct OwnedCachePut {
+    key: String,
+    source: Source,
+    operation: String,
+    status_code: u16,
+    body: Vec<u8>,
+    metadata: serde_json::Value,
+    ttl: Duration,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct CacheEntrySummary {
     pub id: i64,
@@ -240,7 +250,18 @@ pub struct UnifiedCacheEntryDetail {
 }
 
 impl UpstreamCache {
-    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+    pub async fn open(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref().to_path_buf();
+        tokio::task::spawn_blocking(move || Self::open_sync(path))
+            .await
+            .map_err(Error::from)?
+    }
+
+    pub async fn open_default() -> Result<Self> {
+        Self::open(default_cache_path()).await
+    }
+
+    fn open_sync(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         if let Some(parent) = path.parent() {
             if !parent.as_os_str().is_empty() {
@@ -250,15 +271,13 @@ impl UpstreamCache {
 
         let connection = Connection::open(path)?;
         connection.pragma_update(None, "foreign_keys", "ON")?;
+        connection.query_row("PRAGMA journal_mode = WAL", [], |_| Ok(()))?;
+        connection.busy_timeout(Duration::from_millis(5_000))?;
         let cache = Self {
             inner: Arc::new(Mutex::new(connection)),
         };
         cache.migrate()?;
         Ok(cache)
-    }
-
-    pub fn open_default() -> Result<Self> {
-        Self::open(default_cache_path())
     }
 
     pub fn default_path() -> PathBuf {
@@ -287,7 +306,13 @@ impl UpstreamCache {
         Ok(format!("{:x}", hasher.finalize()))
     }
 
-    pub fn get_fresh(&self, key: &str) -> Result<Option<CacheHit>> {
+    pub async fn get_fresh(&self, key: &str) -> Result<Option<CacheHit>> {
+        let key = key.to_string();
+        self.spawn_blocking(move |cache| cache.get_fresh_sync(&key))
+            .await
+    }
+
+    fn get_fresh_sync(&self, key: &str) -> Result<Option<CacheHit>> {
         let now = now_unix();
         let connection = self.lock()?;
         let hit = connection
@@ -315,11 +340,25 @@ impl UpstreamCache {
         Ok(hit)
     }
 
-    pub fn put(&self, request: CachePut<'_>) -> Result<i64> {
+    pub async fn put(&self, request: CachePut<'_>) -> Result<i64> {
+        let request = OwnedCachePut {
+            key: request.key.to_string(),
+            source: request.source,
+            operation: request.operation.to_string(),
+            status_code: request.status_code,
+            body: request.body.to_vec(),
+            metadata: request.metadata.clone(),
+            ttl: request.ttl,
+        };
+        self.spawn_blocking(move |cache| cache.put_sync(&request))
+            .await
+    }
+
+    fn put_sync(&self, request: &OwnedCachePut) -> Result<i64> {
         let now = now_unix();
         let expires_at = now.saturating_add(request.ttl.as_secs().min(i64::MAX as u64) as i64);
-        let body_hash = hash_hex(request.body);
-        let metadata_json = serde_json::to_string(request.metadata)?;
+        let body_hash = hash_hex(&request.body);
+        let metadata_json = serde_json::to_string(&request.metadata)?;
         let response_headers = json!({ "cached_at_layer": "provider_operation" }).to_string();
         let connection = self.lock()?;
         connection.execute(
@@ -360,7 +399,13 @@ impl UpstreamCache {
         Ok(id)
     }
 
-    pub fn get_unified_fresh(&self, key: &str) -> Result<Option<UnifiedCacheHit>> {
+    pub async fn get_unified_fresh(&self, key: &str) -> Result<Option<UnifiedCacheHit>> {
+        let key = key.to_string();
+        self.spawn_blocking(move |cache| cache.get_unified_fresh_sync(&key))
+            .await
+    }
+
+    fn get_unified_fresh_sync(&self, key: &str) -> Result<Option<UnifiedCacheHit>> {
         let now = now_unix();
         let connection = self.lock()?;
         let hit = connection
@@ -383,7 +428,21 @@ impl UpstreamCache {
         Ok(hit)
     }
 
-    pub fn put_unified(
+    pub async fn put_unified(
+        &self,
+        key: &str,
+        body: &[u8],
+        dependency_keys: &[String],
+        ttl: Duration,
+    ) -> Result<i64> {
+        let key = key.to_string();
+        let body = body.to_vec();
+        let dependency_keys = dependency_keys.to_vec();
+        self.spawn_blocking(move |cache| cache.put_unified_sync(&key, &body, &dependency_keys, ttl))
+            .await
+    }
+
+    fn put_unified_sync(
         &self,
         key: &str,
         body: &[u8],
@@ -425,7 +484,17 @@ impl UpstreamCache {
         Ok(id)
     }
 
-    pub fn put_ai_score(
+    pub async fn put_ai_score(
+        &self,
+        unified_cache_id: i64,
+        score_json: &serde_json::Value,
+    ) -> Result<i64> {
+        let score_json = score_json.clone();
+        self.spawn_blocking(move |cache| cache.put_ai_score_sync(unified_cache_id, &score_json))
+            .await
+    }
+
+    fn put_ai_score_sync(
         &self,
         unified_cache_id: i64,
         score_json: &serde_json::Value,
@@ -451,7 +520,12 @@ impl UpstreamCache {
         Ok(connection.last_insert_rowid())
     }
 
-    pub fn list_ai_scores(&self, unified_cache_id: i64) -> Result<Vec<AiScoreRecord>> {
+    pub async fn list_ai_scores(&self, unified_cache_id: i64) -> Result<Vec<AiScoreRecord>> {
+        self.spawn_blocking(move |cache| cache.list_ai_scores_sync(unified_cache_id))
+            .await
+    }
+
+    fn list_ai_scores_sync(&self, unified_cache_id: i64) -> Result<Vec<AiScoreRecord>> {
         let connection = self.lock()?;
         let mut statement = connection.prepare(
             "SELECT id, unified_cache_id, score_json, created_at
@@ -464,14 +538,22 @@ impl UpstreamCache {
             .map_err(Error::from)
     }
 
-    pub fn list_recent_ai_scores(&self, limit: usize) -> Result<Vec<AiScoreRecord>> {
-        self.query_ai_scores(AiScoreQuery {
-            limit,
-            ..AiScoreQuery::default()
+    pub async fn list_recent_ai_scores(&self, limit: usize) -> Result<Vec<AiScoreRecord>> {
+        self.spawn_blocking(move |cache| {
+            cache.query_ai_scores_sync(AiScoreQuery {
+                limit,
+                ..AiScoreQuery::default()
+            })
         })
+        .await
     }
 
-    pub fn query_ai_scores(&self, query: AiScoreQuery) -> Result<Vec<AiScoreRecord>> {
+    pub async fn query_ai_scores(&self, query: AiScoreQuery) -> Result<Vec<AiScoreRecord>> {
+        self.spawn_blocking(move |cache| cache.query_ai_scores_sync(query))
+            .await
+    }
+
+    fn query_ai_scores_sync(&self, query: AiScoreQuery) -> Result<Vec<AiScoreRecord>> {
         let limit = i64::try_from(query.limit).unwrap_or(20).clamp(1, 100);
         let mut sql = String::from(
             "SELECT id, unified_cache_id, score_json, created_at FROM ai_scores WHERE 1 = 1",
@@ -507,7 +589,19 @@ impl UpstreamCache {
             .map_err(Error::from)
     }
 
-    pub fn start_fetch_run(&self, query: &str, source: Option<Source>, mode: &str) -> Result<i64> {
+    pub async fn start_fetch_run(
+        &self,
+        query: &str,
+        source: Option<Source>,
+        mode: &str,
+    ) -> Result<i64> {
+        let query = query.to_string();
+        let mode = mode.to_string();
+        self.spawn_blocking(move |cache| cache.start_fetch_run_sync(&query, source, &mode))
+            .await
+    }
+
+    fn start_fetch_run_sync(&self, query: &str, source: Option<Source>, mode: &str) -> Result<i64> {
         let now = now_unix();
         let source = source.map(|source| source.cli_name().to_string());
         let connection = self.lock()?;
@@ -519,7 +613,22 @@ impl UpstreamCache {
         Ok(connection.last_insert_rowid())
     }
 
-    pub fn finish_fetch_run(
+    pub async fn finish_fetch_run(
+        &self,
+        id: i64,
+        status: &str,
+        message: Option<&str>,
+        metadata: FetchRunMetadata,
+    ) -> Result<()> {
+        let status = status.to_string();
+        let message = message.map(str::to_string);
+        self.spawn_blocking(move |cache| {
+            cache.finish_fetch_run_sync(id, &status, message.as_deref(), metadata)
+        })
+        .await
+    }
+
+    fn finish_fetch_run_sync(
         &self,
         id: i64,
         status: &str,
@@ -548,7 +657,12 @@ impl UpstreamCache {
         Ok(())
     }
 
-    pub fn list_fetch_runs(&self, limit: usize) -> Result<Vec<FetchRunRecord>> {
+    pub async fn list_fetch_runs(&self, limit: usize) -> Result<Vec<FetchRunRecord>> {
+        self.spawn_blocking(move |cache| cache.list_fetch_runs_sync(limit))
+            .await
+    }
+
+    fn list_fetch_runs_sync(&self, limit: usize) -> Result<Vec<FetchRunRecord>> {
         let limit = i64::try_from(limit).unwrap_or(50).clamp(1, 500);
         let connection = self.lock()?;
         let mut statement = connection.prepare(
@@ -563,7 +677,15 @@ impl UpstreamCache {
             .map_err(Error::from)
     }
 
-    pub fn provider_health(&self, limit_per_source: usize) -> Result<Vec<ProviderHealthRecord>> {
+    pub async fn provider_health(
+        &self,
+        limit_per_source: usize,
+    ) -> Result<Vec<ProviderHealthRecord>> {
+        self.spawn_blocking(move |cache| cache.provider_health_sync(limit_per_source))
+            .await
+    }
+
+    fn provider_health_sync(&self, limit_per_source: usize) -> Result<Vec<ProviderHealthRecord>> {
         let limit_per_source = limit_per_source.clamp(1, 500);
         let connection = self.lock()?;
         let mut statement = connection.prepare(
@@ -606,7 +728,12 @@ impl UpstreamCache {
         Ok(records)
     }
 
-    pub fn fetch_run_status_counts(&self) -> Result<Vec<FetchRunStatusCount>> {
+    pub async fn fetch_run_status_counts(&self) -> Result<Vec<FetchRunStatusCount>> {
+        self.spawn_blocking(move |cache| cache.fetch_run_status_counts_sync())
+            .await
+    }
+
+    fn fetch_run_status_counts_sync(&self) -> Result<Vec<FetchRunStatusCount>> {
         let connection = self.lock()?;
         let mut statement = connection.prepare(
             "SELECT status, count(*)
@@ -624,7 +751,12 @@ impl UpstreamCache {
             .map_err(Error::from)
     }
 
-    pub fn unified_body(&self, id: i64) -> Result<Option<Vec<u8>>> {
+    pub async fn unified_body(&self, id: i64) -> Result<Option<Vec<u8>>> {
+        self.spawn_blocking(move |cache| cache.unified_body_sync(id))
+            .await
+    }
+
+    fn unified_body_sync(&self, id: i64) -> Result<Option<Vec<u8>>> {
         let connection = self.lock()?;
         connection
             .query_row(
@@ -636,7 +768,12 @@ impl UpstreamCache {
             .map_err(Error::from)
     }
 
-    pub fn unified_detail(&self, id: i64) -> Result<Option<UnifiedCacheEntryDetail>> {
+    pub async fn unified_detail(&self, id: i64) -> Result<Option<UnifiedCacheEntryDetail>> {
+        self.spawn_blocking(move |cache| cache.unified_detail_sync(id))
+            .await
+    }
+
+    fn unified_detail_sync(&self, id: i64) -> Result<Option<UnifiedCacheEntryDetail>> {
         let now = now_unix();
         let connection = self.lock()?;
         let detail = connection
@@ -666,7 +803,12 @@ impl UpstreamCache {
         Ok(detail)
     }
 
-    pub fn list_unified(&self, limit: usize) -> Result<Vec<UnifiedCacheEntrySummary>> {
+    pub async fn list_unified(&self, limit: usize) -> Result<Vec<UnifiedCacheEntrySummary>> {
+        self.spawn_blocking(move |cache| cache.list_unified_sync(limit))
+            .await
+    }
+
+    fn list_unified_sync(&self, limit: usize) -> Result<Vec<UnifiedCacheEntrySummary>> {
         let now = now_unix();
         let limit = i64::try_from(limit).unwrap_or(100).clamp(1, 500);
         let connection = self.lock()?;
@@ -697,7 +839,12 @@ impl UpstreamCache {
             .map_err(Error::from)
     }
 
-    pub fn list(&self, limit: usize) -> Result<Vec<CacheEntrySummary>> {
+    pub async fn list(&self, limit: usize) -> Result<Vec<CacheEntrySummary>> {
+        self.spawn_blocking(move |cache| cache.list_sync(limit))
+            .await
+    }
+
+    fn list_sync(&self, limit: usize) -> Result<Vec<CacheEntrySummary>> {
         let now = now_unix();
         let limit = i64::try_from(limit).unwrap_or(100).clamp(1, 500);
         let connection = self.lock()?;
@@ -736,7 +883,12 @@ impl UpstreamCache {
             .map_err(Error::from)
     }
 
-    pub fn detail(&self, id: i64) -> Result<Option<CacheEntryDetail>> {
+    pub async fn detail(&self, id: i64) -> Result<Option<CacheEntryDetail>> {
+        self.spawn_blocking(move |cache| cache.detail_sync(id))
+            .await
+    }
+
+    fn detail_sync(&self, id: i64) -> Result<Option<CacheEntryDetail>> {
         use base64::Engine;
 
         let now = now_unix();
@@ -781,7 +933,12 @@ impl UpstreamCache {
         Ok(detail)
     }
 
-    pub fn delete(&self, id: i64) -> Result<bool> {
+    pub async fn delete(&self, id: i64) -> Result<bool> {
+        self.spawn_blocking(move |cache| cache.delete_sync(id))
+            .await
+    }
+
+    fn delete_sync(&self, id: i64) -> Result<bool> {
         let mut connection = self.lock()?;
         let transaction = connection.transaction()?;
         let cache_key = transaction
@@ -804,7 +961,12 @@ impl UpstreamCache {
         Ok(changed > 0)
     }
 
-    pub fn delete_unified(&self, id: i64) -> Result<bool> {
+    pub async fn delete_unified(&self, id: i64) -> Result<bool> {
+        self.spawn_blocking(move |cache| cache.delete_unified_sync(id))
+            .await
+    }
+
+    fn delete_unified_sync(&self, id: i64) -> Result<bool> {
         let mut connection = self.lock()?;
         let transaction = connection.transaction()?;
         transaction.execute(
@@ -817,7 +979,11 @@ impl UpstreamCache {
         Ok(changed > 0)
     }
 
-    pub fn stats(&self) -> Result<CacheStats> {
+    pub async fn stats(&self) -> Result<CacheStats> {
+        self.spawn_blocking(move |cache| cache.stats_sync()).await
+    }
+
+    fn stats_sync(&self) -> Result<CacheStats> {
         let now = now_unix();
         let connection = self.lock()?;
         let upstream_entries = count(&connection, "SELECT count(*) FROM upstream_cache", &[])?;
@@ -848,7 +1014,12 @@ impl UpstreamCache {
         })
     }
 
-    pub fn prune(&self, options: CachePruneOptions) -> Result<CachePruneReport> {
+    pub async fn prune(&self, options: CachePruneOptions) -> Result<CachePruneReport> {
+        self.spawn_blocking(move |cache| cache.prune_sync(options))
+            .await
+    }
+
+    fn prune_sync(&self, options: CachePruneOptions) -> Result<CachePruneReport> {
         let now = now_unix();
         let keep_fetch_runs = i64::try_from(options.keep_fetch_runs).unwrap_or(i64::MAX);
         let keep_ai_scores = i64::try_from(options.keep_ai_scores).unwrap_or(i64::MAX);
@@ -918,31 +1089,44 @@ impl UpstreamCache {
         Ok(report)
     }
 
-    pub fn vacuum(&self) -> Result<()> {
+    pub async fn vacuum(&self) -> Result<()> {
+        self.spawn_blocking(move |cache| cache.vacuum_sync()).await
+    }
+
+    fn vacuum_sync(&self) -> Result<()> {
         let connection = self.lock()?;
         connection.execute_batch("VACUUM")?;
         Ok(())
     }
 
-    pub fn export(&self, options: CacheExportOptions) -> Result<Vec<u8>> {
+    pub async fn export(&self, options: CacheExportOptions) -> Result<Vec<u8>> {
+        self.spawn_blocking(move |cache| cache.export_sync(options))
+            .await
+    }
+
+    fn export_sync(&self, options: CacheExportOptions) -> Result<Vec<u8>> {
         let mut records = Vec::new();
         if options.upstream {
-            for record in self.list(options.limit)? {
+            for record in self.list_sync(options.limit)? {
                 records.push(json!({ "section": "upstream", "record": record }));
             }
         }
         if options.unified {
-            for record in self.list_unified(options.limit)? {
+            for record in self.list_unified_sync(options.limit)? {
                 records.push(json!({ "section": "unified", "record": record }));
             }
         }
         if options.fetch_runs {
-            for record in self.list_fetch_runs(options.limit)? {
+            for record in self.list_fetch_runs_sync(options.limit)? {
                 records.push(json!({ "section": "fetch_runs", "record": record }));
             }
         }
         if options.ai_scores {
-            for record in self.list_recent_ai_scores(options.limit)? {
+            let scores = self.query_ai_scores_sync(AiScoreQuery {
+                limit: options.limit,
+                ..AiScoreQuery::default()
+            })?;
+            for record in scores {
                 records.push(json!({ "section": "ai_scores", "record": record }));
             }
         }
@@ -1037,6 +1221,17 @@ impl UpstreamCache {
         ensure_fetch_run_columns(&connection)?;
         ensure_ai_score_columns(&connection)?;
         Ok(())
+    }
+
+    async fn spawn_blocking<T, F>(&self, op: F) -> Result<T>
+    where
+        F: FnOnce(&Self) -> Result<T> + Send + 'static,
+        T: Send + 'static,
+    {
+        let cache = self.clone();
+        tokio::task::spawn_blocking(move || op(&cache))
+            .await
+            .map_err(Error::from)?
     }
 
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, Connection>> {
@@ -1436,14 +1631,14 @@ fn default_cache_path() -> PathBuf {
 mod tests {
     use super::*;
 
-    #[test]
-    fn list_and_detail_include_display_fields_and_preview() {
+    #[tokio::test]
+    async fn list_and_detail_include_display_fields_and_preview() {
         let path = std::env::temp_dir().join(format!(
             "rosettrism-cache-display-{}-{}.sqlite",
             now_unix(),
             std::process::id()
         ));
-        let cache = UpstreamCache::open(&path).unwrap();
+        let cache = UpstreamCache::open(&path).await.unwrap();
         let result = SearchResult {
             source: Source::Lrclib,
             id: "abc-123".into(),
@@ -1470,9 +1665,10 @@ mod tests {
                 metadata: &metadata,
                 ttl: Duration::from_secs(60),
             })
+            .await
             .unwrap();
 
-        let entries = cache.list(10).unwrap();
+        let entries = cache.list(10).await.unwrap();
         let entry = entries
             .iter()
             .find(|entry| entry.cache_key == "display-test")
@@ -1482,7 +1678,7 @@ mod tests {
         assert_eq!(entry.title.as_deref(), Some("Song"));
         assert_eq!(entry.artist.as_deref(), Some("Artist"));
 
-        let detail = cache.detail(entry.id).unwrap().unwrap();
+        let detail = cache.detail(entry.id).await.unwrap().unwrap();
         assert_eq!(detail.query.as_deref(), Some("Song Artist"));
         assert_eq!(detail.item_id.as_deref(), Some("abc-123"));
         assert!(detail.body_text_preview.contains("Song"));
@@ -1491,14 +1687,14 @@ mod tests {
         let _ = std::fs::remove_file(path);
     }
 
-    #[test]
-    fn deleting_upstream_entry_invalidates_dependent_unified_cache() {
+    #[tokio::test]
+    async fn deleting_upstream_entry_invalidates_dependent_unified_cache() {
         let path = std::env::temp_dir().join(format!(
             "rosettrism-cache-dependency-{}-{}.sqlite",
             now_unix(),
             std::process::id()
         ));
-        let cache = UpstreamCache::open(&path).unwrap();
+        let cache = UpstreamCache::open(&path).await.unwrap();
         cache
             .put(CachePut {
                 key: "upstream-key",
@@ -1509,6 +1705,7 @@ mod tests {
                 metadata: &json!({ "item_id": "abc" }),
                 ttl: Duration::from_secs(60),
             })
+            .await
             .unwrap();
         cache
             .put_unified(
@@ -1517,34 +1714,45 @@ mod tests {
                 &["upstream-key".to_string()],
                 Duration::from_secs(60),
             )
+            .await
             .unwrap();
 
         let entry = cache
             .list(10)
+            .await
             .unwrap()
             .into_iter()
             .find(|entry| entry.cache_key == "upstream-key")
             .unwrap();
-        assert!(cache.get_unified_fresh("unified-key").unwrap().is_some());
-        assert!(cache.delete(entry.id).unwrap());
-        assert!(cache.get_unified_fresh("unified-key").unwrap().is_none());
-        assert!(!cache.delete(entry.id).unwrap());
+        assert!(cache
+            .get_unified_fresh("unified-key")
+            .await
+            .unwrap()
+            .is_some());
+        assert!(cache.delete(entry.id).await.unwrap());
+        assert!(cache
+            .get_unified_fresh("unified-key")
+            .await
+            .unwrap()
+            .is_none());
+        assert!(!cache.delete(entry.id).await.unwrap());
 
         drop(cache);
         let _ = std::fs::remove_file(path);
     }
 
-    #[test]
-    fn records_and_counts_fetch_runs() {
+    #[tokio::test]
+    async fn records_and_counts_fetch_runs() {
         let path = std::env::temp_dir().join(format!(
             "rosettrism-fetch-runs-{}-{}.sqlite",
             now_unix(),
             std::process::id()
         ));
-        let cache = UpstreamCache::open(&path).unwrap();
+        let cache = UpstreamCache::open(&path).await.unwrap();
 
         let first_id = cache
             .start_fetch_run("Song Artist", Some(Source::Lrclib), "fetch_source_result")
+            .await
             .unwrap();
         cache
             .finish_fetch_run(
@@ -1557,9 +1765,11 @@ mod tests {
                     cache_event: Some("cache_hit".into()),
                 },
             )
+            .await
             .unwrap();
         let second_id = cache
             .start_fetch_run("Other Song", None, "aggregate_fetch")
+            .await
             .unwrap();
         cache
             .finish_fetch_run(
@@ -1572,9 +1782,10 @@ mod tests {
                     cache_event: None,
                 },
             )
+            .await
             .unwrap();
 
-        let runs = cache.list_fetch_runs(10).unwrap();
+        let runs = cache.list_fetch_runs(10).await.unwrap();
         assert_eq!(runs.len(), 2);
         assert_eq!(runs[0].id, second_id);
         assert_eq!(runs[0].status, "no_lyrics_found");
@@ -1584,27 +1795,27 @@ mod tests {
             Some("served_unified_cache: id=42")
         );
 
-        let counts = cache.fetch_run_status_counts().unwrap();
+        let counts = cache.fetch_run_status_counts().await.unwrap();
         assert!(counts
             .iter()
             .any(|count| count.status == "cache_hit" && count.count == 1));
         assert!(counts
             .iter()
             .any(|count| count.status == "no_lyrics_found" && count.count == 1));
-        assert_eq!(cache.stats().unwrap().fetch_run_entries, 2);
+        assert_eq!(cache.stats().await.unwrap().fetch_run_entries, 2);
 
         drop(cache);
         let _ = std::fs::remove_file(path);
     }
 
-    #[test]
-    fn stores_and_lists_ai_scores_for_unified_cache() {
+    #[tokio::test]
+    async fn stores_and_lists_ai_scores_for_unified_cache() {
         let path = std::env::temp_dir().join(format!(
             "rosettrism-ai-score-{}-{}.sqlite",
             now_unix(),
             std::process::id()
         ));
-        let cache = UpstreamCache::open(&path).unwrap();
+        let cache = UpstreamCache::open(&path).await.unwrap();
         let unified_id = cache
             .put_unified(
                 "unified-ai-score-test",
@@ -1612,6 +1823,7 @@ mod tests {
                 &[],
                 Duration::from_secs(60),
             )
+            .await
             .unwrap();
         let score = json!({
             "model": "gpt-4o-mini",
@@ -1625,9 +1837,9 @@ mod tests {
             "created_at": now_unix()
         });
 
-        cache.put_ai_score(unified_id, &score).unwrap();
+        cache.put_ai_score(unified_id, &score).await.unwrap();
 
-        let scores = cache.list_ai_scores(unified_id).unwrap();
+        let scores = cache.list_ai_scores(unified_id).await.unwrap();
         assert_eq!(scores.len(), 1);
         assert_eq!(scores[0].unified_cache_id, unified_id);
         assert_eq!(scores[0].score_json["candidate_summary_hash"], "abc123");
@@ -1648,16 +1860,17 @@ mod tests {
                 created_at_end: Some(now_unix() + 60),
                 limit: 10,
             })
+            .await
             .unwrap();
         assert_eq!(queried.len(), 1);
-        assert_eq!(cache.stats().unwrap().ai_score_entries, 1);
+        assert_eq!(cache.stats().await.unwrap().ai_score_entries, 1);
 
         drop(cache);
         let _ = std::fs::remove_file(path);
     }
 
-    #[test]
-    fn migrates_legacy_ai_scores_before_creating_query_index() {
+    #[tokio::test]
+    async fn migrates_legacy_ai_scores_before_creating_query_index() {
         let path = std::env::temp_dir().join(format!(
             "rosettrism-ai-score-legacy-{}-{}.sqlite",
             now_unix(),
@@ -1703,7 +1916,7 @@ mod tests {
                 .unwrap();
         }
 
-        let cache = UpstreamCache::open(&path).unwrap();
+        let cache = UpstreamCache::open(&path).await.unwrap();
         let scores = cache
             .query_ai_scores(AiScoreQuery {
                 query_hash: Some("legacy-hash".into()),
@@ -1712,6 +1925,7 @@ mod tests {
                 limit: 10,
                 ..AiScoreQuery::default()
             })
+            .await
             .unwrap();
         assert_eq!(scores.len(), 1);
 

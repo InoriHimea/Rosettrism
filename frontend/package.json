@@ -1,7 +1,7 @@
 {
   "name": "rosettrism-dashboard",
   "private": true,
-  "version": "4.13.0",
+  "version": "5.0.0",
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
@@ -15,7 +15,7 @@
     "test:playback-release": "playwright test tests/lyric-playback-release.spec.js",
     "test:media-playback": "playwright test tests/media-playback-phase7.spec.js",
     "test:media-session": "playwright test tests/media-playback-phase9.spec.js",
-    "test:unit": "node --test src/api/__tests__/*.test.js src/__tests__/*.test.js",
+    "test:unit": "node --test src/api/__tests__/*.test.js src/__tests__/*.test.js src/i18n/__tests__/*.test.js",
     "test:firefox-check": "node scripts/check-firefox-playwright.mjs",
     "cleanup:firefox": "node scripts/cleanup-firefox-zombies.mjs",
     "verify:multilingual-live": "node scripts/capture-multilingual-live.mjs"

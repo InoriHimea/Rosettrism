@@ -45,7 +45,7 @@ impl LyricProvider for CachedProvider {
 
         let key = UpstreamCache::cache_key(self.source, "search", &SearchKey { query })?;
         if !self.force_refresh {
-            if let Some(hit) = self.cache.get_fresh(&key)? {
+            if let Some(hit) = self.cache.get_fresh(&key).await? {
                 return cached_search_hit(hit.body, hit.metadata);
             }
         }
@@ -53,33 +53,37 @@ impl LyricProvider for CachedProvider {
         match self.inner.search(query).await {
             Ok(results) => {
                 let body = serde_json::to_vec(&results)?;
-                self.cache.put(CachePut {
-                    key: &key,
-                    source: self.source,
-                    operation: "search",
-                    status_code: 200,
-                    body: &body,
-                    metadata: &json!({
-                        "payload": "search_results",
-                        "query": query,
-                        "result_count": results.len(),
-                        "first_result": results.first(),
-                    }),
-                    ttl: self.ttl,
-                })?;
+                self.cache
+                    .put(CachePut {
+                        key: &key,
+                        source: self.source,
+                        operation: "search",
+                        status_code: 200,
+                        body: &body,
+                        metadata: &json!({
+                            "payload": "search_results",
+                            "query": query,
+                            "result_count": results.len(),
+                            "first_result": results.first(),
+                        }),
+                        ttl: self.ttl,
+                    })
+                    .await?;
                 Ok(results)
             }
             Err(err) => {
                 let message = err.to_string();
-                self.cache.put(CachePut {
-                    key: &key,
-                    source: self.source,
-                    operation: "search",
-                    status_code: 599,
-                    body: &[],
-                    metadata: &json!({ "error": message, "query": query }),
-                    ttl: error_ttl(self.ttl),
-                })?;
+                self.cache
+                    .put(CachePut {
+                        key: &key,
+                        source: self.source,
+                        operation: "search",
+                        status_code: 599,
+                        body: &[],
+                        metadata: &json!({ "error": message, "query": query }),
+                        ttl: error_ttl(self.ttl),
+                    })
+                    .await?;
                 Err(err)
             }
         }
@@ -88,7 +92,7 @@ impl LyricProvider for CachedProvider {
     async fn fetch(&self, result: &SearchResult) -> Result<FetchedLyric> {
         let key = fetch_cache_key(self.source, result)?;
         if !self.force_refresh {
-            if let Some(hit) = self.cache.get_fresh(&key)? {
+            if let Some(hit) = self.cache.get_fresh(&key).await? {
                 let fetched = cached_fetch_hit(hit.body, hit.metadata)?;
                 if cached_fetch_payload_is_usable(&fetched) {
                     return Ok(fetched);
@@ -104,28 +108,32 @@ impl LyricProvider for CachedProvider {
                     document: fetched.document.clone(),
                     annotations: fetched.annotations.clone(),
                 })?;
-                self.cache.put(CachePut {
-                    key: &key,
-                    source: self.source,
-                    operation: "fetch",
-                    status_code: 200,
-                    body: &fetched.raw,
-                    metadata: &metadata,
-                    ttl: self.ttl,
-                })?;
+                self.cache
+                    .put(CachePut {
+                        key: &key,
+                        source: self.source,
+                        operation: "fetch",
+                        status_code: 200,
+                        body: &fetched.raw,
+                        metadata: &metadata,
+                        ttl: self.ttl,
+                    })
+                    .await?;
                 Ok(fetched)
             }
             Err(err) => {
                 let message = err.to_string();
-                self.cache.put(CachePut {
-                    key: &key,
-                    source: self.source,
-                    operation: "fetch",
-                    status_code: 599,
-                    body: &[],
-                    metadata: &json!({ "error": message, "result": result }),
-                    ttl: error_ttl(self.ttl),
-                })?;
+                self.cache
+                    .put(CachePut {
+                        key: &key,
+                        source: self.source,
+                        operation: "fetch",
+                        status_code: 599,
+                        body: &[],
+                        metadata: &json!({ "error": message, "result": result }),
+                        ttl: error_ttl(self.ttl),
+                    })
+                    .await?;
                 Err(err)
             }
         }
@@ -233,7 +241,7 @@ mod tests {
             "rosettrism-cache-provider-{}.sqlite",
             crate::cache::now_unix()
         ));
-        let cache = UpstreamCache::open(&path).unwrap();
+        let cache = UpstreamCache::open(&path).await.unwrap();
         let cache_for_assert = cache.clone();
         let search_count = Arc::new(AtomicUsize::new(0));
         let fetch_count = Arc::new(AtomicUsize::new(0));
@@ -257,7 +265,7 @@ mod tests {
         let _ = provider.fetch(&first[0]).await.unwrap();
         assert_eq!(fetch_count.load(Ordering::SeqCst), 1);
 
-        let entries = cache_for_assert.list(10).unwrap();
+        let entries = cache_for_assert.list(10).await.unwrap();
         assert!(entries
             .iter()
             .any(|entry| entry.query.as_deref() == Some("Song Artist")));
@@ -278,7 +286,7 @@ mod tests {
             "rosettrism-cache-provider-invalid-krc-{}.sqlite",
             crate::cache::now_unix()
         ));
-        let cache = UpstreamCache::open(&path).unwrap();
+        let cache = UpstreamCache::open(&path).await.unwrap();
         let result = SearchResult {
             source: Source::Kugou,
             id: "kid".into(),
@@ -310,6 +318,7 @@ mod tests {
                 metadata: &metadata,
                 ttl: Duration::from_secs(60),
             })
+            .await
             .unwrap();
 
         let fetch_count = Arc::new(AtomicUsize::new(0));

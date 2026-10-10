@@ -264,7 +264,8 @@ pub async fn run() -> anyhow::Result<()> {
                 provider_options,
                 ttl,
                 force_refresh,
-            )?;
+            )
+            .await?;
             if let Some(source) = source {
                 let provider = context.provider(source, ttl, force_refresh).await?;
                 let result = search_and_select(provider.as_ref(), &query).await?;
@@ -312,7 +313,8 @@ pub async fn run() -> anyhow::Result<()> {
                 provider_options,
                 ttl,
                 force_refresh,
-            )?;
+            )
+            .await?;
             if let Some(source) = source {
                 if format.is_none() && top.is_none() {
                     let response = context
@@ -408,10 +410,10 @@ pub async fn run() -> anyhow::Result<()> {
             }
         }
         Command::Cache { command } => {
-            let cache = open_cache(db.as_ref())?;
+            let cache = open_cache(db.as_ref()).await?;
             match command {
                 CacheCommand::Stats => {
-                    let rendered = serde_json::to_vec_pretty(&cache.stats()?)?;
+                    let rendered = serde_json::to_vec_pretty(&cache.stats().await?)?;
                     write_output(None, &rendered).await?;
                 }
                 CacheCommand::Prune {
@@ -419,11 +421,13 @@ pub async fn run() -> anyhow::Result<()> {
                     keep_fetch_runs,
                     keep_ai_scores,
                 } => {
-                    let report = cache.prune(CachePruneOptions {
-                        dry_run: !yes,
-                        keep_fetch_runs,
-                        keep_ai_scores,
-                    })?;
+                    let report = cache
+                        .prune(CachePruneOptions {
+                            dry_run: !yes,
+                            keep_fetch_runs,
+                            keep_ai_scores,
+                        })
+                        .await?;
                     let rendered = serde_json::to_vec_pretty(&report)?;
                     write_output(None, &rendered).await?;
                     if !yes {
@@ -436,7 +440,7 @@ pub async fn run() -> anyhow::Result<()> {
                         "vacuumed": yes,
                     }))?;
                     if yes {
-                        cache.vacuum()?;
+                        cache.vacuum().await?;
                     } else {
                         eprintln!("dry-run only; pass --yes to run VACUUM");
                     }
@@ -452,22 +456,25 @@ pub async fn run() -> anyhow::Result<()> {
                     output,
                 } => {
                     let any_section = upstream || unified || fetch_runs || ai_scores;
-                    let rendered = cache.export(CacheExportOptions {
-                        format: format.into(),
-                        upstream: upstream || !any_section,
-                        unified: unified || !any_section,
-                        fetch_runs: fetch_runs || !any_section,
-                        ai_scores: ai_scores || !any_section,
-                        limit,
-                    })?;
+                    let rendered = cache
+                        .export(CacheExportOptions {
+                            format: format.into(),
+                            upstream: upstream || !any_section,
+                            unified: unified || !any_section,
+                            fetch_runs: fetch_runs || !any_section,
+                            ai_scores: ai_scores || !any_section,
+                            limit,
+                        })
+                        .await?;
                     write_output(output.as_ref(), &rendered).await?;
                 }
                 CacheCommand::Runs { limit } => {
-                    let rendered = serde_json::to_vec_pretty(&cache.list_fetch_runs(limit)?)?;
+                    let rendered = serde_json::to_vec_pretty(&cache.list_fetch_runs(limit).await?)?;
                     write_output(None, &rendered).await?;
                 }
                 CacheCommand::AiScores { limit } => {
-                    let rendered = serde_json::to_vec_pretty(&cache.list_recent_ai_scores(limit)?)?;
+                    let rendered =
+                        serde_json::to_vec_pretty(&cache.list_recent_ai_scores(limit).await?)?;
                     write_output(None, &rendered).await?;
                 }
             }
@@ -482,7 +489,8 @@ pub async fn run() -> anyhow::Result<()> {
                 provider_options,
                 ttl,
                 false,
-            )?;
+            )
+            .await?;
             server::run(server::ServerOptions {
                 host,
                 port,
@@ -511,14 +519,14 @@ fn print_results(results: &[crate::provider::SearchResult]) {
     eprintln!("{}", render_results_table(results));
 }
 
-fn open_cache(db: Option<&PathBuf>) -> anyhow::Result<UpstreamCache> {
+async fn open_cache(db: Option<&PathBuf>) -> anyhow::Result<UpstreamCache> {
     match db {
-        Some(path) => Ok(UpstreamCache::open(path)?),
-        None => Ok(UpstreamCache::open_default()?),
+        Some(path) => Ok(UpstreamCache::open(path).await?),
+        None => Ok(UpstreamCache::open_default().await?),
     }
 }
 
-fn service_context(
+async fn service_context(
     cookie: Option<String>,
     offline_db: Option<PathBuf>,
     db: Option<&PathBuf>,
@@ -526,7 +534,7 @@ fn service_context(
     ttl: Duration,
     force_refresh: bool,
 ) -> anyhow::Result<ServiceContext> {
-    let cache = open_cache(db)?;
+    let cache = open_cache(db).await?;
     Ok(ServiceContext {
         cache: Some(cache),
         provider_options,

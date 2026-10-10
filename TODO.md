@@ -15,7 +15,6 @@
 
 ## 受阻 / 环境限制
 
-- [ ] lost_world 远端推送 403（2026-10-10 v5.0.0 发版时 master + tag 均被拒，github 远端正常）：需检查 git.mellivora.com.cn 凭据/权限，恢复后补推 `git push lost_world master v5.0.0`。
 - [ ] Playwright Chromium CDN 403：`frontend npm test` 在无 Chromium 且 CDN 被墙的环境失败（v1.8.0 已记录）；spec 本身在 Chromium 存在时全过。解法待定（镜像源或手动安装）。
 - [ ] Phase 9 Firefox runner 恢复异常未修：Edge/Chrome 过 4/4，Firefox 需 `scripts/cleanup-firefox-zombies.mjs` 兜底。
 - [ ] Phase 7 真实 Provider 音频 URL 属外部前置条件，本地仅 WAV fixture 覆盖（v2.3.0 记录）。

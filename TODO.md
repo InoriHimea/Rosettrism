@@ -8,7 +8,7 @@
 
 ## 待办（明确计划、尚未开工）
 
-- [ ] Git stale 远程分支清理：约 130 个 `lost_world/worktree-agent-*` 远程分支（历史 agent 工作树残留），清理需用户确认后执行 `git push lost_world --delete`。
+（空）
 
 ## 受阻 / 环境限制
 

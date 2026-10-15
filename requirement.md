@@ -572,3 +572,22 @@
 
 ### 关联 plan
 - `.plan/2026-10-15-cache-split.md`
+
+## v5.0.3 — 2026-10-15 — 清理 lost_world 历史 agent 分支
+
+### 目标
+- 删除 `lost_world` 远程上 120 个已完全并入 `shrimpfish` 的 `worktree-agent-*` 历史分支；`master`/`shrimpfish` 不受影响。
+- 删除前核对：每个分支均为 `shrimpfish` 的祖先（无独有提交），并把分支名与 SHA 备份到仓库外 `~/lw_backup/`。
+
+### 验收条件
+- `git ls-remote --heads lost_world` 仅剩 `master` 与 `shrimpfish`。
+- 无代码改动；TODO.md 移除该待办。
+
+### 实作状态
+- [x] 合并状态核对（120/120 已并入）
+- [x] SHA 备份
+- [x] 删除 120 个远程分支
+- [x] TODO.md 更新、版本 5.0.3
+
+### 关联 plan
+- `.plan/2026-10-15-cache-split.md`（同日工作流，无新增代码计划）

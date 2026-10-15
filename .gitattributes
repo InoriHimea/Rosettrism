@@ -1,0 +1,2 @@
+# Golden snapshots are compared byte-for-byte; keep LF on every platform.
+tests/fixtures/golden/*.snap text eol=lf

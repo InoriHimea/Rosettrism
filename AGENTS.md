@@ -48,7 +48,7 @@ WSL note: if `runpane doctor --json` cannot find `/tmp/pane-daemon.../daemon.soc
 
 # Repository Guidelines
 
-Rosettrism (`rosettrism`, crate name `rosettrism`) is a Rust single-binary lyric toolkit: decode local lyric files, fetch lyrics from 25+ online providers, cache upstream requests in SQLite, aggregate candidates into a stable unified JSON, and serve a React dashboard via an embedded HTTP server. Version 5.0.1, AGPL-3.0-only.
+Rosettrism (`rosettrism`, crate name `rosettrism`) is a Rust single-binary lyric toolkit: decode local lyric files, fetch lyrics from 25+ online providers, cache upstream requests in SQLite, aggregate candidates into a stable unified JSON, and serve a React dashboard via an embedded HTTP server. Version 5.0.2, AGPL-3.0-only.
 
 ## Project Overview
 
@@ -93,7 +93,7 @@ CLI (clap) ──> ServiceContext ──> aggregate_fetch_inner
 - **Error handling split**: `thiserror::Error` enum (`src/error.rs`) with `#[from]` conversions for reqwest/rusqlite/io/serde_json defines a library `Result<T>`; `anyhow` + `.context()` is used only at the CLI entry boundary for human-friendly diagnostics.
 - **Serde unified model**: `UnifiedLyric`/`LyricDocument` carry `schema_version = "1.0"`, `#[serde(skip_serializing_if = ...)]` for clean empty-field elision, and `sort_and_fill_durations` post-processing so decoders can leave durations unset.
 - **Format auto-detection + dispatch**: `decoder/detect.rs` sniffs magic bytes (krc1, QRC QMC magic, TTML, YRC JSON); `decoder/mod.rs` routes to per-format parsers. KRC does XOR+zlib/deflate; QRC does 3DES/DES decryption + XML CDATA/hex/base64 unwrapping.
-- **SQLite persistence**: `cache.rs` manages 4 tables (`upstream_cache`, `unified_cache`, `fetch_runs`, `ai_scores`) with schema migrations, foreign keys, SHA-256 cache keys, TTL expiry columns, and an in-process `Arc<std::sync::Mutex<Connection>>` (WAL journal mode + 5s busy_timeout). Every public `UpstreamCache` method is `async fn` and offloads to `spawn_blocking`; the lock guard never crosses an `await`.
+- **SQLite persistence**: `src/cache/` manages 4 tables (`upstream_cache`, `unified_cache`, `fetch_runs`, `ai_scores`) with schema migrations, foreign keys, SHA-256 cache keys, TTL expiry columns, and an in-process `Arc<std::sync::Mutex<Connection>>` (WAL journal mode + 5s busy_timeout). Every public `UpstreamCache` method is `async fn` and offloads to `spawn_blocking`; the lock guard never crosses an `await`.
 - **AI scoring via OpenAI-compatible API**: candidate summaries are hashed and sent to `/chat/completions` with `response_format: json_object`; `best_index` + per-candidate scores persist to `ai_scores` and replayable via `replay_ai_score_for_unified_cache`.
 - **Embedded dashboard**: `rust_embed` serves `frontend/dist/` static assets; Axum routes expose `/api/*`; bearer token (`ROSETTRISM_SERVER_TOKEN`) required for non-loopback hosts.
 
@@ -266,8 +266,8 @@ Each `Source` variant exposes `capabilities()`, `auth_requirement()`, `decoder_o
 | `src/lib.rs` | Crate root: module declarations + public re-exports |
 | `src/cli.rs` (27KB) | Clap CLI: `decode`, `fetch`, `search`, `server`, `cache` subcommands + `ServiceContext` wiring |
 | `src/service.rs` (83KB) | Core orchestration: `aggregate_fetch`, AI scoring, provider fan-out, normalization |
-| `src/server.rs` (71KB) | Axum routes, handlers, auth middleware, `rust_embed` dashboard serving |
-| `src/cache.rs` (60KB) | SQLite: 4 tables, TTL, fetch_runs, ai_scores, migrations, prune/vacuum/export |
+| `src/server/` | Axum routes (`mod.rs`), handlers, search filtering/aggregation, error mapping, `rust_embed` dashboard serving (`assets.rs`) |
+| `src/cache/` | SQLite: `mod.rs` (open/migrate/lock), `types.rs`, `upstream.rs`, `unified.rs`, `ai_scores.rs`, `fetch_runs.rs`, `maintenance.rs` (prune/vacuum/export) |
 | `src/cached_provider.rs` (11KB) | `CachedProvider` decorator wrapping `LyricProvider` with SQLite TTL |
 | `src/model.rs` (6KB) | `UnifiedLyric`, `LyricDocument`, `LyricTrack`, `LyricWord`, `Annotation` types |
 | `src/error.rs` | `Error` enum (thiserror) + `Result<T>` alias |
@@ -308,7 +308,7 @@ Each `Source` variant exposes `capabilities()`, `auth_requirement()`, `decoder_o
 - **Unit tests** (`#[cfg(test)] mod tests`): 32 source files have inline test modules. Strong coverage in decoders (QRC has 10 tests including reference-vector and client-payload decryption), providers (wiremock-based `MockServer` tests for apple_music, kugou, lrclib, migu, musixmatch, netease, etc.), cache (TTL, dependency invalidation, fetch_runs, ai_scores with secret redaction), and CLI helpers.
 - **Integration tests** (`tests/cli.rs`, 14 tests): decode/fetch/search/server/cache end-to-end via `assert_cmd`.
 - **Schema tests** (`tests/unified_schema.rs`): validates `schema/unified-lyric.schema.json` against 4 source fixtures (QQ/QRC, Kugou/KRC, Netease/YRC, LRCLIB/LRC) with back-compat for missing `schema_version`.
-- **Server tests** (`src/server.rs`): Axum router integration covering `/api/health`, `/api/stats`, `/api/runs`, `/api/cache/:id`, token auth (401/x-rosettrism-token/Authorization: Bearer), SPA fallback, error mapping.
+- **Server tests** (`src/server/tests.rs`): Axum router integration covering `/api/health`, `/api/stats`, `/api/runs`, `/api/cache/:id`, token auth (401/x-rosettrism-token/Authorization: Bearer), SPA fallback, error mapping.
 
 ### Frontend tests
 

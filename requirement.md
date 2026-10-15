@@ -553,3 +553,22 @@
 
 ### 关联 plan
 - `.plan/2026-10-15-server-split.md`
+
+## v5.0.2 — 2026-10-15 — cache.rs 按表域拆分与 golden 快照换行固定
+
+### 目标
+- `src/cache.rs`（1935 行）拆为 `src/cache/` 目录：`mod.rs`（`UpstreamCache` 结构、open/migrate/lock/spawn_blocking、通用工具）、`types.rs`（公共数据类型）、`upstream.rs`、`unified.rs`、`ai_scores.rs`、`fetch_runs.rs`、`maintenance.rs`（stats/prune/vacuum/export）、`tests.rs`。
+- 纯重构：`crate::cache::*` 公共 API 通过 `pub use types::*` 保持不变，所有调用方零修改。
+- 新增 `.gitattributes`，固定 `tests/fixtures/golden/*.snap` 为 LF，修复 Windows `core.autocrlf=true` 下 golden 测试失败。
+
+### 验收条件
+- `cargo fmt --check` 干净；`cargo test`（NO_PROXY）lib 171 / cli 14 / decode_fixture 1 / unified_schema 5 全绿。
+
+### 实作状态
+- [x] cache.rs → src/cache/ 八个文件
+- [x] `.gitattributes` 固定 golden 快照 LF
+- [x] fmt / cargo test 全绿（unified_schema 在本机首次通过）
+- [x] 版本 5.0.2
+
+### 关联 plan
+- `.plan/2026-10-15-cache-split.md`

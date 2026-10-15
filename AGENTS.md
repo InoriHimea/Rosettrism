@@ -48,7 +48,7 @@ WSL note: if `runpane doctor --json` cannot find `/tmp/pane-daemon.../daemon.soc
 
 # Repository Guidelines
 
-Rosettrism (`rosettrism`, crate name `rosettrism`) is a Rust single-binary lyric toolkit: decode local lyric files, fetch lyrics from 25+ online providers, cache upstream requests in SQLite, aggregate candidates into a stable unified JSON, and serve a React dashboard via an embedded HTTP server. Version 4.13.0, AGPL-3.0-only.
+Rosettrism (`rosettrism`, crate name `rosettrism`) is a Rust single-binary lyric toolkit: decode local lyric files, fetch lyrics from 25+ online providers, cache upstream requests in SQLite, aggregate candidates into a stable unified JSON, and serve a React dashboard via an embedded HTTP server. Version 5.0.1, AGPL-3.0-only.
 
 ## Project Overview
 

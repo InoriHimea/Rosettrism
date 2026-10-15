@@ -8,10 +8,8 @@
 
 ## 待办（明确计划、尚未开工）
 
-- [ ] `server.rs`（约 2312 行）拆分：v5.0.0 只拆了 service.rs；server.rs 的 handlers 按资源域（cache/unified/runs/ai/静态资源）拆分另行立项。
-- [ ] `cache.rs`（约 1721 行）拆分：v5.0.0 叠加了 async 改造，避免同轮再拆；后续可按表域（upstream/unified/fetch_runs/ai_scores/维护操作）分文件。
+- [ ] `cache.rs`（约 1935 行）拆分：v5.0.0 叠加了 async 改造，避免同轮再拆；后续可按表域（upstream/unified/fetch_runs/ai_scores/维护操作）分文件。
 - [ ] Git stale 远程分支清理：约 130 个 `lost_world/worktree-agent-*` 远程分支（历史 agent 工作树残留），清理需用户确认后执行 `git push lost_world --delete`。
-- [ ] master 领先 lost_world/master 多个提交未推送（与下次发布一起推）。
 
 ## 受阻 / 环境限制
 
@@ -19,3 +17,4 @@
 - [ ] Phase 9 Firefox runner 恢复异常未修：Edge/Chrome 过 4/4，Firefox 需 `scripts/cleanup-firefox-zombies.mjs` 兜底。
 - [ ] Phase 7 真实 Provider 音频 URL 属外部前置条件，本地仅 WAV fixture 覆盖（v2.3.0 记录）。
 - [ ] 本机 F: 盘 incremental compilation hard-link warning（文件系统不支持硬链接，cargo 回退 copy）：无功能影响，可通过 `CARGO_INCREMENTAL=0` 或迁移缓存目录消除。
+- [ ] `tests/unified_schema.rs` golden 在 Windows `core.autocrlf=true` 检出下失败（快照为 CRLF，输出为 LF）：可加 `.gitattributes` 对 `tests/fixtures/golden/*.snap` 设 `eol=lf`。

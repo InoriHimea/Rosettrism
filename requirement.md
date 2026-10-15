@@ -534,3 +534,22 @@
 
 ### 关联 plan
 - `.plan/2026-10-10-sqlite-async-and-quality.md`
+
+## v5.0.1 — 2026-10-15 — server.rs 按职责拆分
+
+### 目标
+- `src/server.rs`（2328 行）拆为 `src/server/` 目录：`mod.rs`（ServerOptions/AppState/run/路由/鉴权）、`handlers.rs`（各 API handler）、`search.rs`（搜索请求、意图过滤、聚合）、`assets.rs`（内嵌 dashboard 静态资源与 SPA 回退）、`error.rs`（ApiError）、`tests.rs`。
+- 纯重构：对外 API（`server::run`、`ServerOptions`）、HTTP 路由与响应行为不变。
+
+### 验收条件
+- `cargo fmt --check` 干净；`cargo test`（NO_PROXY）lib 171 / cli 14 / decode_fixture 1 全绿。
+- `tests/unified_schema.rs` golden 在 Windows autocrlf 检出下的 CRLF 失败为既有环境问题，非本次回归（快照转 LF 后 5/5 通过）。
+
+### 实作状态
+- [x] server.rs → src/server/ 六个文件
+- [x] AGENTS.md 版本号同步 5.0.0；TODO.md 行数校正并移除过期条目
+- [x] fmt / cargo test 验证
+- [x] 版本 5.0.1
+
+### 关联 plan
+- `.plan/2026-10-15-server-split.md`
